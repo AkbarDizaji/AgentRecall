@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AgentRecall.Cli/AgentRecall.Cli.csproj" />
+    <Project Path="src/AgentRecall.Core/AgentRecall.Core.csproj" />
+    <Project Path="src/AgentRecall.Infrastructure/AgentRecall.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AgentRecall.Tests/AgentRecall.Tests.csproj" />
+  </Folder>
+</Solution>

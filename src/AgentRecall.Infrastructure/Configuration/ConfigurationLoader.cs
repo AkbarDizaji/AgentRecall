@@ -1,0 +1,51 @@
+using AgentRecall.Core.Configuration;
+using Microsoft.Extensions.Configuration;
+
+namespace AgentRecall.Infrastructure.Configuration;
+
+/// <summary>
+/// Builds configuration from an optional JSON file and environment variables,
+/// then binds it to <see cref="AgentRecallOptions"/>.
+/// </summary>
+public static class ConfigurationLoader
+{
+    /// <summary>Default config file name looked up in the base directory.</summary>
+    public const string DefaultFileName = "agentrecall.json";
+
+    /// <summary>Prefix for environment-variable overrides (e.g. AGENTRECALL__LogLevel).</summary>
+    public const string EnvPrefix = "AGENTRECALL_";
+
+    /// <summary>
+    /// Builds an <see cref="IConfiguration"/> from the given base path (defaults
+    /// to the current directory) plus environment variables.
+    /// </summary>
+    public static IConfiguration BuildConfiguration(string? basePath = null)
+    {
+        basePath ??= Directory.GetCurrentDirectory();
+
+        return new ConfigurationBuilder()
+            .SetBasePath(basePath)
+            .AddJsonFile(DefaultFileName, optional: true, reloadOnChange: false)
+            .AddEnvironmentVariables(prefix: EnvPrefix)
+            .Build();
+    }
+
+    /// <summary>
+    /// Loads and binds <see cref="AgentRecallOptions"/>. Missing values fall back
+    /// to the option defaults, so this always returns a usable instance.
+    /// </summary>
+    public static AgentRecallOptions Load(string? basePath = null) =>
+        Bind(BuildConfiguration(basePath));
+
+    /// <summary>
+    /// Binds <see cref="AgentRecallOptions"/> from an existing configuration.
+    /// </summary>
+    public static AgentRecallOptions Bind(IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        var options = new AgentRecallOptions();
+        configuration.GetSection(AgentRecallOptions.SectionName).Bind(options);
+        return options;
+    }
+}
