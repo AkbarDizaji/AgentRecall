@@ -1,5 +1,6 @@
 using AgentRecall.Core.Abstractions;
 using AgentRecall.Core.Configuration;
+using AgentRecall.Core.Services;
 using AgentRecall.Infrastructure.Persistence;
 using AgentRecall.Infrastructure.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
@@ -25,6 +26,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IRecallEventRepository, RecallEventRepository>();
         services.AddScoped<IRecallScopeRepository, RecallScopeRepository>();
         services.AddScoped<IDatabaseInitializer, DatabaseInitializer>();
+
+        // Feedback capture and rule extraction (Phase 3).
+        services.AddSingleton<IRecallExtractor, RuleBasedRecallExtractor>();
+        services.AddScoped<IFeedbackService, FeedbackService>();
 
         return services;
     }

@@ -7,6 +7,9 @@ public enum RuleStatus
     Active = 1,
     Superseded = 2,
     Retired = 3,
+
+    /// <summary>Extracted from feedback but not yet reviewed/promoted.</summary>
+    Pending = 4,
 }
 
 /// <summary>

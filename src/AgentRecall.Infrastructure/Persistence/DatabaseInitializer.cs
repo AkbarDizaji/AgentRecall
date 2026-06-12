@@ -37,7 +37,7 @@ public sealed class DatabaseInitializer : IDatabaseInitializer
         }
         else
         {
-            _logger.LogInformation("AgentRecall database already present at {Path}", _options.DatabasePath);
+            _logger.LogDebug("AgentRecall database already present at {Path}", _options.DatabasePath);
         }
 
         return _options.DatabasePath;

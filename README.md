@@ -2,8 +2,9 @@
 
 A local-first memory and learning system for AI coding agents.
 
-> **Status: Phase 2 — local SQLite persistence.** Entities, repositories, and
-> database initialization are in place. No vector search or MCP yet.
+> **Status: Phase 3 — feedback capture & rule extraction.** Feedback is stored
+> as events and converted into pending rules by a rule-based extractor. No LLM
+> integration, vector search, or MCP yet.
 
 ## Projects
 
@@ -43,9 +44,29 @@ dotnet run --project src/AgentRecall.Cli -- <command>
 | Command | Description |
 | --- | --- |
 | `init` | Create the local data directory and SQLite database. |
+| `feedback add` | Record feedback and extract a pending rule from it. |
+| `rules list` | List all rules. |
+| `rules show <id>` | Show a single rule in detail. |
 | `help` (also `--help`, `-h`, or no args) | Show usage. |
 | `version` (also `--version`, `-v`) | Show the installed version. |
 | `status` | Show the memory subsystem status. |
+
+### Capturing feedback
+
+Feedback is stored as a `RecallEvent` and converted into a `Pending`
+`RecallRule` by a deterministic, rule-based extractor (no LLM yet).
+
+```bash
+agentrecall feedback add \
+  --task "write a SQL query for user lookup" \
+  --feedback "use parameterized queries to avoid injection" \
+  --bad-output "string-concatenated SQL" \
+  --fixed-output "a parameterized command with @name" \
+  --scope-level Repository --scope-value AgentRecall \
+  --tags "security,sql"
+```
+
+`--task` and `--feedback` are required; the rest are optional.
 
 ## Configuration
 

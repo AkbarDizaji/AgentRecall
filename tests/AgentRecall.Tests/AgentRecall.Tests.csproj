@@ -21,6 +21,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\AgentRecall.Core\AgentRecall.Core.csproj" />
     <ProjectReference Include="..\..\src\AgentRecall.Infrastructure\AgentRecall.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\AgentRecall.Cli\AgentRecall.Cli.csproj" />
   </ItemGroup>
 
 </Project>
