@@ -13,23 +13,32 @@ public static class LoggingSetup
     /// Builds an <see cref="ILoggerFactory"/> whose minimum level is taken from
     /// <paramref name="options"/>. An unrecognized level falls back to Information.
     /// </summary>
-    public static ILoggerFactory CreateLoggerFactory(AgentRecallOptions options)
+    public static ILoggerFactory CreateLoggerFactory(AgentRecallOptions options) =>
+        LoggerFactory.Create(builder => Configure(builder, options));
+
+    /// <summary>
+    /// Configures an <see cref="ILoggingBuilder"/> from <paramref name="options"/>:
+    /// single-line console output at the configured minimum level (falling back
+    /// to Information for an unrecognized value). Used by both the standalone
+    /// factory and the DI container.
+    /// </summary>
+    public static void Configure(ILoggingBuilder builder, AgentRecallOptions options)
     {
+        ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(options);
 
         var minLevel = Enum.TryParse<LogLevel>(options.LogLevel, ignoreCase: true, out var parsed)
             ? parsed
             : LogLevel.Information;
 
-        return LoggerFactory.Create(builder =>
-        {
-            builder
-                .SetMinimumLevel(minLevel)
-                .AddSimpleConsole(o =>
-                {
-                    o.SingleLine = true;
-                    o.TimestampFormat = "HH:mm:ss ";
-                });
-        });
+        builder
+            .SetMinimumLevel(minLevel)
+            // EF Core's per-command logging is verbose for a CLI; keep only warnings+.
+            .AddFilter("Microsoft.EntityFrameworkCore", LogLevel.Warning)
+            .AddSimpleConsole(o =>
+            {
+                o.SingleLine = true;
+                o.TimestampFormat = "HH:mm:ss ";
+            });
     }
 }

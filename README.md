@@ -2,16 +2,24 @@
 
 A local-first memory and learning system for AI coding agents.
 
-> **Status: Phase 1 — solution skeleton.** No database, MCP, or embeddings yet.
+> **Status: Phase 2 — local SQLite persistence.** Entities, repositories, and
+> database initialization are in place. No vector search or MCP yet.
 
 ## Projects
 
 | Project | Purpose |
 | --- | --- |
 | `AgentRecall.Cli` | Command-line entry point (`agentrecall`). |
-| `AgentRecall.Core` | Domain model, options, and service contracts. |
-| `AgentRecall.Infrastructure` | Configuration loading and logging setup. |
-| `AgentRecall.Tests` | Unit tests. |
+| `AgentRecall.Core` | Domain entities, options, and repository/initializer contracts. |
+| `AgentRecall.Infrastructure` | Configuration, logging, and EF Core SQLite persistence. |
+| `AgentRecall.Tests` | Unit tests (use temporary SQLite databases). |
+
+## Persistence
+
+A local SQLite database is stored under the data directory (default
+`~/.agentrecall/agentrecall.db`). It holds three entities — `RecallRule`,
+`RecallEvent`, and `RecallScope` — accessed through repositories. Run
+`agentrecall init` to create the directory and schema.
 
 ## Requirements
 
@@ -34,6 +42,7 @@ dotnet run --project src/AgentRecall.Cli -- <command>
 
 | Command | Description |
 | --- | --- |
+| `init` | Create the local data directory and SQLite database. |
 | `help` (also `--help`, `-h`, or no args) | Show usage. |
 | `version` (also `--version`, `-v`) | Show the installed version. |
 | `status` | Show the memory subsystem status. |
