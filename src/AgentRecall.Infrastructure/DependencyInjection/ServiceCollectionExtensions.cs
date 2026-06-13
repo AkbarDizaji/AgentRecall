@@ -1,6 +1,7 @@
 using AgentRecall.Core.Abstractions;
 using AgentRecall.Core.Configuration;
 using AgentRecall.Core.Services;
+using AgentRecall.Infrastructure.Embeddings;
 using AgentRecall.Infrastructure.Persistence;
 using AgentRecall.Infrastructure.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
@@ -30,6 +31,10 @@ public static class ServiceCollectionExtensions
         // Feedback capture and rule extraction (Phase 3).
         services.AddSingleton<IRecallExtractor, RuleBasedRecallExtractor>();
         services.AddScoped<IFeedbackService, FeedbackService>();
+
+        // Retrieval (Phase 4). NullEmbeddingProvider keeps search keyword-only.
+        services.AddSingleton<IEmbeddingProvider, NullEmbeddingProvider>();
+        services.AddScoped<IRecallSearchService, KeywordRecallSearchService>();
 
         return services;
     }

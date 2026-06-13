@@ -2,6 +2,7 @@ using AgentRecall.Core;
 using AgentRecall.Core.Abstractions;
 using AgentRecall.Core.Domain;
 using AgentRecall.Core.Feedback;
+using AgentRecall.Core.Search;
 using AgentRecall.Core.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -48,6 +49,9 @@ public static class CommandRouter
 
             case "rules":
                 return await RulesAsync(rest, services, output, logger, cancellationToken).ConfigureAwait(false);
+
+            case "search":
+                return await SearchAsync(rest, services, output, logger, cancellationToken).ConfigureAwait(false);
 
             case "status":
                 var memory = services.GetRequiredService<IMemoryService>();
@@ -210,6 +214,86 @@ public static class CommandRouter
         }
     }
 
+    private static async Task<int> SearchAsync(
+        string[] args,
+        IServiceProvider services,
+        TextWriter output,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        // The query is the first positional argument; flags follow.
+        var query = args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal)
+            ? args[0]
+            : null;
+
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            output.WriteLine("Usage: agentrecall search \"<query>\" [--scope-level <level>] [--scope-value <text>] [--limit <n>]");
+            return 1;
+        }
+
+        var options = ParseOptions(args);
+
+        var searchOptions = new SearchOptions();
+
+        if (options.TryGetValue("scope-level", out var rawScope))
+        {
+            if (!Enum.TryParse<ScopeLevel>(rawScope, ignoreCase: true, out var level))
+            {
+                output.WriteLine($"Invalid --scope-level '{rawScope}'. Valid values: {string.Join(", ", Enum.GetNames<ScopeLevel>())}");
+                return 1;
+            }
+
+            searchOptions = searchOptions with { ScopeLevel = level };
+        }
+
+        if (options.TryGetValue("scope-value", out var scopeValue))
+        {
+            searchOptions = searchOptions with { ScopeValue = scopeValue };
+        }
+
+        if (options.TryGetValue("limit", out var rawLimit))
+        {
+            if (!int.TryParse(rawLimit, out var limit) || limit <= 0)
+            {
+                output.WriteLine($"Invalid --limit '{rawLimit}'. Expected a positive integer.");
+                return 1;
+            }
+
+            searchOptions = searchOptions with { Limit = limit };
+        }
+
+        await using var scope = services.CreateAsyncScope();
+        await EnsureInitializedAsync(scope, cancellationToken).ConfigureAwait(false);
+        var search = scope.ServiceProvider.GetRequiredService<IRecallSearchService>();
+
+        try
+        {
+            var results = await search.SearchAsync(query, searchOptions, cancellationToken).ConfigureAwait(false);
+            if (results.Count == 0)
+            {
+                output.WriteLine($"No matching rules for \"{query}\".");
+                return 0;
+            }
+
+            output.WriteLine($"{results.Count} result(s) for \"{query}\":");
+            foreach (var result in results)
+            {
+                var rule = result.Rule;
+                output.WriteLine($"  #{rule.Id} [{rule.Status}] score={result.Score:0.00} conf={rule.Confidence:0.00} {rule.ScopeLevel}:{rule.ScopeValue}");
+                output.WriteLine($"      {Truncate(rule.RuleText, 90)}");
+            }
+
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Search failed.");
+            output.WriteLine($"Search failed: {ex.Message}");
+            return 1;
+        }
+    }
+
     /// <summary>Ensures the database exists before a command touches it.</summary>
     private static Task EnsureInitializedAsync(AsyncServiceScope scope, CancellationToken cancellationToken) =>
         scope.ServiceProvider.GetRequiredService<IDatabaseInitializer>().InitializeAsync(cancellationToken);
@@ -274,6 +358,7 @@ public static class CommandRouter
         output.WriteLine("  feedback add         Record feedback and extract a pending rule");
         output.WriteLine("  rules list           List all rules");
         output.WriteLine("  rules show <id>      Show a single rule in detail");
+        output.WriteLine("  search \"<query>\"     Search rules by keyword, ranked");
         output.WriteLine("  status               Show the memory subsystem status");
         output.WriteLine("  help                 Show this help text");
         output.WriteLine("  version              Show the installed version");

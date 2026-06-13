@@ -10,6 +10,12 @@ public enum RuleStatus
 
     /// <summary>Extracted from feedback but not yet reviewed/promoted.</summary>
     Pending = 4,
+
+    /// <summary>Reviewed and accepted as a high-quality, applicable rule.</summary>
+    Promoted = 5,
+
+    /// <summary>Retired/rejected and kept only for history; excluded from search.</summary>
+    Archived = 6,
 }
 
 /// <summary>
