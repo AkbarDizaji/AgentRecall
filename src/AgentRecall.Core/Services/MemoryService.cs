@@ -3,8 +3,8 @@ using AgentRecall.Core.Configuration;
 namespace AgentRecall.Core.Services;
 
 /// <summary>
-/// Default <see cref="IMemoryService"/> implementation. In Phase 1 it holds
-/// configuration only and reports that storage is not yet available.
+/// Default <see cref="IMemoryService"/> implementation. Reports basic status
+/// about where AgentRecall keeps its local data.
 /// </summary>
 public sealed class MemoryService : IMemoryService
 {
@@ -17,6 +17,6 @@ public sealed class MemoryService : IMemoryService
 
     /// <inheritdoc />
     public string Status() =>
-        $"AgentRecall memory not initialized (no storage in Phase 1). " +
-        $"Data directory: {_options.DataDirectory}";
+        $"AgentRecall data directory: {_options.DataDirectory}{Environment.NewLine}" +
+        $"Database: {_options.DatabasePath}";
 }

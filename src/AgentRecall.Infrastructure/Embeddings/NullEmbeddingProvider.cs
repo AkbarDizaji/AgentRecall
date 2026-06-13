@@ -15,5 +15,5 @@ public sealed class NullEmbeddingProvider : IEmbeddingProvider
 
     public ValueTask<float[]> EmbedAsync(string text, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException(
-            "No embedding provider is configured. Embeddings will be enabled in a future phase.");
+            "No embedding provider is configured. Embeddings are not yet enabled.");
 }

@@ -25,7 +25,7 @@ public sealed class RecallRule
     /// <summary>Relevant technical context (frameworks, versions, constraints).</summary>
     public string TechnicalContext { get; set; } = string.Empty;
 
-    /// <summary>Free-form tags. Stored as a comma-separated string in Phase 2.</summary>
+    /// <summary>Free-form tags. Stored as a comma-separated string.</summary>
     public string Tags { get; set; } = string.Empty;
 
     /// <summary>Confidence in the rule, 0.0–1.0.</summary>

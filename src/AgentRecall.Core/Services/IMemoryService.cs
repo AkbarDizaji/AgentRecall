@@ -1,8 +1,7 @@
 namespace AgentRecall.Core.Services;
 
 /// <summary>
-/// The central abstraction for storing and recalling agent memories.
-/// Phase 1 defines the contract only; no persistence is implemented yet.
+/// A small status surface for the memory subsystem.
 /// </summary>
 public interface IMemoryService
 {

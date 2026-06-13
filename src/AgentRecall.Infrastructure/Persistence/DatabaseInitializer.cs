@@ -7,7 +7,7 @@ namespace AgentRecall.Infrastructure.Persistence;
 
 /// <summary>
 /// Creates the data directory and SQLite schema using EF Core's
-/// <c>EnsureCreated</c>. Migrations are deferred to a later phase.
+/// <c>EnsureCreated</c>. Migrations are not used yet.
 /// </summary>
 public sealed class DatabaseInitializer : IDatabaseInitializer
 {

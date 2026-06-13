@@ -1,7 +1,7 @@
 namespace AgentRecall.Core.Abstractions;
 
 /// <summary>
-/// Produces vector embeddings for text. Phase 4 ships only a no-op provider so
+/// Produces vector embeddings for text. Only a no-op provider ships today, so
 /// the search pipeline can blend semantic similarity once a real provider
 /// (local model or external API) is wired in.
 /// </summary>

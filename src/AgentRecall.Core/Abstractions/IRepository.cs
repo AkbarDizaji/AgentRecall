@@ -1,7 +1,7 @@
 namespace AgentRecall.Core.Abstractions;
 
 /// <summary>
-/// Minimal async persistence contract shared by the Phase 2 repositories.
+/// Minimal async persistence contract shared by the repositories.
 /// </summary>
 public interface IRepository<T> where T : class
 {

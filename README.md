@@ -2,10 +2,9 @@
 
 A local-first memory and learning system for AI coding agents.
 
-> **Status: Phase 5 — MCP server for Claude Code.** AgentRecall exposes its
-> search, feedback, and project-rules capabilities as MCP tools over stdio.
-> Feedback capture (Phase 3) and keyword retrieval (Phase 4) are in place. No
-> external embedding providers, web UI, or cloud sync.
+AgentRecall captures feedback, turns it into reusable technical rules, retrieves
+them by keyword, and exposes everything to Claude Code over MCP. It runs entirely
+on your machine — no external embedding providers, web UI, or cloud sync.
 
 ## Projects
 

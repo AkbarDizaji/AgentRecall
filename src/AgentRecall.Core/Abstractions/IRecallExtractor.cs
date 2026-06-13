@@ -5,7 +5,7 @@ namespace AgentRecall.Core.Abstractions;
 
 /// <summary>
 /// Converts raw <see cref="FeedbackInput"/> into a candidate <see cref="RecallRule"/>.
-/// Phase 3 ships a rule-based implementation; an LLM-backed one may follow.
+/// Ships with a rule-based implementation; an LLM-backed one may follow.
 /// </summary>
 public interface IRecallExtractor
 {

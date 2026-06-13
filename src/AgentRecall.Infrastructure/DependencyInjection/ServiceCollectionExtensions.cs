@@ -28,11 +28,11 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IRecallScopeRepository, RecallScopeRepository>();
         services.AddScoped<IDatabaseInitializer, DatabaseInitializer>();
 
-        // Feedback capture and rule extraction (Phase 3).
+        // Feedback capture and rule extraction.
         services.AddSingleton<IRecallExtractor, RuleBasedRecallExtractor>();
         services.AddScoped<IFeedbackService, FeedbackService>();
 
-        // Retrieval (Phase 4). NullEmbeddingProvider keeps search keyword-only.
+        // Retrieval. NullEmbeddingProvider keeps search keyword-only.
         services.AddSingleton<IEmbeddingProvider, NullEmbeddingProvider>();
         services.AddScoped<IRecallSearchService, KeywordRecallSearchService>();
 
