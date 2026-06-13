@@ -13,4 +13,7 @@ public interface IRepository<T> where T : class
 
     /// <summary>Returns all entities.</summary>
     Task<IReadOnlyList<T>> ListAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Persists changes to an existing entity and returns it.</summary>
+    Task<T> UpdateAsync(T entity, CancellationToken cancellationToken = default);
 }

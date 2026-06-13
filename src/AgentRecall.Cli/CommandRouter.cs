@@ -53,6 +53,9 @@ public static class CommandRouter
             case "search":
                 return await SearchAsync(rest, services, output, logger, cancellationToken).ConfigureAwait(false);
 
+            case "import":
+                return await ImportAsync(rest, services, output, logger, cancellationToken).ConfigureAwait(false);
+
             case "mcp":
                 var server = new Mcp.McpServer(services);
                 await server.RunAsync(Console.In, output, cancellationToken).ConfigureAwait(false);
@@ -211,11 +214,116 @@ public static class CommandRouter
                 return 0;
             }
 
+            case "approve":
+            case "promote":
+            case "archive":
+            {
+                if (args.Length < 2 || !int.TryParse(args[1], out var id))
+                {
+                    output.WriteLine($"Usage: agentrecall rules {sub} <id>");
+                    return 1;
+                }
+
+                var lifecycle = scope.ServiceProvider.GetRequiredService<IRuleLifecycleService>();
+                try
+                {
+                    var updated = sub switch
+                    {
+                        "approve" => await lifecycle.ApproveAsync(id, cancellationToken).ConfigureAwait(false),
+                        "promote" => await lifecycle.PromoteAsync(id, cancellationToken).ConfigureAwait(false),
+                        _ => await lifecycle.ArchiveAsync(id, cancellationToken).ConfigureAwait(false),
+                    };
+                    output.WriteLine($"Rule #{updated.Id} is now {updated.Status}.");
+                    return 0;
+                }
+                catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException)
+                {
+                    output.WriteLine(ex.Message);
+                    return 1;
+                }
+            }
+
+            case "supersede":
+            {
+                if (args.Length < 3 || !int.TryParse(args[1], out var oldId) || !int.TryParse(args[2], out var newId))
+                {
+                    output.WriteLine("Usage: agentrecall rules supersede <oldId> <newId>");
+                    return 1;
+                }
+
+                var lifecycle = scope.ServiceProvider.GetRequiredService<IRuleLifecycleService>();
+                try
+                {
+                    var result = await lifecycle.SupersedeAsync(oldId, newId, cancellationToken).ConfigureAwait(false);
+                    output.WriteLine($"Rule #{result.Superseded.Id} is now {result.Superseded.Status}, replaced by rule #{result.Replacement.Id} (v{result.Replacement.Version}).");
+                    return 0;
+                }
+                catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException)
+                {
+                    output.WriteLine(ex.Message);
+                    return 1;
+                }
+            }
+
             default:
                 output.WriteLine("Usage:");
                 output.WriteLine("  agentrecall rules list");
                 output.WriteLine("  agentrecall rules show <id>");
+                output.WriteLine("  agentrecall rules approve <id>");
+                output.WriteLine("  agentrecall rules promote <id>");
+                output.WriteLine("  agentrecall rules supersede <oldId> <newId>");
+                output.WriteLine("  agentrecall rules archive <id>");
                 return 1;
+        }
+    }
+
+    private static async Task<int> ImportAsync(
+        string[] args,
+        IServiceProvider services,
+        TextWriter output,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        var sub = args.Length > 0 ? args[0] : string.Empty;
+
+        var kind = sub switch
+        {
+            "build-log" => (LogKind?)LogKind.Build,
+            "test-log" => LogKind.Test,
+            "lint-log" => LogKind.Lint,
+            _ => null,
+        };
+
+        if (kind is null || args.Length < 2)
+        {
+            output.WriteLine("Usage:");
+            output.WriteLine("  agentrecall import build-log <file>");
+            output.WriteLine("  agentrecall import test-log <file>");
+            output.WriteLine("  agentrecall import lint-log <file>");
+            return 1;
+        }
+
+        var filePath = args[1];
+
+        await using var scope = services.CreateAsyncScope();
+        await EnsureInitializedAsync(scope, cancellationToken).ConfigureAwait(false);
+        var importer = scope.ServiceProvider.GetRequiredService<ILogImportService>();
+
+        try
+        {
+            var result = await importer.ImportAsync(kind.Value, filePath, cancellationToken).ConfigureAwait(false);
+            output.WriteLine($"Imported {result.Kind} log: {result.FailuresFound} failure(s), {result.EventsCreated} event(s) created.");
+            if (result.RulesReinforced > 0)
+            {
+                output.WriteLine($"Reinforced {result.RulesReinforced} rule(s); {result.RulesPromoted} auto-promoted.");
+            }
+
+            return 0;
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or ArgumentException)
+        {
+            output.WriteLine($"Import failed: {ex.Message}");
+            return 1;
         }
     }
 
@@ -363,7 +471,16 @@ public static class CommandRouter
         output.WriteLine("  feedback add         Record feedback and extract a pending rule");
         output.WriteLine("  rules list           List all rules");
         output.WriteLine("  rules show <id>      Show a single rule in detail");
+        output.WriteLine("  rules approve <id>   Move a Pending rule to Active");
+        output.WriteLine("  rules promote <id>   Promote a rule");
+        output.WriteLine("  rules supersede <oldId> <newId>");
+        output.WriteLine("                       Replace one rule with another");
+        output.WriteLine("  rules archive <id>   Archive a rule (excluded from search)");
         output.WriteLine("  search \"<query>\"     Search rules by keyword, ranked");
+        output.WriteLine("  import build-log <file>");
+        output.WriteLine("  import test-log <file>");
+        output.WriteLine("  import lint-log <file>");
+        output.WriteLine("                       Ingest a failure log into events");
         output.WriteLine("  mcp                  Run the MCP server over stdio (for Claude Code)");
         output.WriteLine("  status               Show the memory subsystem status");
         output.WriteLine("  help                 Show this help text");

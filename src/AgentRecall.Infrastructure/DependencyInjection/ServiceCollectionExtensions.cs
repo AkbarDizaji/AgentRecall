@@ -36,6 +36,10 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IEmbeddingProvider, NullEmbeddingProvider>();
         services.AddScoped<IRecallSearchService, KeywordRecallSearchService>();
 
+        // Lifecycle, versioning, and failure ingestion.
+        services.AddScoped<IRuleLifecycleService, RuleLifecycleService>();
+        services.AddScoped<ILogImportService, LogImportService>();
+
         return services;
     }
 }

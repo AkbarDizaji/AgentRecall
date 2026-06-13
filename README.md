@@ -49,11 +49,27 @@ dotnet run --project src/AgentRecall.Cli -- <command>
 | `feedback add` | Record feedback and extract a pending rule from it. |
 | `rules list` | List all rules. |
 | `rules show <id>` | Show a single rule in detail. |
+| `rules approve <id>` | Move a Pending rule to Active. |
+| `rules promote <id>` | Promote a rule. |
+| `rules supersede <oldId> <newId>` | Replace one rule with another (versioned). |
+| `rules archive <id>` | Archive a rule (excluded from search). |
 | `search "<query>"` | Search rules by keyword, ranked by relevance/status/confidence. |
+| `import build-log <file>` | Ingest build failures as events. |
+| `import test-log <file>` | Ingest test failures as events. |
+| `import lint-log <file>` | Ingest lint failures as events. |
 | `mcp` | Run the MCP server over stdio (for Claude Code). |
 | `help` (also `--help`, `-h`, or no args) | Show usage. |
 | `version` (also `--version`, `-v`) | Show the installed version. |
 | `status` | Show the memory subsystem status. |
+
+## Rule lifecycle & learning
+
+Rules move through `Pending → Active → Promoted`, and can be `Superseded` or
+`Archived`. Superseding records the `SupersededById` link and bumps the
+replacement's version. Importing failure logs records each failure as an event;
+failures that match an existing rule (by trigger or tag) reinforce it, and a
+rule is promoted automatically once its confidence reaches the threshold.
+Superseded and archived rules are never reinforced or returned by search.
 
 ## MCP server (Claude Code)
 

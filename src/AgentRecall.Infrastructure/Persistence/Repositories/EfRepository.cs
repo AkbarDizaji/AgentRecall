@@ -32,6 +32,15 @@ public abstract class EfRepository<T> : IRepository<T> where T : class
     public virtual async Task<IReadOnlyList<T>> ListAsync(CancellationToken cancellationToken = default) =>
         await Db.Set<T>().AsNoTracking().ToListAsync(cancellationToken).ConfigureAwait(false);
 
+    public virtual async Task<T> UpdateAsync(T entity, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+
+        Db.Set<T>().Update(entity);
+        await Db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        return entity;
+    }
+
     /// <summary>Hook invoked before an entity is added; default is a no-op.</summary>
     protected virtual void OnAdding(T entity)
     {
