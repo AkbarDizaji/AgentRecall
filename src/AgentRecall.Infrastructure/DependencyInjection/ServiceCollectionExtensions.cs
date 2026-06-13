@@ -40,6 +40,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IRuleLifecycleService, RuleLifecycleService>();
         services.AddScoped<ILogImportService, LogImportService>();
 
+        // Proactive memory helpers.
+        services.AddSingleton<IFeedbackCandidateAnalyzer, FeedbackCandidateAnalyzer>();
+
         return services;
     }
 }

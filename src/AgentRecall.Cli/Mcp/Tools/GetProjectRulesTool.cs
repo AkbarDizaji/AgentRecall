@@ -14,8 +14,9 @@ public sealed class GetProjectRulesTool : IMcpTool
     public string Name => "get_project_rules";
 
     public string Description =>
-        "Get all applicable coding rules for the current project or scope, ranked " +
-        "by status and confidence. Superseded and archived rules are excluded.";
+        "Get the rules that always apply for the current project: project-scoped " +
+        "rules, global rules, and promoted rules. Ordered Project → Promoted → " +
+        "Active. Superseded and archived rules are excluded.";
 
     public JsonObject InputSchema => new()
     {
@@ -23,7 +24,7 @@ public sealed class GetProjectRulesTool : IMcpTool
         ["properties"] = new JsonObject
         {
             ["scope_level"] = ScopeLevelProp(),
-            ["scope_value"] = Prop("string", "Scope identifier to filter by (e.g. repo name, language, path)."),
+            ["scope_value"] = Prop("string", "The project/scope identifier (e.g. repo name, language, path)."),
         },
     };
 
@@ -38,10 +39,15 @@ public sealed class GetProjectRulesTool : IMcpTool
         var all = await repository.ListAsync(cancellationToken).ConfigureAwait(false);
 
         var applicable = all
-            .Where(r => !McpToolHelpers.ExcludedStatuses.Contains(r.Status))
-            .Where(r => scopeLevel is null || r.ScopeLevel == scopeLevel)
-            .Where(r => scopeValue is null || string.Equals(r.ScopeValue, scopeValue, StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(r => StatusRank(r.Status))
+            // Only rules that are actually in force.
+            .Where(r => r.Status is RuleStatus.Active or RuleStatus.Promoted)
+            // With a project scope, keep its rules plus global and promoted ones,
+            // and drop Active rules belonging to other projects.
+            .Where(r => scopeValue is null
+                || r.ScopeLevel == ScopeLevel.Global
+                || r.Status == RuleStatus.Promoted
+                || IsProjectRule(r, scopeLevel, scopeValue))
+            .OrderByDescending(r => Priority(r, scopeLevel, scopeValue))
             .ThenByDescending(r => r.Confidence)
             .ToList();
 
@@ -58,15 +64,27 @@ public sealed class GetProjectRulesTool : IMcpTool
         };
     }
 
-    private static int StatusRank(RuleStatus status) => status switch
+    private static bool IsProjectRule(RecallRule rule, ScopeLevel? scopeLevel, string? scopeValue) =>
+        !string.IsNullOrWhiteSpace(scopeValue)
+        && rule.ScopeLevel != ScopeLevel.Global
+        && string.Equals(rule.ScopeValue, scopeValue, StringComparison.OrdinalIgnoreCase)
+        && (scopeLevel is null || rule.ScopeLevel == scopeLevel);
+
+    /// <summary>Project rules rank above promoted, which rank above plain active.</summary>
+    private static int Priority(RecallRule rule, ScopeLevel? scopeLevel, string? scopeValue)
     {
-        RuleStatus.Promoted => 5,
-        RuleStatus.Active => 4,
-        RuleStatus.Pending => 3,
-        RuleStatus.Draft => 2,
-        RuleStatus.Retired => 1,
-        _ => 0,
-    };
+        if (IsProjectRule(rule, scopeLevel, scopeValue))
+        {
+            return 3;
+        }
+
+        return rule.Status switch
+        {
+            RuleStatus.Promoted => 2,
+            RuleStatus.Active => 1,
+            _ => 0,
+        };
+    }
 
     private static JsonObject Prop(string type, string description) => new()
     {

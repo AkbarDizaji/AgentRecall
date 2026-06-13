@@ -18,8 +18,12 @@ public sealed class RuleBasedRecallExtractor : IRecallExtractor
     {
         ArgumentNullException.ThrowIfNull(input);
 
-        var trigger = Clean(input.Task) is { Length: > 0 } t ? t : "(unspecified task)";
         var feedback = Clean(input.Feedback);
+        var cleanedTask = Clean(input.Task);
+        var hasTask = cleanedTask.Length > 0;
+
+        // With no task, use the feedback itself as the (searchable) trigger.
+        var trigger = hasTask ? cleanedTask : feedback;
 
         var mistake = Clean(input.BadOutput) is { Length: > 0 } bad ? bad : feedback;
 
@@ -29,7 +33,7 @@ public sealed class RuleBasedRecallExtractor : IRecallExtractor
             Status = RuleStatus.Pending,
             Trigger = trigger,
             Mistake = mistake,
-            RuleText = BuildRuleText(trigger, feedback, input),
+            RuleText = BuildRuleText(hasTask ? cleanedTask : null, feedback, input),
             TechnicalContext = Clean(input.ScopeValue),
             Tags = NormalizeTags(input.Tags),
             Confidence = DefaultConfidence,
@@ -38,10 +42,13 @@ public sealed class RuleBasedRecallExtractor : IRecallExtractor
         };
     }
 
-    private static string BuildRuleText(string trigger, string feedback, FeedbackInput input)
+    private static string BuildRuleText(string? trigger, string feedback, FeedbackInput input)
     {
         var sb = new StringBuilder();
-        sb.Append($"When {trigger.TrimEnd('.')}: {feedback}");
+
+        // Frame the rule with its trigger when we have one; otherwise the feedback
+        // stands on its own.
+        sb.Append(trigger is null ? feedback : $"When {trigger.TrimEnd('.')}: {feedback}");
 
         if (Clean(input.FixedOutput) is { Length: > 0 } fixedOutput)
         {

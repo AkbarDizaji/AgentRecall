@@ -148,18 +148,26 @@ new feedback while you work. Register it once:
 claude mcp add agentrecall agentrecall mcp
 ```
 
-That exposes three tools to the agent:
+That exposes these tools to the agent:
 
 | Tool | What it does |
 | --- | --- |
-| `search_rules` | Find rules relevant to what the agent is doing. |
-| `add_feedback` | Record new feedback and create a rule. |
-| `get_project_rules` | List the applicable rules for the current scope. |
+| `get_relevant_context` | Given a task, return the rules to know before starting. |
+| `get_project_rules` | The rules that always apply here (project → promoted → active). |
+| `get_reminders` | A short checklist of high-signal reminders for a kind of work. |
+| `search_rules` | Find rules relevant to a query. |
+| `suggest_feedback_candidate` | Detect whether a message is a reusable correction. |
+| `capture_feedback` | Save a correction in one step (creates a Pending rule). |
+| `add_feedback` | Record feedback with full task/scope context. |
 
-Each tool returns guidance shaped for an agent: `trigger`, `rule`, `do`,
+Each rule comes back as guidance shaped for an agent: `trigger`, `rule`, `do`,
 `do_not`, `reason`, `applies_to`, `confidence`, and `status`. The server speaks
 JSON-RPC 2.0 over stdio and writes only protocol messages to stdout (all logs go
 to stderr), so it behaves identically whether installed or run from source.
+
+A typical agent loop: call `get_relevant_context` (or `get_reminders`) before
+working, then run `suggest_feedback_candidate` on user corrections and
+`capture_feedback` to remember the good ones — no manual command needed.
 
 ---
 

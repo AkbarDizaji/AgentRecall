@@ -36,6 +36,10 @@ public class McpTests
         Assert.Contains("search_rules", names);
         Assert.Contains("add_feedback", names);
         Assert.Contains("get_project_rules", names);
+        Assert.Contains("get_relevant_context", names);
+        Assert.Contains("suggest_feedback_candidate", names);
+        Assert.Contains("capture_feedback", names);
+        Assert.Contains("get_reminders", names);
 
         // Every tool exposes a name, description and an object input schema.
         Assert.All(tools, t =>
@@ -47,7 +51,7 @@ public class McpTests
     }
 
     [Fact]
-    public async Task ToolsList_OverJsonRpc_ReturnsThreeTools()
+    public async Task ToolsList_OverJsonRpc_ReturnsAllTools()
     {
         await using var db = new TestDatabase();
         var server = new McpServer(db.Services);
@@ -57,7 +61,7 @@ public class McpTests
 
         Assert.NotNull(response);
         var tools = response!["result"]!["tools"]!.AsArray();
-        Assert.Equal(3, tools.Count);
+        Assert.Equal(McpServer.DefaultTools().Count, tools.Count);
     }
 
     [Fact]

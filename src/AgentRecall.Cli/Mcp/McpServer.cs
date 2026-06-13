@@ -34,6 +34,10 @@ public sealed class McpServer
         new SearchRulesTool(),
         new AddFeedbackTool(),
         new GetProjectRulesTool(),
+        new GetRelevantContextTool(),
+        new SuggestFeedbackCandidateTool(),
+        new CaptureFeedbackTool(),
+        new GetRemindersTool(),
     ];
 
     /// <summary>The tools this server exposes, keyed by name.</summary>
