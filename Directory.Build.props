@@ -7,5 +7,8 @@
 
     <!-- Single source of truth for the AgentRecall version. -->
     <VersionPrefix>0.1.0</VersionPrefix>
+
+    <!-- Only the CLI project opts back in (as a packed tool). -->
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
 </Project>

@@ -28,17 +28,63 @@ A local SQLite database is stored under the data directory (default
 
 - .NET 8 SDK or newer (developed against .NET 10).
 
-## Build & test
+## Install
+
+AgentRecall is packaged as a .NET global tool, so the `agentrecall` command is
+available everywhere once installed.
+
+From NuGet (once published):
+
+```bash
+dotnet tool install -g AgentRecall
+```
+
+Then:
+
+```bash
+agentrecall init
+agentrecall status
+agentrecall mcp
+```
+
+To update or remove:
+
+```bash
+dotnet tool update -g AgentRecall
+dotnet tool uninstall -g AgentRecall
+```
+
+## Development
 
 ```bash
 dotnet build
 dotnet test
 ```
 
-## Run
+Run a command without installing:
 
 ```bash
 dotnet run --project src/AgentRecall.Cli -- <command>
+```
+
+## Local tool installation
+
+Pack the tool and install it from the local feed:
+
+```bash
+dotnet pack
+dotnet tool install --global --add-source ./nupkg AgentRecall
+```
+
+`dotnet pack` writes the package to `./nupkg`. If a previous build is already
+installed, run `dotnet tool uninstall -g AgentRecall` first (or use
+`dotnet tool update --global --add-source ./nupkg AgentRecall`).
+
+## Usage
+
+```bash
+agentrecall init
+agentrecall status
 ```
 
 ### Commands
@@ -86,10 +132,16 @@ channel. It exposes three tools:
 Each tool returns agent-facing guidance: `trigger`, `rule`, `do`, `do_not`,
 `reason`, `applies_to`, `confidence`, `status`.
 
-Register it with Claude Code (after `dotnet build`):
+Register it with Claude Code (once installed as a global tool):
 
 ```bash
-claude mcp add agentrecall -- dotnet /absolute/path/to/AgentRecall/src/AgentRecall.Cli/bin/Debug/net10.0/agentrecall.dll mcp
+claude mcp add agentrecall agentrecall mcp
+```
+
+Or, to run from source without installing:
+
+```bash
+claude mcp add agentrecall -- dotnet run --project /absolute/path/to/AgentRecall/src/AgentRecall.Cli -- mcp
 ```
 
 ### Capturing feedback
