@@ -1,5 +1,7 @@
 using AgentRecall.Core.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Console;
 
 namespace AgentRecall.Infrastructure.Logging;
 
@@ -40,5 +42,9 @@ public static class LoggingSetup
                 o.SingleLine = true;
                 o.TimestampFormat = "HH:mm:ss ";
             });
+
+        // Route all logs to stderr so stdout stays clean — required for the MCP
+        // stdio transport, which uses stdout as the protocol channel.
+        builder.Services.Configure<ConsoleLoggerOptions>(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
     }
 }

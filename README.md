@@ -2,9 +2,10 @@
 
 A local-first memory and learning system for AI coding agents.
 
-> **Status: Phase 3 — feedback capture & rule extraction.** Feedback is stored
-> as events and converted into pending rules by a rule-based extractor. No LLM
-> integration, vector search, or MCP yet.
+> **Status: Phase 5 — MCP server for Claude Code.** AgentRecall exposes its
+> search, feedback, and project-rules capabilities as MCP tools over stdio.
+> Feedback capture (Phase 3) and keyword retrieval (Phase 4) are in place. No
+> external embedding providers, web UI, or cloud sync.
 
 ## Projects
 
@@ -47,9 +48,32 @@ dotnet run --project src/AgentRecall.Cli -- <command>
 | `feedback add` | Record feedback and extract a pending rule from it. |
 | `rules list` | List all rules. |
 | `rules show <id>` | Show a single rule in detail. |
+| `search "<query>"` | Search rules by keyword, ranked by relevance/status/confidence. |
+| `mcp` | Run the MCP server over stdio (for Claude Code). |
 | `help` (also `--help`, `-h`, or no args) | Show usage. |
 | `version` (also `--version`, `-v`) | Show the installed version. |
 | `status` | Show the memory subsystem status. |
+
+## MCP server (Claude Code)
+
+`agentrecall mcp` speaks the Model Context Protocol over stdio (newline-delimited
+JSON-RPC 2.0). All logging goes to stderr so stdout stays a clean protocol
+channel. It exposes three tools:
+
+| Tool | Purpose |
+| --- | --- |
+| `search_rules` | Search rules relevant to a query (`query`, optional `scope_level`, `scope_value`, `file_path`, `limit`). |
+| `add_feedback` | Record feedback and extract a pending rule (`task`, `feedback`, optional `bad_output`, `fixed_output`, `scope_level`, `scope_value`, `tags`). |
+| `get_project_rules` | List applicable rules for a scope (optional `scope_level`, `scope_value`). |
+
+Each tool returns agent-facing guidance: `trigger`, `rule`, `do`, `do_not`,
+`reason`, `applies_to`, `confidence`, `status`.
+
+Register it with Claude Code (after `dotnet build`):
+
+```bash
+claude mcp add agentrecall -- dotnet /absolute/path/to/AgentRecall/src/AgentRecall.Cli/bin/Debug/net10.0/agentrecall.dll mcp
+```
 
 ### Capturing feedback
 

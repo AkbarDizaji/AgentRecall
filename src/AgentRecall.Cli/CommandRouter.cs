@@ -53,6 +53,11 @@ public static class CommandRouter
             case "search":
                 return await SearchAsync(rest, services, output, logger, cancellationToken).ConfigureAwait(false);
 
+            case "mcp":
+                var server = new Mcp.McpServer(services);
+                await server.RunAsync(Console.In, output, cancellationToken).ConfigureAwait(false);
+                return 0;
+
             case "status":
                 var memory = services.GetRequiredService<IMemoryService>();
                 logger.LogDebug("Resolved memory service.");
@@ -359,6 +364,7 @@ public static class CommandRouter
         output.WriteLine("  rules list           List all rules");
         output.WriteLine("  rules show <id>      Show a single rule in detail");
         output.WriteLine("  search \"<query>\"     Search rules by keyword, ranked");
+        output.WriteLine("  mcp                  Run the MCP server over stdio (for Claude Code)");
         output.WriteLine("  status               Show the memory subsystem status");
         output.WriteLine("  help                 Show this help text");
         output.WriteLine("  version              Show the installed version");
