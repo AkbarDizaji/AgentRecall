@@ -80,6 +80,28 @@ dotnet tool install --global --add-source ./nupkg AgentRecall
 installed, run `dotnet tool uninstall -g AgentRecall` first (or use
 `dotnet tool update --global --add-source ./nupkg AgentRecall`).
 
+## Releasing
+
+Publishing is automated by `.github/workflows/release.yml`, which runs on
+`v*` tags (e.g. `v0.1.0`). It builds, tests, packs, and publishes to NuGet
+using **Trusted Publishing** (OIDC) — no API key is stored in the repository.
+
+One-time setup:
+
+1. On NuGet.org, create a Trusted Publishing policy for the `AgentRecall`
+   package pointing at this repository and the `release.yml` workflow.
+2. Add a repository **variable** named `NUGET_USER` set to your NuGet.org
+   username (Settings → Secrets and variables → Actions → Variables).
+
+To cut a release, bump `VersionPrefix` in `Directory.Build.props`, then:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The workflow derives the package version from the tag.
+
 ## Usage
 
 ```bash

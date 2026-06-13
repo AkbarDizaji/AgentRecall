@@ -7,6 +7,9 @@ on:
 
 permissions:
   contents: read
+  # Required for NuGet Trusted Publishing: lets the job request a GitHub OIDC
+  # token that NuGet.org exchanges for a short-lived publishing key.
+  id-token: write
 
 jobs:
   release:
@@ -60,11 +63,17 @@ jobs:
           name: nupkg
           path: nupkg/*.nupkg
 
+      # Trusted Publishing: exchange the GitHub OIDC token for a short-lived
+      # NuGet.org API key. No long-lived secret is stored in the repo.
+      - name: NuGet login (Trusted Publishing)
+        id: nuget-login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ vars.NUGET_USER }}
+
       - name: Publish to NuGet
-        env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: >-
           dotnet nuget push "nupkg/*.nupkg"
-          --api-key "$NUGET_API_KEY"
+          --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}"
           --source https://api.nuget.org/v3/index.json
           --skip-duplicate
