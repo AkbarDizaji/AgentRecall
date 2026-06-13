@@ -1,5 +1,7 @@
 # AgentRecall
 
+[![CI](https://github.com/AkbarDizaji/AgentRecall/actions/workflows/ci.yml/badge.svg)](https://github.com/AkbarDizaji/AgentRecall/actions/workflows/ci.yml)
+
 A local-first memory and learning system for AI coding agents.
 
 AgentRecall captures feedback, turns it into reusable technical rules, retrieves
