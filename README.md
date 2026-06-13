@@ -2,192 +2,171 @@
 
 [![CI](https://github.com/AkbarDizaji/AgentRecall/actions/workflows/ci.yml/badge.svg)](https://github.com/AkbarDizaji/AgentRecall/actions/workflows/ci.yml)
 
-A local-first memory and learning system for AI coding agents.
+**A local-first memory for AI coding agents.** AgentRecall captures the feedback
+and failures you run into while coding, turns them into reusable technical rules,
+and serves those rules back — on the command line or directly to Claude Code over
+MCP. Everything stays on your machine: no cloud sync, no web UI, no API keys.
 
-AgentRecall captures feedback, turns it into reusable technical rules, retrieves
-them by keyword, and exposes everything to Claude Code over MCP. It runs entirely
-on your machine — no external embedding providers, web UI, or cloud sync.
-
-## Projects
-
-| Project | Purpose |
-| --- | --- |
-| `AgentRecall.Cli` | Command-line entry point (`agentrecall`). |
-| `AgentRecall.Core` | Domain entities, options, and repository/initializer contracts. |
-| `AgentRecall.Infrastructure` | Configuration, logging, and EF Core SQLite persistence. |
-| `AgentRecall.Tests` | Unit tests (use temporary SQLite databases). |
-
-## Persistence
-
-A local SQLite database is stored under the data directory (default
-`~/.agentrecall/agentrecall.db`). It holds three entities — `RecallRule`,
-`RecallEvent`, and `RecallScope` — accessed through repositories. Run
-`agentrecall init` to create the directory and schema.
-
-## Requirements
-
-- .NET 8 SDK or newer (developed against .NET 10).
+---
 
 ## Install
 
-AgentRecall is packaged as a .NET global tool, so the `agentrecall` command is
-available everywhere once installed.
-
-From NuGet (once published):
+AgentRecall is a .NET global tool. You need the [.NET SDK](https://dotnet.microsoft.com/download)
+(8 or newer) installed, then:
 
 ```bash
 dotnet tool install -g AgentRecall
 ```
 
-Then:
+This adds an `agentrecall` command to your PATH. Verify it:
 
 ```bash
-agentrecall init
-agentrecall status
-agentrecall mcp
+agentrecall --version
 ```
 
-To update or remove:
+> If `agentrecall` isn't found afterward, make sure the .NET tools directory is on
+> your PATH (`~/.dotnet/tools` on macOS/Linux, `%USERPROFILE%\.dotnet\tools` on
+> Windows), then restart your shell.
+
+Update or remove it later with:
 
 ```bash
 dotnet tool update -g AgentRecall
 dotnet tool uninstall -g AgentRecall
 ```
 
-## Development
+---
+
+## Quick start
 
 ```bash
-dotnet build
-dotnet test
-```
-
-Run a command without installing:
-
-```bash
-dotnet run --project src/AgentRecall.Cli -- <command>
-```
-
-## Local tool installation
-
-Pack the tool and install it from the local feed:
-
-```bash
-dotnet pack
-dotnet tool install --global --add-source ./nupkg AgentRecall
-```
-
-`dotnet pack` writes the package to `./nupkg`. If a previous build is already
-installed, run `dotnet tool uninstall -g AgentRecall` first (or use
-`dotnet tool update --global --add-source ./nupkg AgentRecall`).
-
-## Releasing
-
-Publishing is automated by `.github/workflows/release.yml`, which runs on
-`v*` tags (e.g. `v0.1.0`). It builds, tests, packs, and publishes to NuGet
-using **Trusted Publishing** (OIDC) — no API key is stored in the repository.
-
-One-time setup:
-
-1. On NuGet.org, create a Trusted Publishing policy for the `AgentRecall`
-   package pointing at this repository and the `release.yml` workflow.
-2. Add a repository **variable** named `NUGET_USER` set to your NuGet.org
-   username (Settings → Secrets and variables → Actions → Variables).
-
-To cut a release, bump `VersionPrefix` in `Directory.Build.props`, then:
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-The workflow derives the package version from the tag.
-
-## Usage
-
-```bash
+# 1. Create the local database (~/.agentrecall/agentrecall.db by default)
 agentrecall init
-agentrecall status
+
+# 2. Teach it something you learned
+agentrecall feedback add \
+  --task "writing a SQL query" \
+  --feedback "use parameterized queries to avoid injection" \
+  --tags "sql,security"
+
+# 3. Recall it later
+agentrecall search "sql injection"
 ```
 
-### Commands
+That's the whole loop: **capture → recall.** Everything below is detail on each
+step.
+
+---
+
+## Using AgentRecall
+
+### Capture feedback
+
+Record a lesson learned. `--task` and `--feedback` are required; the rest add
+context and improve later matching:
+
+```bash
+agentrecall feedback add \
+  --task "writing a SQL query for user lookup" \
+  --feedback "use parameterized queries to avoid injection" \
+  --bad-output "string-concatenated SQL" \
+  --fixed-output "a parameterized command with @name" \
+  --scope-level Repository --scope-value my-repo \
+  --tags "security,sql"
+```
+
+Each entry is stored as an event and turned into a **rule** you can search for.
+
+### Search and read rules
+
+```bash
+agentrecall search "sql injection"          # ranked keyword search
+agentrecall search "sql" --scope-value my-repo --limit 5
+agentrecall rules list                       # everything you've captured
+agentrecall rules show 1                      # full detail for one rule
+```
+
+Results are ranked by relevance, rule status, and confidence.
+
+### Curate rules
+
+Rules start as `Pending`. Promote the good ones, retire the rest:
+
+```bash
+agentrecall rules approve 1                  # Pending  → Active
+agentrecall rules promote 1                  # Active   → Promoted
+agentrecall rules supersede 1 2              # replace rule 1 with rule 2
+agentrecall rules archive 3                  # hide a rule from search
+```
+
+A rule's lifecycle is `Pending → Active → Promoted`, plus `Superseded` and
+`Archived`. Superseded and archived rules never show up in search.
+
+### Learn from failures
+
+Point AgentRecall at a build, test, or lint log. Each failure is recorded, and
+failures that match an existing rule increase its confidence — repeatedly hitting
+the same problem can automatically promote the rule that prevents it:
+
+```bash
+agentrecall import build-log ./build.log
+agentrecall import test-log ./test.log
+agentrecall import lint-log ./lint.log
+```
+
+### Command reference
 
 | Command | Description |
 | --- | --- |
-| `init` | Create the local data directory and SQLite database. |
-| `feedback add` | Record feedback and extract a pending rule from it. |
+| `init` | Create the local data directory and database. |
+| `feedback add` | Record feedback and extract a rule from it. |
+| `search "<query>"` | Search rules by keyword (`--scope-level`, `--scope-value`, `--limit`). |
 | `rules list` | List all rules. |
 | `rules show <id>` | Show a single rule in detail. |
 | `rules approve <id>` | Move a Pending rule to Active. |
 | `rules promote <id>` | Promote a rule. |
 | `rules supersede <oldId> <newId>` | Replace one rule with another (versioned). |
 | `rules archive <id>` | Archive a rule (excluded from search). |
-| `search "<query>"` | Search rules by keyword, ranked by relevance/status/confidence. |
-| `import build-log <file>` | Ingest build failures as events. |
-| `import test-log <file>` | Ingest test failures as events. |
-| `import lint-log <file>` | Ingest lint failures as events. |
+| `import build-log <file>` | Ingest build failures. |
+| `import test-log <file>` | Ingest test failures. |
+| `import lint-log <file>` | Ingest lint failures. |
 | `mcp` | Run the MCP server over stdio (for Claude Code). |
-| `help` (also `--help`, `-h`, or no args) | Show usage. |
-| `version` (also `--version`, `-v`) | Show the installed version. |
-| `status` | Show the memory subsystem status. |
+| `status` | Show where data is stored. |
+| `help` / `--help` / `-h` | Show usage. |
+| `version` / `--version` / `-v` | Show the installed version. |
 
-## Rule lifecycle & learning
+Run `agentrecall help` any time for the same list.
 
-Rules move through `Pending → Active → Promoted`, and can be `Superseded` or
-`Archived`. Superseding records the `SupersededById` link and bumps the
-replacement's version. Importing failure logs records each failure as an event;
-failures that match an existing rule (by trigger or tag) reinforce it, and a
-rule is promoted automatically once its confidence reaches the threshold.
-Superseded and archived rules are never reinforced or returned by search.
+---
 
-## MCP server (Claude Code)
+## Use it from Claude Code
 
-`agentrecall mcp` speaks the Model Context Protocol over stdio (newline-delimited
-JSON-RPC 2.0). All logging goes to stderr so stdout stays a clean protocol
-channel. It exposes three tools:
-
-| Tool | Purpose |
-| --- | --- |
-| `search_rules` | Search rules relevant to a query (`query`, optional `scope_level`, `scope_value`, `file_path`, `limit`). |
-| `add_feedback` | Record feedback and extract a pending rule (`task`, `feedback`, optional `bad_output`, `fixed_output`, `scope_level`, `scope_value`, `tags`). |
-| `get_project_rules` | List applicable rules for a scope (optional `scope_level`, `scope_value`). |
-
-Each tool returns agent-facing guidance: `trigger`, `rule`, `do`, `do_not`,
-`reason`, `applies_to`, `confidence`, `status`.
-
-Register it with Claude Code (once installed as a global tool):
+AgentRecall ships an MCP server so Claude Code can recall your rules and record
+new feedback while you work. Register it once:
 
 ```bash
 claude mcp add agentrecall agentrecall mcp
 ```
 
-Or, to run from source without installing:
+That exposes three tools to the agent:
 
-```bash
-claude mcp add agentrecall -- dotnet run --project /absolute/path/to/AgentRecall/src/AgentRecall.Cli -- mcp
-```
+| Tool | What it does |
+| --- | --- |
+| `search_rules` | Find rules relevant to what the agent is doing. |
+| `add_feedback` | Record new feedback and create a rule. |
+| `get_project_rules` | List the applicable rules for the current scope. |
 
-### Capturing feedback
+Each tool returns guidance shaped for an agent: `trigger`, `rule`, `do`,
+`do_not`, `reason`, `applies_to`, `confidence`, and `status`. The server speaks
+JSON-RPC 2.0 over stdio and writes only protocol messages to stdout (all logs go
+to stderr), so it behaves identically whether installed or run from source.
 
-Feedback is stored as a `RecallEvent` and converted into a `Pending`
-`RecallRule` by a deterministic, rule-based extractor (no LLM yet).
-
-```bash
-agentrecall feedback add \
-  --task "write a SQL query for user lookup" \
-  --feedback "use parameterized queries to avoid injection" \
-  --bad-output "string-concatenated SQL" \
-  --fixed-output "a parameterized command with @name" \
-  --scope-level Repository --scope-value AgentRecall \
-  --tags "security,sql"
-```
-
-`--task` and `--feedback` are required; the rest are optional.
+---
 
 ## Configuration
 
-Configuration is loaded from an optional `agentrecall.json` in the working
-directory, then overridden by environment variables prefixed with
-`AGENTRECALL_`.
+AgentRecall reads an optional `agentrecall.json` from the current directory, then
+applies environment-variable overrides prefixed with `AGENTRECALL_`.
 
 ```json
 {
@@ -198,8 +177,65 @@ directory, then overridden by environment variables prefixed with
 }
 ```
 
-Example environment override:
+```bash
+# Override a setting for a single run
+AGENTRECALL_AgentRecall__LogLevel=Debug agentrecall status
+```
+
+Data lives in a single SQLite database under `DataDirectory` (default
+`~/.agentrecall/agentrecall.db`), so backing up or moving your memory is just
+copying that folder.
+
+---
+
+## Building from source
+
+If you'd rather work from the repository instead of installing the published
+tool:
 
 ```bash
-AGENTRECALL_AgentRecall__LogLevel=Debug dotnet run --project src/AgentRecall.Cli -- status
+git clone https://github.com/AkbarDizaji/AgentRecall.git
+cd AgentRecall
+
+dotnet build
+dotnet test
+
+# Run any command without installing
+dotnet run --project src/AgentRecall.Cli -- init
+```
+
+To build and install your local copy as the global tool:
+
+```bash
+dotnet pack
+dotnet tool install --global --add-source ./nupkg AgentRecall
+```
+
+(`dotnet pack` writes the package to `./nupkg`. If a build is already installed,
+use `dotnet tool update --global --add-source ./nupkg AgentRecall`.)
+
+### Project layout
+
+| Project | Purpose |
+| --- | --- |
+| `AgentRecall.Cli` | Command-line entry point (`agentrecall`) and MCP server. |
+| `AgentRecall.Core` | Domain entities, services, and contracts. |
+| `AgentRecall.Infrastructure` | Configuration, logging, and EF Core SQLite persistence. |
+| `AgentRecall.Tests` | Tests (run against temporary SQLite databases). |
+
+### Releasing
+
+Releases are automated by `.github/workflows/release.yml` on `v*` tags. It
+builds, tests, packs, and publishes to NuGet using **Trusted Publishing** (OIDC)
+— no API key is stored in the repository.
+
+One-time setup: create a Trusted Publishing policy for the `AgentRecall` package
+on NuGet.org (pointing at this repo and `release.yml`), and add a repository
+variable `NUGET_USER` with your NuGet.org username.
+
+To cut a release, bump `VersionPrefix` in `Directory.Build.props`, then tag:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
 ```
