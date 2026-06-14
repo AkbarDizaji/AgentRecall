@@ -31,6 +31,18 @@ public sealed class RecallRule
     /// <summary>Confidence in the rule, 0.0–1.0.</summary>
     public double Confidence { get; set; }
 
+    /// <summary>
+    /// Manual ranking weight used by the policy engine to break ties between
+    /// matching rules; higher wins. Defaults to 0.
+    /// </summary>
+    public int Priority { get; set; }
+
+    /// <summary>
+    /// True when the rule has been deliberately retired from active use. A
+    /// deprecated rule is never treated as effective, regardless of status.
+    /// </summary>
+    public bool Deprecated { get; set; }
+
     public ScopeLevel ScopeLevel { get; set; } = ScopeLevel.Global;
 
     /// <summary>The scope identifier (e.g. repo name, language, file path).</summary>
@@ -39,7 +51,16 @@ public sealed class RecallRule
     /// <summary>Id of the rule that replaced this one, if any.</summary>
     public int? SupersededById { get; set; }
 
+    /// <summary>
+    /// Id of the rule that this rule explicitly supersedes, if any. When both this
+    /// rule and its target match a task, the policy engine ignores the target.
+    /// </summary>
+    public int? SupersedesRuleId { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
 
     public DateTimeOffset UpdatedAt { get; set; }
+
+    /// <summary>When the rule was last applied to a task, if ever.</summary>
+    public DateTimeOffset? LastUsedAt { get; set; }
 }

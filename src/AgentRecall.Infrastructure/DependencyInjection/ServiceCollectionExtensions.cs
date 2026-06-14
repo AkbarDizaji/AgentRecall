@@ -1,5 +1,7 @@
 using AgentRecall.Core.Abstractions;
+using AgentRecall.Core.Compression;
 using AgentRecall.Core.Configuration;
+using AgentRecall.Core.Policy;
 using AgentRecall.Core.Services;
 using AgentRecall.Infrastructure.Embeddings;
 using AgentRecall.Infrastructure.Persistence;
@@ -39,6 +41,13 @@ public static class ServiceCollectionExtensions
         // Lifecycle, versioning, and failure ingestion.
         services.AddScoped<IRuleLifecycleService, RuleLifecycleService>();
         services.AddScoped<ILogImportService, LogImportService>();
+
+        // Conflict resolution across matching rules.
+        services.AddScoped<IPolicyEngine, PolicyEngine>();
+
+        // Memory compression: dedupe and distil rules into canonical guidance.
+        services.AddSingleton<ICanonicalRuleGenerator, DeterministicCanonicalRuleGenerator>();
+        services.AddScoped<IMemoryCompressionService, MemoryCompressionService>();
 
         // Proactive memory helpers.
         services.AddSingleton<IFeedbackCandidateAnalyzer, FeedbackCandidateAnalyzer>();

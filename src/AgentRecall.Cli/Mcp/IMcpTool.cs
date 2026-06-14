@@ -66,4 +66,37 @@ public static class McpArgs
 
         return int.TryParse(node.GetValue<string?>(), out var parsed) ? parsed : null;
     }
+
+    public static double? GetDouble(JsonObject? args, string key)
+    {
+        if (args is null || !args.TryGetPropertyValue(key, out var node) || node is null)
+        {
+            return null;
+        }
+
+        // Accept both JSON numbers and numeric strings.
+        if (node.GetValueKind() == System.Text.Json.JsonValueKind.Number)
+        {
+            return node.GetValue<double>();
+        }
+
+        return double.TryParse(node.GetValue<string?>(), out var parsed) ? parsed : null;
+    }
+
+    public static bool? GetBool(JsonObject? args, string key)
+    {
+        if (args is null || !args.TryGetPropertyValue(key, out var node) || node is null)
+        {
+            return null;
+        }
+
+        var kind = node.GetValueKind();
+        if (kind is System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False)
+        {
+            return node.GetValue<bool>();
+        }
+
+        // Accept boolean-ish strings ("true"/"false").
+        return bool.TryParse(node.GetValue<string?>(), out var parsed) ? parsed : null;
+    }
 }

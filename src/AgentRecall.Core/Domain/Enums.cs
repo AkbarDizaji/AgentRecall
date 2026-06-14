@@ -38,4 +38,7 @@ public enum RecallEventType
     RuleApplied = 2,
     RuleSuperseded = 3,
     MistakeObserved = 4,
+
+    /// <summary>Several rules were merged into a single canonical rule.</summary>
+    RulesCompressed = 5,
 }

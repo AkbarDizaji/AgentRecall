@@ -25,8 +25,11 @@ public sealed class AgentRecallDbContext : DbContext
             entity.Property(e => e.Status).HasConversion<string>();
             entity.Property(e => e.ScopeLevel).HasConversion<string>();
             entity.Property(e => e.Trigger).IsRequired();
+            entity.Property(e => e.Priority).HasDefaultValue(0);
+            entity.Property(e => e.Deprecated).HasDefaultValue(false);
             entity.HasIndex(e => new { e.ScopeLevel, e.ScopeValue });
             entity.HasIndex(e => e.Status);
+            entity.HasIndex(e => e.Deprecated);
         });
 
         modelBuilder.Entity<RecallEvent>(entity =>

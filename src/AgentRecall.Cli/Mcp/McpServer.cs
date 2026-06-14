@@ -38,6 +38,8 @@ public sealed class McpServer
         new SuggestFeedbackCandidateTool(),
         new CaptureFeedbackTool(),
         new GetRemindersTool(),
+        new ResolveRulesTool(),
+        new CompressMemoryTool(),
     ];
 
     /// <summary>The tools this server exposes, keyed by name.</summary>
