@@ -40,6 +40,7 @@ public sealed class McpServer
         new GetRemindersTool(),
         new ResolveRulesTool(),
         new CompressMemoryTool(),
+        new InjectContextTool(),
     ];
 
     /// <summary>The tools this server exposes, keyed by name.</summary>

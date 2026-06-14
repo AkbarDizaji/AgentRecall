@@ -1,0 +1,322 @@
+using AgentRecall.Core.Abstractions;
+using AgentRecall.Core.Domain;
+using AgentRecall.Core.Policy;
+
+namespace AgentRecall.Core.Context;
+
+/// <summary>
+/// Default <see cref="IContextInjectionService"/>. Ranks rules by usefulness using
+/// blended relevance signals weighted by confidence, prunes conflicts and
+/// superseded rules via the policy engine, buckets the survivors into
+/// must-follow / warning / suggested, and fills a token budget highest-value
+/// first.
+/// </summary>
+public sealed class ContextInjectionService : IContextInjectionService
+{
+    // Relevance signal weights (sum to 1.0).
+    private const double KeywordWeight = 0.30;
+    private const double SemanticWeight = 0.30;
+    private const double DomainWeight = 0.20;
+    private const double TaskTypeWeight = 0.10;
+    private const double ScopeWeight = 0.10;
+
+    /// <summary>Minimum relevance for a rule to be considered at all.</summary>
+    private const double RelevanceFloor = 0.08;
+
+    /// <summary>Score at or above which a high-trust rule is "must-follow".</summary>
+    private const double MustFollowFloor = 0.15;
+
+    // Tokens/words associated with each task type, used for the task-type signal.
+    private static readonly Dictionary<TaskType, string[]> TaskTypeTerms = new()
+    {
+        [TaskType.Security] = ["security", "auth", "authentication", "authorization", "injection", "secret", "credential", "encryption", "vulnerability", "sanitize", "validation"],
+        [TaskType.Performance] = ["performance", "latency", "cache", "caching", "allocation", "async", "throughput", "memory", "index"],
+        [TaskType.Refactor] = ["refactor", "design", "pattern", "structure", "coupling", "cohesion", "abstraction", "naming"],
+        [TaskType.Test] = ["test", "tests", "mock", "assertion", "coverage", "fixture", "deterministic"],
+        [TaskType.BugFix] = ["bug", "fix", "regression", "edge", "null", "boundary", "exception", "error"],
+        [TaskType.Documentation] = ["documentation", "docs", "comment", "comments", "readme", "example"],
+        [TaskType.Review] = ["review", "convention", "style", "consistency", "readability"],
+    };
+
+    private readonly IRecallRuleRepository _rules;
+    private readonly IPolicyEngine _policy;
+    private readonly IConceptExpander _concepts;
+
+    public ContextInjectionService(
+        IRecallRuleRepository rules,
+        IPolicyEngine policy,
+        IConceptExpander concepts)
+    {
+        _rules = rules ?? throw new ArgumentNullException(nameof(rules));
+        _policy = policy ?? throw new ArgumentNullException(nameof(policy));
+        _concepts = concepts ?? throw new ArgumentNullException(nameof(concepts));
+    }
+
+    public async Task<ContextInjectionResult> BuildContextAsync(ContextRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var taskTokens = ContextTokens.FromTask(request.Task);
+        var domainTokens = ContextTokens.FromIdentifiers(request.FileNames.Concat(request.ChangedEntities));
+
+        if (taskTokens.Count == 0 && domainTokens.Count == 0)
+        {
+            return Empty(request.TokenBudget, "No task keywords or changed entities to match on.");
+        }
+
+        // Concepts are activated by everything the task is "about".
+        var concepts = _concepts.Build(taskTokens.Concat(domainTokens));
+
+        var all = await _rules.ListAsync(cancellationToken).ConfigureAwait(false);
+        var pool = all.Where(r => r.Status is RuleStatus.Active or RuleStatus.Promoted && !r.Deprecated).ToList();
+
+        // Score every rule; keep those clearing the relevance floor.
+        var assessments = new Dictionary<int, Assessment>();
+        foreach (var rule in pool)
+        {
+            var assessment = Assess(rule, taskTokens, domainTokens, concepts, request);
+            if (assessment.Relevance >= RelevanceFloor)
+            {
+                assessments[rule.Id] = assessment;
+            }
+        }
+
+        // Let the policy engine prune conflicts, supersedes and overrides.
+        var relevantRules = assessments.Values.Select(a => a.Rule).ToList();
+        var resolution = _policy.Resolve(relevantRules, new PolicyContext
+        {
+            ScopeLevel = request.ScopeLevel,
+            ScopeValue = request.ScopeValue,
+        });
+
+        var prunedByPolicy = resolution.Ignored.Count;
+
+        var ranked = resolution.Effective
+            .Select(v => assessments[v.Rule.Id])
+            .OrderByDescending(a => a.Score)
+            .ThenByDescending(a => a.Rule.Confidence)
+            .ThenBy(a => a.Rule.Id)
+            .ToList();
+
+        return PackIntoBudget(ranked, request.TokenBudget, prunedByPolicy);
+    }
+
+    private Assessment Assess(
+        RecallRule rule,
+        HashSet<string> taskTokens,
+        HashSet<string> domainTokens,
+        ConceptContext concepts,
+        ContextRequest request)
+    {
+        var ruleTokens = ContextTokens.FromRule(rule);
+        var reasons = new List<string>();
+
+        // 1. Literal keyword overlap with the task.
+        var keywordHits = taskTokens.Where(ruleTokens.Contains).ToList();
+        var keyword = taskTokens.Count == 0 ? 0 : (double)keywordHits.Count / taskTokens.Count;
+        if (keywordHits.Count > 0)
+        {
+            reasons.Add($"matches task keyword(s): {string.Join(", ", keywordHits)}");
+        }
+
+        // 2. Semantic match via activated concept groups (no shared words needed).
+        var semanticGroups = new Dictionary<string, IReadOnlyCollection<string>>();
+        var semanticHits = 0;
+        foreach (var token in ruleTokens)
+        {
+            if (!taskTokens.Contains(token) && !domainTokens.Contains(token) &&
+                concepts.TryRelate(token, out var group, out var viaSeeds))
+            {
+                semanticHits++;
+                semanticGroups[group] = viaSeeds;
+            }
+        }
+
+        var semantic = semanticGroups.Count == 0
+            ? 0
+            : Math.Min(1.0, 0.6 * semanticGroups.Count + 0.2 * (semanticHits - semanticGroups.Count));
+        foreach (var (group, seeds) in semanticGroups)
+        {
+            reasons.Add($"semantically related to {group} (task mentions {string.Join(", ", seeds)})");
+        }
+
+        // 3. Domain match against changed files/entities.
+        var domainHits = domainTokens.Where(ruleTokens.Contains).ToList();
+        var domain = domainTokens.Count == 0 ? 0 : (double)domainHits.Count / domainTokens.Count;
+        if (domainHits.Count > 0)
+        {
+            reasons.Add($"matches changed code: {string.Join(", ", domainHits)}");
+        }
+
+        // 4. Task-type alignment.
+        var taskType = 0.0;
+        if (TaskTypeTerms.TryGetValue(request.TaskType, out var typeTerms))
+        {
+            var typeHits = typeTerms.Where(ruleTokens.Contains).ToList();
+            if (typeHits.Count > 0)
+            {
+                taskType = Math.Min(1.0, 0.5 + 0.25 * typeHits.Count);
+                reasons.Add($"relevant to {request.TaskType} work: {string.Join(", ", typeHits)}");
+            }
+        }
+
+        // 5. Scope: a project-specific match beats a global rule.
+        double scope;
+        var projectScoped = false;
+        if (!string.IsNullOrWhiteSpace(request.ScopeValue)
+            && rule.ScopeLevel != ScopeLevel.Global
+            && string.Equals(rule.ScopeValue, request.ScopeValue, StringComparison.OrdinalIgnoreCase))
+        {
+            scope = 1.0;
+            projectScoped = true;
+            reasons.Add($"project-specific rule for {rule.ScopeValue}");
+        }
+        else
+        {
+            scope = rule.ScopeLevel == ScopeLevel.Global ? 0.2 : 0.0;
+        }
+
+        var relevance =
+            KeywordWeight * keyword +
+            SemanticWeight * semantic +
+            DomainWeight * domain +
+            TaskTypeWeight * taskType +
+            ScopeWeight * scope;
+
+        // Confidence weighting: confidence scales relevance without zeroing it,
+        // and promoted rules get a small lift.
+        var confidence = Math.Clamp(rule.Confidence, 0.0, 1.0);
+        var confidenceFactor = 0.5 + 0.5 * confidence;
+        var statusFactor = rule.Status == RuleStatus.Promoted ? 1.1 : 1.0;
+        var score = relevance * confidenceFactor * statusFactor;
+
+        var highTrust = confidence >= 0.8 || rule.Status == RuleStatus.Promoted;
+        if (highTrust)
+        {
+            reasons.Add($"high confidence ({confidence:0.00}){(rule.Status == RuleStatus.Promoted ? ", promoted" : string.Empty)}");
+        }
+
+        return new Assessment(rule, relevance, score, reasons, projectScoped, highTrust, IsProhibition(rule));
+    }
+
+    private static ContextInjectionResult PackIntoBudget(List<Assessment> ranked, int budget, int prunedByPolicy)
+    {
+        var mustFollow = new List<InjectedRule>();
+        var warnings = new List<InjectedRule>();
+        var suggested = new List<InjectedRule>();
+
+        // Bucket first so budgeting can prioritise must-follow and warnings.
+        var bucketed = ranked
+            .Select(a => (Assessment: a, Injected: ToInjected(a)))
+            .ToList();
+
+        var tokensUsed = 0;
+        var trimmed = 0;
+
+        // Fill in priority order: must-follow, then warnings, then suggested.
+        foreach (var importance in new[] { RuleImportance.MustFollow, RuleImportance.Warning, RuleImportance.Suggested })
+        {
+            foreach (var (_, injected) in bucketed.Where(b => b.Injected.Importance == importance))
+            {
+                if (tokensUsed + injected.EstimatedTokens > budget)
+                {
+                    trimmed++;
+                    continue;
+                }
+
+                tokensUsed += injected.EstimatedTokens;
+                switch (importance)
+                {
+                    case RuleImportance.MustFollow: mustFollow.Add(injected); break;
+                    case RuleImportance.Warning: warnings.Add(injected); break;
+                    default: suggested.Add(injected); break;
+                }
+            }
+        }
+
+        var explanation =
+            $"Selected {mustFollow.Count + warnings.Count + suggested.Count} rule(s) " +
+            $"({mustFollow.Count} must-follow, {warnings.Count} warning(s), {suggested.Count} suggested) " +
+            $"using {tokensUsed}/{budget} tokens.";
+        if (prunedByPolicy > 0)
+        {
+            explanation += $" Policy engine set aside {prunedByPolicy} conflicting/superseded rule(s).";
+        }
+
+        if (trimmed > 0)
+        {
+            explanation += $" {trimmed} relevant rule(s) trimmed to fit the token budget.";
+        }
+
+        return new ContextInjectionResult
+        {
+            MustFollow = mustFollow,
+            Suggested = suggested,
+            Warnings = warnings,
+            TokensUsed = tokensUsed,
+            TokenBudget = budget,
+            Explanation = explanation,
+        };
+    }
+
+    private static InjectedRule ToInjected(Assessment a)
+    {
+        var importance = a.Prohibition
+            ? RuleImportance.Warning
+            : (a.HighTrust || a.ProjectScoped) && a.Score >= MustFollowFloor
+                ? RuleImportance.MustFollow
+                : RuleImportance.Suggested;
+
+        var explanation = a.Reasons.Count > 0
+            ? $"{string.Join("; ", a.Reasons)} (score {a.Score:0.00})."
+            : $"Relevant to the task (score {a.Score:0.00}).";
+
+        return new InjectedRule
+        {
+            Rule = a.Rule,
+            Importance = importance,
+            Score = Math.Round(a.Score, 4),
+            Relevance = Math.Round(a.Relevance, 4),
+            Explanation = explanation,
+            MatchReasons = a.Reasons,
+            EstimatedTokens = EstimateTokens(a.Rule, explanation),
+        };
+    }
+
+    private static int EstimateTokens(RecallRule rule, string explanation)
+    {
+        // ~4 characters per token, plus a little structural overhead.
+        var chars = rule.RuleText.Length + rule.Mistake.Length + rule.Trigger.Length + explanation.Length;
+        return (int)Math.Ceiling(chars / 4.0) + 8;
+    }
+
+    private static bool IsProhibition(RecallRule rule)
+    {
+        var text = rule.RuleText.ToLowerInvariant();
+        return text.StartsWith("never ", StringComparison.Ordinal)
+            || text.StartsWith("avoid ", StringComparison.Ordinal)
+            || text.Contains("do not", StringComparison.Ordinal)
+            || text.Contains("don't", StringComparison.Ordinal)
+            || text.Contains("should not", StringComparison.Ordinal)
+            || text.Contains("must not", StringComparison.Ordinal);
+    }
+
+    private static ContextInjectionResult Empty(int budget, string explanation) => new()
+    {
+        MustFollow = [],
+        Suggested = [],
+        Warnings = [],
+        TokensUsed = 0,
+        TokenBudget = budget,
+        Explanation = explanation,
+    };
+
+    private sealed record Assessment(
+        RecallRule Rule,
+        double Relevance,
+        double Score,
+        List<string> Reasons,
+        bool ProjectScoped,
+        bool HighTrust,
+        bool Prohibition);
+}

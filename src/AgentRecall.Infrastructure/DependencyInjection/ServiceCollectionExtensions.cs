@@ -1,6 +1,7 @@
 using AgentRecall.Core.Abstractions;
 using AgentRecall.Core.Compression;
 using AgentRecall.Core.Configuration;
+using AgentRecall.Core.Context;
 using AgentRecall.Core.Policy;
 using AgentRecall.Core.Services;
 using AgentRecall.Infrastructure.Embeddings;
@@ -44,6 +45,10 @@ public static class ServiceCollectionExtensions
 
         // Conflict resolution across matching rules.
         services.AddScoped<IPolicyEngine, PolicyEngine>();
+
+        // Smart context injection: relevance-ranked rule retrieval for a task.
+        services.AddSingleton<IConceptExpander, DomainConceptExpander>();
+        services.AddScoped<IContextInjectionService, ContextInjectionService>();
 
         // Memory compression: dedupe and distil rules into canonical guidance.
         services.AddSingleton<ICanonicalRuleGenerator, DeterministicCanonicalRuleGenerator>();
