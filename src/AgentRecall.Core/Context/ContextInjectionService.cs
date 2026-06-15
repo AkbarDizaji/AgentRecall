@@ -93,12 +93,29 @@ public sealed class ContextInjectionService : IContextInjectionService
 
         var ranked = resolution.Effective
             .Select(v => assessments[v.Rule.Id])
+            .ToList();
+
+        // Optionally fold in Pending rules — scored the same way, but never elevated
+        // to must-follow since they haven't been approved.
+        if (request.IncludePending)
+        {
+            foreach (var rule in all.Where(r => r.Status == RuleStatus.Pending && !r.Deprecated))
+            {
+                var assessment = Assess(rule, taskTokens, domainTokens, concepts, request) with { Unapproved = true };
+                if (assessment.Relevance >= RelevanceFloor)
+                {
+                    ranked.Add(assessment);
+                }
+            }
+        }
+
+        ranked = ranked
             .OrderByDescending(a => a.Score)
             .ThenByDescending(a => a.Rule.Confidence)
             .ThenBy(a => a.Rule.Id)
             .ToList();
 
-        return PackIntoBudget(ranked, request.TokenBudget, prunedByPolicy);
+        return PackIntoBudget(ranked, request.TokenBudget, request.Limit, prunedByPolicy);
     }
 
     private Assessment Assess(
@@ -196,10 +213,10 @@ public sealed class ContextInjectionService : IContextInjectionService
             reasons.Add($"high confidence ({confidence:0.00}){(rule.Status == RuleStatus.Promoted ? ", promoted" : string.Empty)}");
         }
 
-        return new Assessment(rule, relevance, score, reasons, projectScoped, highTrust, IsProhibition(rule));
+        return new Assessment(rule, relevance, score, reasons, projectScoped, highTrust, IsProhibition(rule), false);
     }
 
-    private static ContextInjectionResult PackIntoBudget(List<Assessment> ranked, int budget, int prunedByPolicy)
+    private static ContextInjectionResult PackIntoBudget(List<Assessment> ranked, int budget, int limit, int prunedByPolicy)
     {
         var mustFollow = new List<InjectedRule>();
         var warnings = new List<InjectedRule>();
@@ -212,19 +229,21 @@ public sealed class ContextInjectionService : IContextInjectionService
 
         var tokensUsed = 0;
         var trimmed = 0;
+        var selected = 0;
 
         // Fill in priority order: must-follow, then warnings, then suggested.
         foreach (var importance in new[] { RuleImportance.MustFollow, RuleImportance.Warning, RuleImportance.Suggested })
         {
             foreach (var (_, injected) in bucketed.Where(b => b.Injected.Importance == importance))
             {
-                if (tokensUsed + injected.EstimatedTokens > budget)
+                if (selected >= limit || tokensUsed + injected.EstimatedTokens > budget)
                 {
                     trimmed++;
                     continue;
                 }
 
                 tokensUsed += injected.EstimatedTokens;
+                selected++;
                 switch (importance)
                 {
                     case RuleImportance.MustFollow: mustFollow.Add(injected); break;
@@ -263,7 +282,8 @@ public sealed class ContextInjectionService : IContextInjectionService
     {
         var importance = a.Prohibition
             ? RuleImportance.Warning
-            : (a.HighTrust || a.ProjectScoped) && a.Score >= MustFollowFloor
+            // Unapproved (Pending) rules are surfaced but never as must-follow.
+            : !a.Unapproved && (a.HighTrust || a.ProjectScoped) && a.Score >= MustFollowFloor
                 ? RuleImportance.MustFollow
                 : RuleImportance.Suggested;
 
@@ -318,5 +338,6 @@ public sealed class ContextInjectionService : IContextInjectionService
         List<string> Reasons,
         bool ProjectScoped,
         bool HighTrust,
-        bool Prohibition);
+        bool Prohibition,
+        bool Unapproved);
 }

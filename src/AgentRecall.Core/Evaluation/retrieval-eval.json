@@ -1,0 +1,47 @@
+{
+  "rules": [
+    { "key": "moq-matchers", "status": "Promoted", "trigger": "writing Moq unit tests", "rule": "Use Moq argument matchers like It.IsAny<T>() consistently in setups.", "doNot": "Never mix raw values and matchers in one Moq setup.", "tags": "moq,testing,matchers,mock,unit" },
+    { "key": "prisma-singleton", "status": "Promoted", "trigger": "creating API routes that use Prisma", "rule": "Use a single shared PrismaClient instance across API routes.", "doNot": "Never instantiate a new PrismaClient per request.", "tags": "prisma,api,route,database,client,singleton" },
+    { "key": "sql-parameterized", "status": "Promoted", "trigger": "writing SQL queries", "rule": "Use parameterized SQL queries for all user input.", "doNot": "Never concatenate user input into SQL strings.", "tags": "sql,query,database,injection,security" },
+    { "key": "money-value-object", "status": "Promoted", "trigger": "modeling money or currency amounts", "rule": "Use a Money value object holding amount and currency together.", "doNot": "Never represent money as a bare decimal.", "tags": "money,currency,amount,domain,value-object,refund" },
+    { "key": "dates-utc", "status": "Active", "trigger": "handling dates and times", "rule": "Store timestamps in UTC and format them as ISO 8601.", "doNot": "Never store local time without an offset.", "tags": "date,time,timestamp,timezone,utc,iso8601" },
+    { "key": "async-configureawait", "status": "Active", "trigger": "writing asynchronous library code", "rule": "Use ConfigureAwait(false) on awaits in library code.", "doNot": "", "tags": "async,await,configureawait,library,concurrency,deadlock" },
+    { "key": "auth-hash-passwords", "status": "Promoted", "trigger": "storing user passwords", "rule": "Hash passwords with a slow algorithm such as bcrypt.", "doNot": "Never store passwords in plain text.", "tags": "auth,password,hash,bcrypt,security,credentials" },
+    { "key": "logging-no-secrets", "status": "Active", "trigger": "logging requests and responses", "rule": "Redact secrets, tokens, and passwords from logs.", "doNot": "Never log authorization headers or access tokens.", "tags": "logging,log,secret,token,redact,security" },
+    { "key": "react-list-keys", "status": "Active", "trigger": "rendering lists in React components", "rule": "Give each rendered list item a stable key prop.", "doNot": "Never use the array index as a React key for dynamic lists.", "tags": "react,list,key,component,frontend,render" },
+    { "key": "http-status-codes", "status": "Active", "trigger": "designing REST endpoints", "rule": "Return accurate HTTP status codes; use 404 for missing resources.", "doNot": "", "tags": "http,rest,api,status,endpoint,response" },
+    { "key": "di-constructor", "status": "Active", "trigger": "wiring up dependencies", "rule": "Inject dependencies through the constructor.", "doNot": "Avoid service-locator lookups inside methods.", "tags": "di,dependency-injection,constructor,ioc,services" },
+    { "key": "ef-no-tracking", "status": "Active", "trigger": "reading data with EF Core", "rule": "Use AsNoTracking() for read-only EF Core queries.", "doNot": "", "tags": "efcore,ef,query,asnotracking,readonly,performance" },
+    { "key": "null-guard", "status": "Active", "trigger": "handling nullable arguments", "rule": "Guard public method arguments with ArgumentNullException.ThrowIfNull.", "doNot": "", "tags": "null,nullable,guard,argument,validation" },
+    { "key": "cache-ttl", "status": "Active", "trigger": "caching computed values", "rule": "Set an explicit TTL and invalidation strategy for every cache.", "doNot": "Never cache without an expiry.", "tags": "cache,caching,ttl,invalidation,expiry,performance" }
+  ],
+  "scenarios": [
+    { "query": "write Moq tests", "expected": ["moq-matchers"] },
+    { "query": "mock a dependency in a unit test", "expected": ["moq-matchers"] },
+    { "query": "set up argument matchers for a mock", "expected": ["moq-matchers"] },
+    { "query": "create API route", "expected": ["prisma-singleton"] },
+    { "query": "instantiate the Prisma client in a route handler", "expected": ["prisma-singleton"] },
+    { "query": "write a SQL query for user lookup", "expected": ["sql-parameterized"] },
+    { "query": "avoid SQL injection", "expected": ["sql-parameterized"] },
+    { "query": "model a refund amount", "expected": ["money-value-object"] },
+    { "query": "represent currency in the domain model", "expected": ["money-value-object"] },
+    { "query": "format a date for display", "expected": ["dates-utc"] },
+    { "query": "handle time zones correctly", "expected": ["dates-utc"] },
+    { "query": "await calls inside a library", "expected": ["async-configureawait"] },
+    { "query": "fix an async deadlock in library code", "expected": ["async-configureawait"] },
+    { "query": "store user passwords securely", "expected": ["auth-hash-passwords"] },
+    { "query": "hash a password", "expected": ["auth-hash-passwords"] },
+    { "query": "log incoming requests", "expected": ["logging-no-secrets"] },
+    { "query": "render a list of items in React", "expected": ["react-list-keys"] },
+    { "query": "design a REST endpoint", "expected": ["http-status-codes"] },
+    { "query": "wire up dependency injection", "expected": ["di-constructor"] },
+    { "query": "read data efficiently with EF Core", "expected": ["ef-no-tracking"] },
+    { "query": "guard against null arguments", "expected": ["null-guard"] },
+    { "query": "add caching with an expiry", "expected": ["cache-ttl"] }
+  ],
+  "baseline": {
+    "precisionAt1": 0.90,
+    "precisionAt3": 0.30,
+    "recallAt5": 0.95
+  }
+}

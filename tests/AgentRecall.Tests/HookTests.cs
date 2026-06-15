@@ -1,0 +1,155 @@
+using AgentRecall.Cli.Hooks;
+using AgentRecall.Core.Abstractions;
+using AgentRecall.Core.Context;
+using AgentRecall.Core.Domain;
+using AgentRecall.Core.Hooks;
+using Microsoft.Extensions.DependencyInjection;
+using Xunit;
+
+namespace AgentRecall.Tests;
+
+public class HookTests
+{
+    private static async Task Init(TestDatabase db)
+    {
+        await using var scope = db.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<IDatabaseInitializer>().InitializeAsync();
+    }
+
+    private static async Task SeedMoqRule(TestDatabase db, RuleStatus status = RuleStatus.Promoted)
+    {
+        await using var scope = db.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IRecallRuleRepository>();
+        await repo.AddAsync(new RecallRule
+        {
+            Trigger = "writing Moq tests",
+            RuleText = "Use Moq argument matchers like It.IsAny<T>() consistently in tests.",
+            Mistake = "Never mix raw values and matchers in one setup.",
+            TechnicalContext = "", Tags = "moq,tests,testing,matchers",
+            Confidence = 0.9, Status = status, ScopeLevel = ScopeLevel.Global, ScopeValue = "",
+        });
+    }
+
+    private static string Payload(string prompt) =>
+        $$"""{"prompt": {{System.Text.Json.JsonSerializer.Serialize(prompt)}}, "cwd": "/tmp/project"}""";
+
+    // ---- Gate -----------------------------------------------------------------
+
+    [Theory]
+    [InlineData("Write Moq tests for OrderService", true)]
+    [InlineData("implement a repository", true)]
+    [InlineData("add an API endpoint", true)]
+    [InlineData("what is the weather today", false)]
+    [InlineData("summarize this article", false)]
+    public void Gate_DetectsDevelopmentPrompts(string prompt, bool expected) =>
+        Assert.Equal(expected, PromptGate.IsRelevant(prompt, PromptGate.DefaultKeywords));
+
+    [Fact]
+    public void Gate_WholeWordMatch_DoesNotFireOnLookalikes()
+    {
+        // "test" must not match "latest"; "api" must not match "rapid".
+        Assert.False(PromptGate.IsRelevant("the latest rapid changes", ["test", "api"]));
+        Assert.True(PromptGate.IsRelevant("run the test", ["test"]));
+    }
+
+    [Fact]
+    public void Gate_IsConfigurable()
+    {
+        Assert.True(PromptGate.IsRelevant("deploy the cluster", ["deploy"]));
+        Assert.False(PromptGate.IsRelevant("deploy the cluster", PromptGate.DefaultKeywords));
+    }
+
+    // ---- Formatter ------------------------------------------------------------
+
+    [Fact]
+    public void Formatter_EmptyResult_ReturnsEmpty()
+    {
+        var result = new ContextInjectionResult
+        {
+            MustFollow = [], Suggested = [], Warnings = [],
+            TokensUsed = 0, TokenBudget = 0, Explanation = "",
+        };
+
+        Assert.Equal(string.Empty, HookContextFormatter.Format(result));
+    }
+
+    // ---- Hook end to end ------------------------------------------------------
+
+    [Fact]
+    public async Task Hook_DevelopmentPrompt_InjectsStructuredContext()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+        await SeedMoqRule(db);
+
+        var diagnostics = new StringWriter();
+        var output = await UserPromptSubmitHook.RunAsync(
+            Payload("Write Moq tests for OrderService"), db.Services, diagnostics);
+
+        Assert.Contains("## AgentRecall Technical Context", output);
+        Assert.Contains("Must Follow:", output);
+        Assert.Contains("Moq argument matchers", output);
+        Assert.Contains("Source Rules:", output);
+    }
+
+    [Fact]
+    public async Task Hook_NonDevelopmentPrompt_InjectsNothing()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+        await SeedMoqRule(db);
+
+        var output = await UserPromptSubmitHook.RunAsync(
+            Payload("what is the weather today"), db.Services, new StringWriter());
+
+        Assert.Equal(string.Empty, output);
+    }
+
+    [Fact]
+    public async Task Hook_Disabled_InjectsNothing()
+    {
+        await using var db = new TestDatabase(o => o.HookEnabled = false);
+        await Init(db);
+        await SeedMoqRule(db);
+
+        var output = await UserPromptSubmitHook.RunAsync(
+            Payload("Write Moq tests for OrderService"), db.Services, new StringWriter());
+
+        Assert.Equal(string.Empty, output);
+    }
+
+    [Fact]
+    public async Task Hook_MalformedPayload_DoesNotThrow_AndInjectsNothing()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        var output = await UserPromptSubmitHook.RunAsync("{ not json", db.Services, new StringWriter());
+
+        Assert.Equal(string.Empty, output);
+    }
+
+    [Fact]
+    public async Task Hook_PendingRules_ExcludedByDefault_IncludedWhenConfigured()
+    {
+        // Default: pending rule is not injected.
+        await using (var db = new TestDatabase())
+        {
+            await Init(db);
+            await SeedMoqRule(db, RuleStatus.Pending);
+            var output = await UserPromptSubmitHook.RunAsync(
+                Payload("Write Moq tests for OrderService"), db.Services, new StringWriter());
+            Assert.Equal(string.Empty, output);
+        }
+
+        // Configured to include pending.
+        await using (var db = new TestDatabase(o => o.HookIncludePending = true))
+        {
+            await Init(db);
+            await SeedMoqRule(db, RuleStatus.Pending);
+            var output = await UserPromptSubmitHook.RunAsync(
+                Payload("Write Moq tests for OrderService"), db.Services, new StringWriter());
+            Assert.Contains("AgentRecall Technical Context", output);
+        }
+    }
+}

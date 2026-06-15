@@ -1,3 +1,5 @@
+using AgentRecall.Core.Hooks;
+
 namespace AgentRecall.Core.Configuration;
 
 /// <summary>
@@ -38,4 +40,22 @@ public sealed class AgentRecallOptions
 
     /// <summary>The absolute path to the SQLite database file.</summary>
     public string DatabasePath => Path.Combine(DataDirectory, DatabaseFileName);
+
+    /// <summary>
+    /// Whether the UserPromptSubmit hook injects context. When false, the hook is a
+    /// no-op even if it's wired into Claude Code's settings.
+    /// </summary>
+    public bool HookEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Keywords that mark a prompt as software-development work worth injecting
+    /// context for. Single words match whole-word; multi-word entries match as phrases.
+    /// </summary>
+    public string[] HookKeywords { get; set; } = PromptGate.DefaultKeywords;
+
+    /// <summary>Maximum rules the hook injects (keeps the block small).</summary>
+    public int HookMaxRules { get; set; } = 5;
+
+    /// <summary>Whether the hook may inject Pending (unapproved) rules.</summary>
+    public bool HookIncludePending { get; set; }
 }

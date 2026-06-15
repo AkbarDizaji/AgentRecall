@@ -69,7 +69,7 @@ public class FeedbackTests
             Assert.NotNull(stored);
             Assert.Equal(RuleStatus.Active, stored!.Status);
             Assert.Equal(ScopeLevel.Repository, stored.ScopeLevel);
-            Assert.Contains("use parameterized queries", stored.RuleText);
+            Assert.Contains("parameterized queries", stored.RuleText, StringComparison.OrdinalIgnoreCase);
             Assert.Equal("security,sql", stored.Tags);
         }
     }
@@ -119,7 +119,7 @@ public class FeedbackTests
 
         // No bad output → no distinct mistake, so "do"/"do not" won't duplicate.
         Assert.Equal(string.Empty, result.Rule.Mistake);
-        Assert.Equal("use parameterized queries", result.Rule.RuleText);
+        Assert.Contains("parameterized queries", result.Rule.RuleText, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -140,7 +140,8 @@ public class FeedbackTests
         Assert.Equal(0, listCode);
         var text = listOutput.ToString();
         Assert.Contains("Active", text);
-        Assert.Contains("write a SQL query", text);
+        // Trigger is normalized to a readable condition ("When writing a SQL query").
+        Assert.Contains("SQL query", text);
     }
 
     [Fact]
@@ -162,7 +163,7 @@ public class FeedbackTests
         var text = showOutput.ToString();
         Assert.Contains("Rule #1", text);
         Assert.Contains("Active", text);
-        Assert.Contains("use parameterized queries", text);
+        Assert.Contains("parameterized queries", text, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

@@ -51,6 +51,15 @@ public sealed record ContextRequest
 
     /// <summary>Approximate token budget for the injected context.</summary>
     public int TokenBudget { get; init; } = 1500;
+
+    /// <summary>Maximum number of rules to return across all buckets.</summary>
+    public int Limit { get; init; } = 25;
+
+    /// <summary>
+    /// When true, also consider Pending rules (never as must-follow). Off by
+    /// default: only Active and Promoted rules are returned.
+    /// </summary>
+    public bool IncludePending { get; init; }
 }
 
 /// <summary>A rule selected for injection, with its score and an explanation.</summary>

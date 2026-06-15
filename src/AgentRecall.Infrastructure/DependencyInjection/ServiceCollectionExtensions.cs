@@ -2,6 +2,7 @@ using AgentRecall.Core.Abstractions;
 using AgentRecall.Core.Compression;
 using AgentRecall.Core.Configuration;
 using AgentRecall.Core.Context;
+using AgentRecall.Core.Extraction;
 using AgentRecall.Core.Policy;
 using AgentRecall.Core.Services;
 using AgentRecall.Infrastructure.Embeddings;
@@ -32,6 +33,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IDatabaseInitializer, DatabaseInitializer>();
 
         // Feedback capture and rule extraction.
+        services.AddSingleton<IRecallRuleQualityValidator, RecallRuleQualityValidator>();
         services.AddSingleton<IRecallExtractor, RuleBasedRecallExtractor>();
         services.AddScoped<IFeedbackService, FeedbackService>();
 

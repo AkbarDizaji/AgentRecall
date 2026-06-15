@@ -235,6 +235,83 @@ public class ContextInjectionTests
 
     // ---- MCP tool -------------------------------------------------------------
 
+    // ---- Round-trip: store → promote → inject --------------------------------
+
+    [Fact]
+    public async Task RoundTrip_MoqRule_IsReturnedAsMustFollow()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        int ruleId;
+        await using (var scope = db.CreateScope())
+        {
+            // Store a rule about Moq matcher usage via the real capture path.
+            var feedback = scope.ServiceProvider.GetRequiredService<IFeedbackService>();
+            var captured = await feedback.AddAsync(new Core.Feedback.FeedbackInput
+            {
+                Task = "writing Moq unit tests",
+                Feedback = "Always use Moq argument matchers like It.IsAny<T>() consistently in Moq tests.",
+                Tags = "moq,testing,matchers",
+            });
+            ruleId = captured.Rule.Id;
+
+            // Approve/promote it.
+            var lifecycle = scope.ServiceProvider.GetRequiredService<IRuleLifecycleService>();
+            await lifecycle.PromoteAsync(ruleId);
+        }
+
+        await using (var scope = db.CreateScope())
+        {
+            var service = scope.ServiceProvider.GetRequiredService<IContextInjectionService>();
+
+            // A new, overlapping task.
+            var result = await service.BuildContextAsync(new ContextRequest { Task = "write Moq tests for service X" });
+
+            Assert.Contains(result.MustFollow, r => r.Rule.Id == ruleId);
+            Assert.Contains(ruleId, ContextProjection.SourceRuleIds(result));
+        }
+    }
+
+    [Fact]
+    public async Task PendingRules_ExcludedByDefault_IncludedOnRequest()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+        // Captured as Pending explicitly.
+        await Seed(db, "Use Moq argument matchers in tests.", tags: "moq", status: RuleStatus.Pending);
+
+        await using var scope = db.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IContextInjectionService>();
+
+        var withoutPending = await service.BuildContextAsync(new ContextRequest { Task = "write Moq tests" });
+        Assert.Empty(withoutPending.All);
+
+        var withPending = await service.BuildContextAsync(new ContextRequest { Task = "write Moq tests", IncludePending = true });
+        Assert.NotEmpty(withPending.All);
+        // Pending rules are never elevated to must-follow.
+        Assert.Empty(withPending.MustFollow);
+    }
+
+    [Fact]
+    public async Task Cli_InjectContext_PrintsAgentOptimizedSections()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+        var id = await Seed(db, "Always use Moq argument matchers like It.IsAny<T>() in Moq tests.",
+            tags: "moq,testing", confidence: 0.95, status: RuleStatus.Promoted);
+
+        var output = new StringWriter();
+        var code = await AgentRecall.Cli.CommandRouter.RunAsync(
+            ["inject-context", "write Moq tests for service X"], db.Services, output);
+
+        Assert.Equal(0, code);
+        var text = output.ToString();
+        Assert.Contains("Must-follow:", text);
+        Assert.Contains($"#{id}", text);
+        Assert.Contains("Source rule IDs:", text);
+    }
+
     [Fact]
     public void Server_RegistersInjectContextTool()
     {

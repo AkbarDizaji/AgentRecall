@@ -1,9 +1,13 @@
 using AgentRecall.Core;
 using AgentRecall.Core.Abstractions;
+using AgentRecall.Core.Configuration;
+using AgentRecall.Core.Context;
 using AgentRecall.Core.Domain;
+using AgentRecall.Core.Evaluation;
 using AgentRecall.Core.Feedback;
 using AgentRecall.Core.Search;
 using AgentRecall.Core.Services;
+using AgentRecall.Infrastructure.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -53,8 +57,17 @@ public static class CommandRouter
             case "search":
                 return await SearchAsync(rest, services, output, logger, cancellationToken).ConfigureAwait(false);
 
+            case "inject-context":
+                return await InjectContextAsync(rest, services, output, cancellationToken).ConfigureAwait(false);
+
             case "import":
                 return await ImportAsync(rest, services, output, logger, cancellationToken).ConfigureAwait(false);
+
+            case "eval":
+                return await EvalAsync(rest, output, cancellationToken).ConfigureAwait(false);
+
+            case "hook":
+                return await HookAsync(rest, services, output, cancellationToken).ConfigureAwait(false);
 
             case "mcp":
                 var server = new Mcp.McpServer(services);
@@ -389,6 +402,112 @@ public static class CommandRouter
         }
     }
 
+    private static async Task<int> InjectContextAsync(
+        string[] args,
+        IServiceProvider services,
+        TextWriter output,
+        CancellationToken cancellationToken)
+    {
+        var task = args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal) ? args[0] : null;
+        if (string.IsNullOrWhiteSpace(task))
+        {
+            output.WriteLine("Usage: agentrecall inject-context \"<task>\" [--scope-level <level>] [--scope-value <text>] [--file-path <path>] [--limit <n>] [--include-pending]");
+            return 1;
+        }
+
+        var options = ParseOptions(args);
+
+        var scopeLevel = (ScopeLevel?)null;
+        if (options.TryGetValue("scope-level", out var rawScope))
+        {
+            if (!Enum.TryParse<ScopeLevel>(rawScope, ignoreCase: true, out var level))
+            {
+                output.WriteLine($"Invalid --scope-level '{rawScope}'. Valid values: {string.Join(", ", Enum.GetNames<ScopeLevel>())}");
+                return 1;
+            }
+
+            scopeLevel = level;
+        }
+
+        var request = new ContextRequest
+        {
+            Task = task!,
+            ScopeLevel = scopeLevel,
+            ScopeValue = options.GetValueOrDefault("scope-value"),
+            FileNames = options.TryGetValue("file-path", out var filePath) && !string.IsNullOrWhiteSpace(filePath) ? [filePath] : [],
+            IncludePending = options.ContainsKey("include-pending"),
+        };
+
+        if (options.TryGetValue("limit", out var rawLimit))
+        {
+            if (!int.TryParse(rawLimit, out var limit) || limit <= 0)
+            {
+                output.WriteLine($"Invalid --limit '{rawLimit}'. Expected a positive integer.");
+                return 1;
+            }
+
+            request = request with { Limit = limit };
+        }
+
+        await using var scope = services.CreateAsyncScope();
+        await EnsureInitializedAsync(scope, cancellationToken).ConfigureAwait(false);
+        var service = scope.ServiceProvider.GetRequiredService<IContextInjectionService>();
+
+        var result = await service.BuildContextAsync(request, cancellationToken).ConfigureAwait(false);
+
+        if (!result.All.Any())
+        {
+            output.WriteLine($"No relevant rules for \"{task}\".");
+            return 0;
+        }
+
+        output.WriteLine(result.Explanation);
+
+        WriteBucket(output, "Must-follow", result.MustFollow, showReason: true);
+        WriteBucket(output, "Warnings", result.Warnings, showReason: false);
+
+        WriteList(output, "Preferred patterns", ContextProjection.PreferredPatterns(result));
+        WriteList(output, "Anti-patterns", ContextProjection.AntiPatterns(result));
+
+        var ids = ContextProjection.SourceRuleIds(result);
+        output.WriteLine($"Source rule IDs: {string.Join(", ", ids.Select(id => $"#{id}"))}");
+        return 0;
+    }
+
+    private static void WriteBucket(TextWriter output, string title, IReadOnlyList<Core.Context.InjectedRule> rules, bool showReason)
+    {
+        if (rules.Count == 0)
+        {
+            return;
+        }
+
+        output.WriteLine();
+        output.WriteLine($"{title}:");
+        foreach (var injected in rules)
+        {
+            output.WriteLine($"  #{injected.Rule.Id} [score {injected.Score:0.00}] {Truncate(injected.Rule.RuleText, 90)}");
+            if (showReason && !string.IsNullOrWhiteSpace(injected.Rule.TechnicalContext))
+            {
+                output.WriteLine($"      reason: {Truncate(injected.Rule.TechnicalContext, 90)}");
+            }
+        }
+    }
+
+    private static void WriteList(TextWriter output, string title, IReadOnlyList<string> items)
+    {
+        if (items.Count == 0)
+        {
+            return;
+        }
+
+        output.WriteLine();
+        output.WriteLine($"{title}:");
+        foreach (var item in items)
+        {
+            output.WriteLine($"  - {Truncate(item, 100)}");
+        }
+    }
+
     private static async Task<int> SearchAsync(
         string[] args,
         IServiceProvider services,
@@ -469,6 +588,135 @@ public static class CommandRouter
         }
     }
 
+    private static async Task<int> HookAsync(
+        string[] args,
+        IServiceProvider services,
+        TextWriter output,
+        CancellationToken cancellationToken)
+    {
+        if (args.Length == 0 || args[0] != "user-prompt-submit")
+        {
+            output.WriteLine("Usage: agentrecall hook user-prompt-submit");
+            output.WriteLine("(reads the Claude Code hook payload on stdin; intended for a UserPromptSubmit hook)");
+            return 1;
+        }
+
+        var payload = await Console.In.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+        var context = await Hooks.UserPromptSubmitHook
+            .RunAsync(payload, services, Console.Error, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!string.IsNullOrEmpty(context))
+        {
+            output.WriteLine(context);
+        }
+
+        // Always succeed so the hook never blocks the prompt.
+        return 0;
+    }
+
+    private static async Task<int> EvalAsync(string[] args, TextWriter output, CancellationToken cancellationToken)
+    {
+        if (args.Length == 0 || args[0] != "retrieval")
+        {
+            output.WriteLine("Usage: agentrecall eval retrieval [--dataset <path>]");
+            return 1;
+        }
+
+        var options = ParseOptions(args);
+
+        EvaluationDataset dataset;
+        try
+        {
+            dataset = options.TryGetValue("dataset", out var path) && !string.IsNullOrWhiteSpace(path)
+                ? EvaluationDatasetLoader.LoadFile(path)
+                : EvaluationDatasetLoader.LoadDefault();
+        }
+        catch (Exception ex) when (ex is IOException or System.Text.Json.JsonException or InvalidOperationException)
+        {
+            output.WriteLine($"Failed to load evaluation dataset: {ex.Message}");
+            return 1;
+        }
+
+        // Evaluate against an isolated, throwaway store so the user's real DB is
+        // never touched or polluted.
+        var tempDirectory = Path.Combine(Path.GetTempPath(), "agentrecall-eval", Guid.NewGuid().ToString("N"));
+        var evalOptions = new AgentRecallOptions { DataDirectory = tempDirectory, DatabaseFileName = "eval.db" };
+
+        var collection = new ServiceCollection();
+        collection.AddSingleton(evalOptions);
+        collection.AddLogging(b => b.SetMinimumLevel(LogLevel.Warning));
+        collection.AddAgentRecallPersistence();
+
+        await using var provider = collection.BuildServiceProvider();
+        try
+        {
+            RetrievalEvaluationReport report;
+            await using (var scope = provider.CreateAsyncScope())
+            {
+                await scope.ServiceProvider.GetRequiredService<IDatabaseInitializer>().InitializeAsync(cancellationToken).ConfigureAwait(false);
+                var rules = scope.ServiceProvider.GetRequiredService<IRecallRuleRepository>();
+                var search = scope.ServiceProvider.GetRequiredService<IRecallSearchService>();
+                report = await RetrievalEvaluationHarness.RunAsync(dataset, rules, search, cancellationToken).ConfigureAwait(false);
+            }
+
+            WriteEvaluationReport(output, report);
+            return report.Passed ? 0 : 1;
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(tempDirectory))
+                {
+                    Directory.Delete(tempDirectory, recursive: true);
+                }
+            }
+            catch (IOException)
+            {
+                // Best-effort cleanup of the throwaway store.
+            }
+        }
+    }
+
+    private static void WriteEvaluationReport(TextWriter output, RetrievalEvaluationReport report)
+    {
+        var m = report.Metrics;
+        var b = report.Baseline;
+
+        output.WriteLine($"Retrieval evaluation over {m.ScenarioCount} scenario(s):");
+        output.WriteLine($"  Precision@1: {m.PrecisionAt1:0.000}  (baseline {b.PrecisionAt1:0.000})");
+        output.WriteLine($"  Precision@3: {m.PrecisionAt3:0.000}  (baseline {b.PrecisionAt3:0.000})");
+        output.WriteLine($"  Recall@5:    {m.RecallAt5:0.000}  (baseline {b.RecallAt5:0.000})");
+
+        // Surface scenarios where the expected rule wasn't retrieved in the top 5.
+        var misses = report.Scenarios.Where(s => s.RecallAt5 < 1.0).ToList();
+        if (misses.Count > 0)
+        {
+            output.WriteLine();
+            output.WriteLine($"Misses ({misses.Count}):");
+            foreach (var miss in misses)
+            {
+                var ranked = miss.RankedTopK.Count > 0 ? string.Join(", ", miss.RankedTopK) : "(none)";
+                output.WriteLine($"  \"{miss.Query}\" expected [{string.Join(", ", miss.Expected)}] but got [{ranked}]");
+            }
+        }
+
+        output.WriteLine();
+        if (report.Passed)
+        {
+            output.WriteLine("PASS: retrieval quality meets the baseline.");
+        }
+        else
+        {
+            output.WriteLine("FAIL: retrieval quality dropped below the baseline.");
+            foreach (var failure in report.Failures)
+            {
+                output.WriteLine($"  - {failure}");
+            }
+        }
+    }
+
     /// <summary>Ensures the database exists before a command touches it.</summary>
     private static Task EnsureInitializedAsync(AsyncServiceScope scope, CancellationToken cancellationToken) =>
         scope.ServiceProvider.GetRequiredService<IDatabaseInitializer>().InitializeAsync(cancellationToken);
@@ -539,12 +787,18 @@ public static class CommandRouter
         output.WriteLine("                       Replace one rule with another");
         output.WriteLine("  rules archive <id>   Archive a rule (excluded from search)");
         output.WriteLine("  search \"<query>\"     Search rules by keyword, ranked");
+        output.WriteLine("  inject-context \"<task>\"");
+        output.WriteLine("                       Build agent-ready context (must-follow, warnings,");
+        output.WriteLine("                       preferred/anti-patterns) for a task");
         output.WriteLine("  import build-log <file>");
         output.WriteLine("  import test-log <file>");
         output.WriteLine("  import lint-log <file>");
         output.WriteLine("                       Ingest a failure log into events");
         output.WriteLine("  import pr-comments <file>");
         output.WriteLine("                       Capture PR review comments as pending rules");
+        output.WriteLine("  eval retrieval       Evaluate retrieval quality against the bundled dataset");
+        output.WriteLine("  hook user-prompt-submit");
+        output.WriteLine("                       Gated context injection for a Claude Code UserPromptSubmit hook");
         output.WriteLine("  mcp                  Run the MCP server over stdio (for Claude Code)");
         output.WriteLine("  status               Show the memory subsystem status");
         output.WriteLine("  help                 Show this help text");

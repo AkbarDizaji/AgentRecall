@@ -133,6 +133,21 @@ agentrecall import pr-comments ./comments.json --task "PR #42: add refunds" --sc
 
 Then review what it captured with `agentrecall rules list` and approve the keepers.
 
+### Evaluate retrieval quality
+
+Retrieval is only useful if the right rule comes back for a task. `eval retrieval`
+runs a bundled dataset of rules and query scenarios through the ranker in a
+throwaway store (your real database is never touched) and reports **Precision@1**,
+**Precision@3**, and **Recall@5**:
+
+```bash
+agentrecall eval retrieval                 # bundled dataset
+agentrecall eval retrieval --dataset ./my-eval.json
+```
+
+It exits non-zero when any metric falls below the dataset's baseline, so CI fails
+on a retrieval regression. The same check also runs as a unit test.
+
 ### Command reference
 
 | Command | Description |
@@ -150,6 +165,8 @@ Then review what it captured with `agentrecall rules list` and approve the keepe
 | `import test-log <file>` | Ingest test failures. |
 | `import lint-log <file>` | Ingest lint failures. |
 | `import pr-comments <file>` | Capture PR review comments as pending rules (`--task`, `--scope-level`, `--scope-value`, `--tags`). |
+| `inject-context "<task>"` | Build agent-ready context (must-follow, warnings, preferred/anti-patterns) for a task. |
+| `eval retrieval` | Evaluate retrieval quality against the bundled dataset (`--dataset <path>`); non-zero exit below baseline. |
 | `mcp` | Run the MCP server over stdio (for Claude Code). |
 | `status` | Show where data is stored. |
 | `help` / `--help` / `-h` | Show usage. |
@@ -218,6 +235,108 @@ The `agentrecall` MCP server holds rules learned from past feedback. Use it:
 Because `CLAUDE.md` is loaded into the agent's context each session, this turns
 "recall the relevant rules first" into default behaviour rather than something
 you have to ask for.
+
+### Guarantee it with a hook (deterministic injection)
+
+A `CLAUDE.md` instruction only *nudges* the model — calling an MCP tool is still
+its choice. To make rule injection **deterministic**, wire AgentRecall into a
+Claude Code [UserPromptSubmit hook](https://docs.claude.com/en/docs/claude-code/hooks).
+Hooks are run by Claude Code itself (not the model), so the context is injected
+before the model responds, every time the gate matches.
+
+Add this to your project's `.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command", "command": "agentrecall hook user-prompt-submit" } ] }
+    ]
+  }
+}
+```
+
+**How it works.** On each prompt, Claude Code pipes a small JSON payload (the
+prompt text and working directory) to `agentrecall hook user-prompt-submit`. The
+command:
+
+1. checks the prompt against a keyword **gate** — non-development prompts are
+   skipped entirely (no cost, no output);
+2. for a development prompt, retrieves the most relevant rules for the current
+   repository (scope = the repo containing the working directory);
+3. prints a compact block that Claude Code prepends to the model's context:
+
+```
+## AgentRecall Technical Context
+
+Must Follow:
+- ...
+
+Warnings:
+- ...
+
+Preferred Patterns:
+- ...
+
+Anti Patterns:
+- ...
+
+Source Rules:
+- #12, #4
+```
+
+Empty sections are omitted, and only Active/Promoted rules are included. The hook
+**never blocks** — if AgentRecall errors, it logs to stderr and injects nothing.
+
+**Configure it** in `agentrecall.json` (no need to touch `settings.json` to tune):
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `HookEnabled` | `true` | Master switch; `false` makes the hook a no-op. |
+| `HookKeywords` | (see below) | Words/phrases that mark a prompt as dev work. |
+| `HookMaxRules` | `5` | Maximum rules injected (keeps the block small). |
+| `HookIncludePending` | `false` | Whether unapproved (Pending) rules may be injected. |
+
+```json
+{
+  "AgentRecall": {
+    "HookEnabled": true,
+    "HookMaxRules": 5,
+    "HookIncludePending": false,
+    "HookKeywords": [
+      "implement", "write", "create", "fix", "debug", "refactor", "review",
+      "test", "unit test", "integration test", "api", "endpoint", "repository",
+      "service", "controller", "moq", "build", "lint"
+    ]
+  }
+}
+```
+
+- **Disable it** — set `"HookEnabled": false`, or remove the hook from
+  `settings.json`.
+- **Tune gating** — edit `HookKeywords`. Single words match whole words ("api"
+  won't fire on "rapid"); multi-word entries match as phrases.
+- **Troubleshoot** — run it by hand and inspect the output; failures go to stderr:
+
+  ```bash
+  echo '{"prompt":"Write Moq tests for OrderService","cwd":"'"$PWD"'"}' \
+    | agentrecall hook user-prompt-submit
+  ```
+
+  An empty result means the gate didn't match, the hook is disabled, or no rules
+  were relevant. Use `claude --debug` to see hook execution inside Claude Code.
+
+**Verify the flow.** With a Moq rule stored and promoted, the prompt
+*"Write Moq tests for OrderService"* drives:
+
+```
+User prompt
+  → Claude Code fires the UserPromptSubmit hook
+  → agentrecall hook user-prompt-submit  (gate matches "write", "moq", "test", "service")
+  → inject-context retrieves the Moq rule
+  → "## AgentRecall Technical Context …" is prepended to the model context
+  → Claude responds with the rule already in view
+```
 
 ---
 
@@ -295,9 +414,12 @@ One-time setup: create a Trusted Publishing policy for the `AgentRecall` package
 on NuGet.org (pointing at this repo and `release.yml`), and add a repository
 variable `NUGET_USER` with your NuGet.org username.
 
-To cut a release, bump `VersionPrefix` in `Directory.Build.props`, then tag:
+To cut a release: bump `VersionPrefix` in `Directory.Build.props`, add an entry
+to [`CHANGELOG.md`](CHANGELOG.md) and update `<PackageReleaseNotes>` in
+`src/AgentRecall.Cli/AgentRecall.Cli.csproj` (this is what NuGet shows for the
+version), then tag:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```

@@ -31,8 +31,11 @@ public sealed class InjectContextTool : IMcpTool
             ["scope_level"] = ScopeLevelProp(),
             ["scope_value"] = Prop("string", "Project/scope identifier (e.g. repo name)."),
             ["file_names"] = StringArrayProp("Files the task touches."),
+            ["file_path"] = Prop("string", "A single file the task touches (merged with file_names)."),
             ["changed_entities"] = StringArrayProp("Code entities being added or changed (types, methods, concepts)."),
             ["token_budget"] = Prop("integer", "Approximate token budget for the context (default 1500)."),
+            ["limit"] = Prop("integer", "Maximum number of rules to return (default 25)."),
+            ["include_pending"] = Prop("boolean", "Also include Pending rules, never as must-follow (default false)."),
         },
         ["required"] = new JsonArray { "task" },
     };
@@ -49,9 +52,11 @@ public sealed class InjectContextTool : IMcpTool
                 ? level
                 : null,
             ScopeValue = McpArgs.GetString(arguments, "scope_value"),
-            FileNames = ReadStringArray(arguments, "file_names"),
+            FileNames = MergeFiles(ReadStringArray(arguments, "file_names"), McpArgs.GetString(arguments, "file_path")),
             ChangedEntities = ReadStringArray(arguments, "changed_entities"),
             TokenBudget = McpArgs.GetInt(arguments, "token_budget") is { } b and > 0 ? b : 1500,
+            Limit = McpArgs.GetInt(arguments, "limit") is { } l and > 0 ? l : 25,
+            IncludePending = McpArgs.GetBool(arguments, "include_pending") ?? false,
         };
 
         var service = services.GetRequiredService<IContextInjectionService>();
@@ -62,11 +67,27 @@ public sealed class InjectContextTool : IMcpTool
             ["must_follow"] = ToArray(result.MustFollow),
             ["warnings"] = ToArray(result.Warnings),
             ["suggested"] = ToArray(result.Suggested),
+            ["preferred_patterns"] = ToStringArray(ContextProjection.PreferredPatterns(result)),
+            ["anti_patterns"] = ToStringArray(ContextProjection.AntiPatterns(result)),
+            ["source_rule_ids"] = new JsonArray([.. ContextProjection.SourceRuleIds(result).Select(id => (JsonNode)id)]),
             ["tokens_used"] = result.TokensUsed,
             ["token_budget"] = result.TokenBudget,
             ["explanation"] = result.Explanation,
         };
     }
+
+    private static IReadOnlyList<string> MergeFiles(IReadOnlyList<string> files, string? single)
+    {
+        if (string.IsNullOrWhiteSpace(single))
+        {
+            return files;
+        }
+
+        return files.Append(single).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static JsonArray ToStringArray(IReadOnlyList<string> values) =>
+        new([.. values.Select(v => (JsonNode)v)]);
 
     private static JsonArray ToArray(IReadOnlyList<InjectedRule> rules)
     {
