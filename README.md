@@ -152,7 +152,10 @@ That exposes these tools to the agent:
 
 | Tool | What it does |
 | --- | --- |
-| `get_relevant_context` | Given a task, return the rules to know before starting. |
+| `inject_context` | Given a task (and optionally its type, scope, files, changed entities), return the most useful rules — ranked by relevance and confidence, conflict-resolved, and bucketed into **must-follow**, **suggested**, and **warnings**, each with an explanation. |
+| `resolve_rules` | When several rules match a task, decide which to follow and which to ignore — resolving direct conflicts and superseded rules. |
+| `compress_memory` | Find duplicate, near-duplicate, and overlapping rules and merge each group into one canonical rule (dry run by default; originals are preserved for audit). |
+| `get_relevant_context` | Given a task, return the rules to know before starting (keyword-based). |
 | `get_project_rules` | The rules that always apply here (project → promoted → active). |
 | `get_reminders` | A short checklist of high-signal reminders for a kind of work. |
 | `search_rules` | Find rules relevant to a query. |
@@ -165,9 +168,33 @@ Each rule comes back as guidance shaped for an agent: `trigger`, `rule`, `do`,
 JSON-RPC 2.0 over stdio and writes only protocol messages to stdout (all logs go
 to stderr), so it behaves identically whether installed or run from source.
 
-A typical agent loop: call `get_relevant_context` (or `get_reminders`) before
-working, then run `suggest_feedback_candidate` on user corrections and
-`capture_feedback` to remember the good ones — no manual command needed.
+A typical agent loop: call `inject_context` before working (it ranks rules and
+flags must-follow guidance and warnings), then run `suggest_feedback_candidate`
+on user corrections and `capture_feedback` to remember the good ones — no manual
+command needed.
+
+### Make the agent use it automatically
+
+Registering the server only makes the tools *available* — the agent still has to
+choose to call them. To make recall part of every task, add a short instruction
+to your project's `CLAUDE.md` (or `AGENTS.md`). Drop this in:
+
+```markdown
+## Memory (AgentRecall)
+
+The `agentrecall` MCP server holds rules learned from past feedback. Use it:
+
+- **Before** coding, refactoring, reviewing, or debugging, call `inject_context`
+  with the task description (and `task_type`, `scope_value`, `file_names`,
+  `changed_entities` when known). Follow every **must-follow** rule and heed the
+  **warnings** before writing code.
+- **When the user corrects you**, call `suggest_feedback_candidate`; if it's a
+  reusable lesson, call `capture_feedback` so the same mistake isn't repeated.
+```
+
+Because `CLAUDE.md` is loaded into the agent's context each session, this turns
+"recall the relevant rules first" into default behaviour rather than something
+you have to ask for.
 
 ---
 
