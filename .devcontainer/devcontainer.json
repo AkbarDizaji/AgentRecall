@@ -1,0 +1,43 @@
+{
+  // Dev container for working on AgentRecall.
+  "name": "AgentRecall",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+
+  "features": {
+    // The repo targets .NET 10.
+    "ghcr.io/devcontainers/features/dotnet:2": { "version": "10.0" },
+    // gh is used by the PR-comment import workflow.
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+
+  // Persist the AgentRecall SQLite database across container rebuilds.
+  //
+  // AgentRecall stores its DB under ~/.agentrecall by default, which lives in the
+  // container's filesystem and would be wiped on "Rebuild Container". Backing that
+  // path with a named Docker volume keeps the data — it outlives rebuilds until the
+  // volume is explicitly removed (`docker volume rm agentrecall-data`).
+  "mounts": [
+    "source=agentrecall-data,target=/home/vscode/.agentrecall,type=volume"
+  ],
+
+  // Pin the data directory to the mounted path so the DB always lands on the volume,
+  // regardless of which user/process runs the CLI or MCP server.
+  "containerEnv": {
+    "AGENTRECALL_AgentRecall__DataDirectory": "/home/vscode/.agentrecall"
+  },
+
+  "remoteEnv": {
+    // So a globally-installed `agentrecall` tool is on PATH.
+    "PATH": "${containerEnv:PATH}:/home/vscode/.dotnet/tools"
+  },
+
+  // A named volume mounts root-owned; hand it to the container user so the DB is
+  // writable, then restore the solution.
+  "postCreateCommand": "sudo chown vscode:vscode /home/vscode/.agentrecall && dotnet restore",
+
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-dotnettools.csharp"]
+    }
+  }
+}
