@@ -38,6 +38,7 @@
     <RepositoryUrl>https://github.com/AkbarDizaji/AgentRecall</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageReleaseNotes>0.2.0 adds a policy engine for resolving conflicting rules, automatic memory compression, smart context injection (inject-context) with a deterministic UserPromptSubmit hook, PR review-comment ingestion, retrieval-quality evaluation, and structured rule extraction. Captured feedback is now Active by default. Full notes: https://github.com/AkbarDizaji/AgentRecall/blob/main/CHANGELOG.md</PackageReleaseNotes>
   </PropertyGroup>
 
   <ItemGroup>
