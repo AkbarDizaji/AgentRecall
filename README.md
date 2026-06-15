@@ -90,17 +90,22 @@ Results are ranked by relevance, rule status, and confidence.
 
 ### Curate rules
 
-Rules start as `Pending`. Promote the good ones, retire the rest:
+Captured rules are **Active** by default, so they apply immediately. Promote the
+best, retire the rest:
 
 ```bash
-agentrecall rules approve 1                  # Pending  → Active
 agentrecall rules promote 1                  # Active   → Promoted
+agentrecall rules approve 1                  # Pending  → Active (if captured as pending)
 agentrecall rules supersede 1 2              # replace rule 1 with rule 2
 agentrecall rules archive 3                  # hide a rule from search
 ```
 
 A rule's lifecycle is `Pending → Active → Promoted`, plus `Superseded` and
 `Archived`. Superseded and archived rules never show up in search.
+
+Prefer to review before a rule counts? Capture it as pending with
+`agentrecall feedback add … --pending`, or make pending the default for every
+capture by setting `AutoApproveFeedback` to `false` (see [Configuration](#configuration)).
 
 ### Learn from failures
 
@@ -113,6 +118,20 @@ agentrecall import build-log ./build.log
 agentrecall import test-log ./test.log
 agentrecall import lint-log ./lint.log
 ```
+
+### Learn from PR review comments
+
+Reviewer comments are feedback too. Point AgentRecall at a comments file — JSON
+from the GitHub CLI or plain text — and each comment that reads as a reusable
+correction becomes a **pending rule** (tagged `pr-review`); praise, questions and
+nits are skipped:
+
+```bash
+gh pr view 42 --json comments > comments.json
+agentrecall import pr-comments ./comments.json --task "PR #42: add refunds" --scope-value my-repo
+```
+
+Then review what it captured with `agentrecall rules list` and approve the keepers.
 
 ### Command reference
 
@@ -130,6 +149,7 @@ agentrecall import lint-log ./lint.log
 | `import build-log <file>` | Ingest build failures. |
 | `import test-log <file>` | Ingest test failures. |
 | `import lint-log <file>` | Ingest lint failures. |
+| `import pr-comments <file>` | Capture PR review comments as pending rules (`--task`, `--scope-level`, `--scope-value`, `--tags`). |
 | `mcp` | Run the MCP server over stdio (for Claude Code). |
 | `status` | Show where data is stored. |
 | `help` / `--help` / `-h` | Show usage. |
@@ -160,8 +180,9 @@ That exposes these tools to the agent:
 | `get_reminders` | A short checklist of high-signal reminders for a kind of work. |
 | `search_rules` | Find rules relevant to a query. |
 | `suggest_feedback_candidate` | Detect whether a message is a reusable correction. |
-| `capture_feedback` | Save a correction in one step (creates a Pending rule). |
+| `capture_feedback` | Save a correction in one step (creates an Active rule by default; `pending=true` to require approval). |
 | `add_feedback` | Record feedback with full task/scope context. |
+| `import_pr_comments` | Capture PR review comments as pending rules (skips praise/questions/nits). |
 
 Each rule comes back as guidance shaped for an agent: `trigger`, `rule`, `do`,
 `do_not`, `reason`, `applies_to`, `confidence`, and `status`. The server speaks
@@ -190,6 +211,8 @@ The `agentrecall` MCP server holds rules learned from past feedback. Use it:
   **warnings** before writing code.
 - **When the user corrects you**, call `suggest_feedback_candidate`; if it's a
   reusable lesson, call `capture_feedback` so the same mistake isn't repeated.
+- **After a PR review**, pass the reviewer's comments to `import_pr_comments` so
+  the actionable ones are remembered as rules.
 ```
 
 Because `CLAUDE.md` is loaded into the agent's context each session, this turns
@@ -207,10 +230,14 @@ applies environment-variable overrides prefixed with `AGENTRECALL_`.
 {
   "AgentRecall": {
     "DataDirectory": "~/.agentrecall",
-    "LogLevel": "Information"
+    "LogLevel": "Information",
+    "AutoApproveFeedback": true
   }
 }
 ```
+
+Set `AutoApproveFeedback` to `false` to make every captured rule start as
+`Pending` (requiring `rules approve`) instead of going straight to `Active`.
 
 ```bash
 # Override a setting for a single run

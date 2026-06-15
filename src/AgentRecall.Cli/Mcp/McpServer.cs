@@ -41,6 +41,7 @@ public sealed class McpServer
         new ResolveRulesTool(),
         new CompressMemoryTool(),
         new InjectContextTool(),
+        new ImportPrCommentsTool(),
     ];
 
     /// <summary>The tools this server exposes, keyed by name.</summary>

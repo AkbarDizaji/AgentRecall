@@ -29,4 +29,11 @@ public sealed record FeedbackInput
 
     /// <summary>Comma-separated tags, if provided.</summary>
     public string? Tags { get; init; }
+
+    /// <summary>
+    /// Overrides the configured default: <c>true</c> forces an Active rule,
+    /// <c>false</c> forces Pending. <c>null</c> uses
+    /// <see cref="Configuration.AgentRecallOptions.AutoApproveFeedback"/>.
+    /// </summary>
+    public bool? AutoApprove { get; init; }
 }

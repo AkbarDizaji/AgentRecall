@@ -14,7 +14,9 @@ public sealed record RuleGuidance
     public required string Trigger { get; init; }
     public required string Rule { get; init; }
     public required string Do { get; init; }
-    public required string DoNot { get; init; }
+
+    /// <summary>What to avoid. Omitted when the rule records no distinct mistake.</summary>
+    public string? DoNot { get; init; }
     public required string Reason { get; init; }
     public required string AppliesTo { get; init; }
     public required double Confidence { get; init; }
@@ -26,7 +28,7 @@ public sealed record RuleGuidance
         Trigger = rule.Trigger,
         Rule = rule.RuleText,
         Do = rule.RuleText,
-        DoNot = rule.Mistake,
+        DoNot = string.IsNullOrWhiteSpace(rule.Mistake) ? null : rule.Mistake,
         Reason = BuildReason(rule),
         AppliesTo = BuildAppliesTo(rule),
         Confidence = Math.Round(rule.Confidence, 2),

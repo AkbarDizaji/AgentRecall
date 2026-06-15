@@ -29,6 +29,13 @@ public sealed class AgentRecallOptions
     /// <summary>Minimum log level to emit. Defaults to "Information".</summary>
     public string LogLevel { get; set; } = "Information";
 
+    /// <summary>
+    /// When true (the default), capturing feedback produces an <c>Active</c> rule
+    /// straight away. Set it to false to keep captured rules <c>Pending</c> until
+    /// they are explicitly approved.
+    /// </summary>
+    public bool AutoApproveFeedback { get; set; } = true;
+
     /// <summary>The absolute path to the SQLite database file.</summary>
     public string DatabasePath => Path.Combine(DataDirectory, DatabaseFileName);
 }

@@ -150,7 +150,7 @@ public class ProactiveMemoryTests
     // --- capture_feedback -------------------------------------------------
 
     [Fact]
-    public async Task CaptureFeedback_CreatesEventAndPendingRuleInOneCall()
+    public async Task CaptureFeedback_CreatesEventAndActiveRuleInOneCall()
     {
         await using var db = new TestDatabase();
         await Init(db);
@@ -166,7 +166,7 @@ public class ProactiveMemoryTests
 
         Assert.True(result["event_id"]!.GetValue<int>() > 0);
         Assert.True(result["rule_id"]!.GetValue<int>() > 0);
-        Assert.Equal("Pending", result["status"]!.GetValue<string>());
+        Assert.Equal("Active", result["status"]!.GetValue<string>());
 
         await using (var scope = db.CreateScope())
         {
@@ -175,7 +175,7 @@ public class ProactiveMemoryTests
             Assert.Single(await events.ListAsync());
             var all = await rules.ListAsync();
             Assert.Single(all);
-            Assert.Equal(RuleStatus.Pending, all[0].Status);
+            Assert.Equal(RuleStatus.Active, all[0].Status);
         }
     }
 

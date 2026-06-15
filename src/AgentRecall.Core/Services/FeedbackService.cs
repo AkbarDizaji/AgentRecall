@@ -1,5 +1,6 @@
 using System.Text;
 using AgentRecall.Core.Abstractions;
+using AgentRecall.Core.Configuration;
 using AgentRecall.Core.Domain;
 using AgentRecall.Core.Feedback;
 
@@ -15,15 +16,18 @@ public sealed class FeedbackService : IFeedbackService
     private readonly IRecallEventRepository _events;
     private readonly IRecallRuleRepository _rules;
     private readonly IRecallExtractor _extractor;
+    private readonly AgentRecallOptions _options;
 
     public FeedbackService(
         IRecallEventRepository events,
         IRecallRuleRepository rules,
-        IRecallExtractor extractor)
+        IRecallExtractor extractor,
+        AgentRecallOptions options)
     {
         _events = events ?? throw new ArgumentNullException(nameof(events));
         _rules = rules ?? throw new ArgumentNullException(nameof(rules));
         _extractor = extractor ?? throw new ArgumentNullException(nameof(extractor));
+        _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
     public async Task<FeedbackResult> AddAsync(FeedbackInput input, CancellationToken cancellationToken = default)
@@ -32,7 +36,11 @@ public sealed class FeedbackService : IFeedbackService
 
         // Extract and persist the candidate rule first so the raw event can link to it.
         var rule = _extractor.Extract(input);
-        rule.Status = RuleStatus.Pending;
+
+        // Approve on capture by default; the per-call override wins over the
+        // configured default, so callers can force Pending (or Active).
+        var approve = input.AutoApprove ?? _options.AutoApproveFeedback;
+        rule.Status = approve ? RuleStatus.Active : RuleStatus.Pending;
         rule = await _rules.AddAsync(rule, cancellationToken).ConfigureAwait(false);
 
         var recallEvent = await _events.AddAsync(new RecallEvent

@@ -16,7 +16,7 @@ public sealed class TestDatabase : IAsyncDisposable
     public ServiceProvider Services { get; }
     public AgentRecallOptions Options { get; }
 
-    public TestDatabase()
+    public TestDatabase(Action<AgentRecallOptions>? configure = null)
     {
         _directory = Path.Combine(Path.GetTempPath(), "agentrecall-tests", Guid.NewGuid().ToString("N"));
 
@@ -25,6 +25,8 @@ public sealed class TestDatabase : IAsyncDisposable
             DataDirectory = _directory,
             DatabaseFileName = "test.db",
         };
+
+        configure?.Invoke(Options);
 
         var services = new ServiceCollection();
         services.AddSingleton(Options);

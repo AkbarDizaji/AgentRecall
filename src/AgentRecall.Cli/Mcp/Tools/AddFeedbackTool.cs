@@ -13,7 +13,8 @@ public sealed class AddFeedbackTool : IMcpTool
 
     public string Description =>
         "Record corrective feedback about an agent's work. Stores the raw feedback " +
-        "and extracts a pending technical rule for future recall.";
+        "and extracts a technical rule for future recall (active by default; pass " +
+        "pending=true to require approval first).";
 
     public JsonObject InputSchema => new()
     {
@@ -27,6 +28,7 @@ public sealed class AddFeedbackTool : IMcpTool
             ["scope_level"] = ScopeLevelProp(),
             ["scope_value"] = Prop("string", "Scope identifier (e.g. repo name, language, path)."),
             ["tags"] = Prop("string", "Comma-separated tags."),
+            ["pending"] = Prop("boolean", "Capture as a Pending rule that needs approval (default false)."),
         },
         ["required"] = new JsonArray { "task", "feedback" },
     };
@@ -48,6 +50,7 @@ public sealed class AddFeedbackTool : IMcpTool
             ScopeLevel = scopeLevel,
             ScopeValue = McpArgs.GetString(arguments, "scope_value"),
             Tags = McpArgs.GetString(arguments, "tags"),
+            AutoApprove = McpArgs.GetBool(arguments, "pending") is { } pending ? !pending : null,
         };
 
         var feedback = services.GetRequiredService<IFeedbackService>();

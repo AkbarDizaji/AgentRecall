@@ -44,7 +44,7 @@ public class FeedbackTests
     }
 
     [Fact]
-    public async Task AddFeedback_CreatesPendingRecallRule()
+    public async Task AddFeedback_CreatesActiveRuleByDefault()
     {
         await using var db = new TestDatabase();
         await Init(db);
@@ -55,7 +55,8 @@ public class FeedbackTests
             var service = scope.ServiceProvider.GetRequiredService<IFeedbackService>();
             var result = await service.AddAsync(SampleInput());
 
-            Assert.Equal(RuleStatus.Pending, result.Rule.Status);
+            // Capturing approves by default now.
+            Assert.Equal(RuleStatus.Active, result.Rule.Status);
             Assert.True(result.Rule.Id > 0);
             ruleId = result.Rule.Id;
         }
@@ -66,11 +67,59 @@ public class FeedbackTests
             var stored = await rules.GetAsync(ruleId);
 
             Assert.NotNull(stored);
-            Assert.Equal(RuleStatus.Pending, stored!.Status);
+            Assert.Equal(RuleStatus.Active, stored!.Status);
             Assert.Equal(ScopeLevel.Repository, stored.ScopeLevel);
             Assert.Contains("use parameterized queries", stored.RuleText);
             Assert.Equal("security,sql", stored.Tags);
         }
+    }
+
+    [Fact]
+    public async Task AddFeedback_AutoApproveFalse_KeepsRulePending()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        await using var scope = db.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IFeedbackService>();
+
+        var result = await service.AddAsync(SampleInput() with { AutoApprove = false });
+
+        Assert.Equal(RuleStatus.Pending, result.Rule.Status);
+    }
+
+    [Fact]
+    public async Task AddFeedback_GlobalAutoApproveOff_KeepsRulePending()
+    {
+        await using var db = new TestDatabase(o => o.AutoApproveFeedback = false);
+        await Init(db);
+
+        await using var scope = db.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IFeedbackService>();
+
+        var result = await service.AddAsync(SampleInput());
+
+        Assert.Equal(RuleStatus.Pending, result.Rule.Status);
+    }
+
+    [Fact]
+    public async Task AddFeedback_WithoutBadOutput_LeavesMistakeEmpty()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        await using var scope = db.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IFeedbackService>();
+
+        var result = await service.AddAsync(new FeedbackInput
+        {
+            Task = "writing SQL",
+            Feedback = "use parameterized queries",
+        });
+
+        // No bad output → no distinct mistake, so "do"/"do not" won't duplicate.
+        Assert.Equal(string.Empty, result.Rule.Mistake);
+        Assert.Equal("use parameterized queries", result.Rule.RuleText);
     }
 
     [Fact]
@@ -90,7 +139,7 @@ public class FeedbackTests
 
         Assert.Equal(0, listCode);
         var text = listOutput.ToString();
-        Assert.Contains("Pending", text);
+        Assert.Contains("Active", text);
         Assert.Contains("write a SQL query", text);
     }
 
@@ -112,7 +161,7 @@ public class FeedbackTests
         Assert.Equal(0, code);
         var text = showOutput.ToString();
         Assert.Contains("Rule #1", text);
-        Assert.Contains("Pending", text);
+        Assert.Contains("Active", text);
         Assert.Contains("use parameterized queries", text);
     }
 

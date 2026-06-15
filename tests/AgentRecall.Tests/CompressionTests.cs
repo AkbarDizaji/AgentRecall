@@ -260,18 +260,15 @@ public class CompressionTests
         await using (var scope = db.CreateScope())
         {
             var feedback = scope.ServiceProvider.GetRequiredService<IFeedbackService>();
-            var lifecycle = scope.ServiceProvider.GetRequiredService<IRuleLifecycleService>();
-
-            var a = await feedback.AddAsync(new Core.Feedback.FeedbackInput
+            // Feedback is captured as Active by default, so it's compressible directly.
+            await feedback.AddAsync(new Core.Feedback.FeedbackInput
             {
                 Task = "writing SQL", Feedback = "Use parameterized SQL.",
             });
-            var b = await feedback.AddAsync(new Core.Feedback.FeedbackInput
+            await feedback.AddAsync(new Core.Feedback.FeedbackInput
             {
                 Task = "writing SQL", Feedback = "Use parameterized SQL queries.",
             });
-            await lifecycle.ApproveAsync(a.Rule.Id);
-            await lifecycle.ApproveAsync(b.Rule.Id);
         }
 
         await using (var scope = db.CreateScope())

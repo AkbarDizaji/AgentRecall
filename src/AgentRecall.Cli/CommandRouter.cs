@@ -140,6 +140,8 @@ public static class CommandRouter
             ScopeLevel = scopeLevel,
             ScopeValue = options.GetValueOrDefault("scope-value"),
             Tags = options.GetValueOrDefault("tags"),
+            // --pending keeps the rule Pending; otherwise the configured default applies.
+            AutoApprove = options.ContainsKey("pending") ? false : null,
         };
 
         await using var scope = services.CreateAsyncScope();
@@ -286,6 +288,11 @@ public static class CommandRouter
     {
         var sub = args.Length > 0 ? args[0] : string.Empty;
 
+        if (sub == "pr-comments")
+        {
+            return await ImportPrCommentsAsync(args[1..], services, output, cancellationToken).ConfigureAwait(false);
+        }
+
         var kind = sub switch
         {
             "build-log" => (LogKind?)LogKind.Build,
@@ -300,6 +307,7 @@ public static class CommandRouter
             output.WriteLine("  agentrecall import build-log <file>");
             output.WriteLine("  agentrecall import test-log <file>");
             output.WriteLine("  agentrecall import lint-log <file>");
+            output.WriteLine("  agentrecall import pr-comments <file> [--task <pr title>] [--scope-level <level>] [--scope-value <text>] [--tags <a,b>]");
             return 1;
         }
 
@@ -316,6 +324,60 @@ public static class CommandRouter
             if (result.RulesReinforced > 0)
             {
                 output.WriteLine($"Reinforced {result.RulesReinforced} rule(s); {result.RulesPromoted} auto-promoted.");
+            }
+
+            return 0;
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or ArgumentException)
+        {
+            output.WriteLine($"Import failed: {ex.Message}");
+            return 1;
+        }
+    }
+
+    private static async Task<int> ImportPrCommentsAsync(
+        string[] args,
+        IServiceProvider services,
+        TextWriter output,
+        CancellationToken cancellationToken)
+    {
+        // The file is the first positional argument; flags follow.
+        var filePath = args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal) ? args[0] : null;
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            output.WriteLine("Usage: agentrecall import pr-comments <file> [--task <pr title>] [--scope-level <level>] [--scope-value <text>] [--tags <a,b>]");
+            return 1;
+        }
+
+        var options = ParseOptions(args);
+
+        var scopeLevel = ScopeLevel.Global;
+        if (options.TryGetValue("scope-level", out var rawScope) &&
+            !Enum.TryParse(rawScope, ignoreCase: true, out scopeLevel))
+        {
+            output.WriteLine($"Invalid --scope-level '{rawScope}'. Valid values: {string.Join(", ", Enum.GetNames<ScopeLevel>())}");
+            return 1;
+        }
+
+        var importOptions = new PullRequestImportOptions
+        {
+            PullRequestTitle = options.GetValueOrDefault("task"),
+            ScopeLevel = scopeLevel,
+            ScopeValue = options.GetValueOrDefault("scope-value"),
+            Tags = options.GetValueOrDefault("tags"),
+        };
+
+        await using var scope = services.CreateAsyncScope();
+        await EnsureInitializedAsync(scope, cancellationToken).ConfigureAwait(false);
+        var importer = scope.ServiceProvider.GetRequiredService<IPullRequestImportService>();
+
+        try
+        {
+            var result = await importer.ImportFileAsync(filePath, importOptions, cancellationToken).ConfigureAwait(false);
+            output.WriteLine($"Imported PR comments: {result.CommentsFound} comment(s), {result.RulesCreated} pending rule(s) created, {result.Skipped} skipped.");
+            if (result.RuleIds.Count > 0)
+            {
+                output.WriteLine($"Created rule(s): {string.Join(", ", result.RuleIds.Select(id => $"#{id}"))}. Review with: agentrecall rules list");
             }
 
             return 0;
@@ -481,6 +543,8 @@ public static class CommandRouter
         output.WriteLine("  import test-log <file>");
         output.WriteLine("  import lint-log <file>");
         output.WriteLine("                       Ingest a failure log into events");
+        output.WriteLine("  import pr-comments <file>");
+        output.WriteLine("                       Capture PR review comments as pending rules");
         output.WriteLine("  mcp                  Run the MCP server over stdio (for Claude Code)");
         output.WriteLine("  status               Show the memory subsystem status");
         output.WriteLine("  help                 Show this help text");
@@ -494,5 +558,6 @@ public static class CommandRouter
         output.WriteLine("  --scope-level <level>  Global|Language|Repository|Directory|File");
         output.WriteLine("  --scope-value <text>   scope identifier (repo, language, path)");
         output.WriteLine("  --tags <a,b,c>         comma-separated tags");
+        output.WriteLine("  --pending              keep the rule Pending instead of approving it");
     }
 }

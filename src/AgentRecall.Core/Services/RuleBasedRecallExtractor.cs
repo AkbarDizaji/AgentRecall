@@ -25,7 +25,9 @@ public sealed class RuleBasedRecallExtractor : IRecallExtractor
         // With no task, use the feedback itself as the (searchable) trigger.
         var trigger = hasTask ? cleanedTask : feedback;
 
-        var mistake = Clean(input.BadOutput) is { Length: > 0 } bad ? bad : feedback;
+        // The mistake is the undesirable output, if one was given — not the
+        // feedback itself (otherwise the rule's "do" and "do not" read the same).
+        var mistake = Clean(input.BadOutput);
 
         return new RecallRule
         {
@@ -33,7 +35,7 @@ public sealed class RuleBasedRecallExtractor : IRecallExtractor
             Status = RuleStatus.Pending,
             Trigger = trigger,
             Mistake = mistake,
-            RuleText = BuildRuleText(hasTask ? cleanedTask : null, feedback, input),
+            RuleText = BuildRuleText(feedback, input),
             TechnicalContext = Clean(input.ScopeValue),
             Tags = NormalizeTags(input.Tags),
             Confidence = DefaultConfidence,
@@ -42,13 +44,13 @@ public sealed class RuleBasedRecallExtractor : IRecallExtractor
         };
     }
 
-    private static string BuildRuleText(string? trigger, string feedback, FeedbackInput input)
+    private static string BuildRuleText(string feedback, FeedbackInput input)
     {
         var sb = new StringBuilder();
 
-        // Frame the rule with its trigger when we have one; otherwise the feedback
-        // stands on its own.
-        sb.Append(trigger is null ? feedback : $"When {trigger.TrimEnd('.')}: {feedback}");
+        // The rule text is the guidance itself; the task is kept as the (searchable)
+        // trigger rather than prepended here, so the rule stays concise.
+        sb.Append(feedback);
 
         if (Clean(input.FixedOutput) is { Length: > 0 } fixedOutput)
         {

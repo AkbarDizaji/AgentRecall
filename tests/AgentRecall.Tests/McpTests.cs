@@ -124,7 +124,7 @@ public class McpTests
     }
 
     [Fact]
-    public async Task AddFeedbackTool_CreatesEventAndPendingRule()
+    public async Task AddFeedbackTool_CreatesEventAndActiveRule()
     {
         await using var db = new TestDatabase();
         await Init(db);
@@ -146,7 +146,7 @@ public class McpTests
 
         Assert.True(result["event_id"]!.GetValue<int>() > 0);
         Assert.True(result["rule_id"]!.GetValue<int>() > 0);
-        Assert.Equal("Pending", result["status"]!.GetValue<string>());
+        Assert.Equal("Active", result["status"]!.GetValue<string>());
 
         // Verify the data actually persisted.
         await using (var scope = db.CreateScope())
@@ -157,7 +157,7 @@ public class McpTests
             Assert.Single(await events.ListAsync());
             var allRules = await rules.ListAsync();
             Assert.Single(allRules);
-            Assert.Equal(RuleStatus.Pending, allRules[0].Status);
+            Assert.Equal(RuleStatus.Active, allRules[0].Status);
         }
     }
 

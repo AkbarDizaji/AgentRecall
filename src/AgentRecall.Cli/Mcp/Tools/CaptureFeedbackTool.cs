@@ -16,19 +16,22 @@ public sealed class CaptureFeedbackTool : IMcpTool
     public string Name => "capture_feedback";
 
     public string Description =>
-        "Save a correction in one step: records a feedback event and generates a " +
-        "Pending rule from it. Only 'feedback' is required.";
+        "Save a correction in one step: records a feedback event and generates an " +
+        "active rule from it. Keep 'feedback' to a single concise directive; put " +
+        "longer rationale in 'task'. Only 'feedback' is required. Pass pending=true " +
+        "to require approval before the rule takes effect.";
 
     public JsonObject InputSchema => new()
     {
         ["type"] = "object",
         ["properties"] = new JsonObject
         {
-            ["feedback"] = Prop("string", "The corrective guidance to remember."),
+            ["feedback"] = Prop("string", "The corrective guidance to remember — one concise directive."),
             ["task"] = Prop("string", "Optional: what the agent was doing when this came up."),
             ["scope_level"] = ScopeLevelProp(),
             ["scope_value"] = Prop("string", "Optional scope identifier (e.g. repo name, language, path)."),
             ["tags"] = Prop("string", "Optional comma-separated tags."),
+            ["pending"] = Prop("boolean", "Optional: capture as a Pending rule that needs approval (default false)."),
         },
         ["required"] = new JsonArray { "feedback" },
     };
@@ -51,6 +54,7 @@ public sealed class CaptureFeedbackTool : IMcpTool
             ScopeLevel = scopeLevel,
             ScopeValue = McpArgs.GetString(arguments, "scope_value"),
             Tags = McpArgs.GetString(arguments, "tags"),
+            AutoApprove = McpArgs.GetBool(arguments, "pending") is { } pending ? !pending : null,
         };
 
         var feedback = services.GetRequiredService<IFeedbackService>();
