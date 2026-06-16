@@ -9,6 +9,38 @@ MCP. Everything stays on your machine: no cloud sync, no web UI, no API keys.
 
 ---
 
+## What it does
+
+AgentRecall is more than a notes file — it actively manages a body of technical
+knowledge so the right guidance reaches your agent at the right moment:
+
+- **Turns feedback into structured rules.** Each correction is parsed into a
+  readable `trigger`, `rule`, `do`, `do_not`, `reason`, and `applies_to`, then
+  validated for quality — not stored as a raw note.
+- **Ranks what to surface.** Retrieval scores rules by keyword + semantic +
+  domain + task-type + scope match, weighted by confidence, and returns them
+  bucketed into **must-follow**, **suggested**, and **warnings** within a token
+  budget — not a flat keyword dump.
+- **Resolves conflicts automatically.** When rules disagree ("use the repository
+  pattern" vs "do not"), the policy engine picks the effective one by scope,
+  explicit supersede, priority, recency, then confidence.
+- **Learns from failures.** Build, test, and lint logs feed back in; repeatedly
+  hitting the same problem raises a rule's confidence and can auto-promote the
+  rule that prevents it.
+- **Compresses its own memory.** Duplicate, near-duplicate, and overlapping
+  rules are detected and merged into one canonical rule, with the originals kept
+  as an audit trail.
+- **Measures retrieval quality.** A bundled evaluation reports Precision@1/@3
+  and Recall@5 and fails CI on a regression, so recall stays trustworthy as the
+  rule set grows.
+- **Injects deterministically.** A gated Claude Code hook prepends the relevant
+  rules to the model's context on every matching prompt — not just when the
+  model remembers to ask.
+
+Everything below is the detail behind each of these.
+
+---
+
 ## Install
 
 AgentRecall is a .NET global tool. You need the [.NET SDK](https://dotnet.microsoft.com/download)
