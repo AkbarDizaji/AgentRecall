@@ -31,9 +31,11 @@
     "PATH": "${containerEnv:PATH}:/home/vscode/.dotnet/tools"
   },
 
-  // A named volume mounts root-owned; hand it to the container user so the DB is
-  // writable, then restore the solution.
-  "postCreateCommand": "sudo chown vscode:vscode /home/vscode/.agentrecall && dotnet restore",
+  // On create — including "Rebuild Container" — fix the volume's ownership, then
+  // rebuild and reinstall the `agentrecall` tool and re-register its MCP server.
+  // Both the binary and the MCP registration live on the (rebuild-wiped) container
+  // filesystem, so they are reconstructed here while the DB persists on the volume.
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
 
   "customizations": {
     "vscode": {
