@@ -36,6 +36,21 @@ public sealed class KeywordRecallSearchService : IRecallSearchService
     // Relevance blend between keyword and semantic similarity (1.0 = keyword-only).
     private const double KeywordBlend = 0.6;
 
+    // Common function words dropped from queries so matches must land on content
+    // words. Without this, a query and an unrelated rule can "match" purely on a
+    // word like "in" or "the".
+    private static readonly HashSet<string> StopWords = new(StringComparer.Ordinal)
+    {
+        "the", "a", "an", "and", "or", "but", "if", "then", "else", "of", "to", "in",
+        "on", "at", "by", "for", "with", "from", "into", "onto", "as", "is", "are",
+        "was", "were", "be", "been", "being", "it", "its", "this", "that", "these",
+        "those", "i", "you", "we", "they", "he", "she", "me", "my", "your", "our",
+        "their", "do", "does", "did", "done", "can", "could", "should", "would",
+        "will", "shall", "may", "might", "must", "what", "which", "who", "whom",
+        "how", "when", "where", "why", "not", "no", "yes", "so", "than", "too",
+        "very", "just", "about", "up", "out",
+    };
+
     private readonly IRecallRuleRepository _rules;
     private readonly IEmbeddingProvider _embeddings;
 
@@ -125,13 +140,22 @@ public sealed class KeywordRecallSearchService : IRecallSearchService
         var matchedTerms = 0;
         double weighted = 0;
 
+        // Token counts per weighted field. Matching whole tokens (rather than
+        // substrings) prevents short terms like "in" from matching inside
+        // unrelated words such as "domain" or "instead".
+        var fieldTokens = Fields
+            .Select(f => (Counts: TokenCounts(f.Select(rule)), f.Weight))
+            .ToArray();
+
         foreach (var term in terms)
         {
             double termScore = 0;
-            foreach (var (select, weight) in Fields)
+            foreach (var (counts, weight) in fieldTokens)
             {
-                var occurrences = CountOccurrences(select(rule).ToLowerInvariant(), term);
-                termScore += occurrences * weight;
+                if (counts.TryGetValue(term, out var occurrences))
+                {
+                    termScore += occurrences * weight;
+                }
             }
 
             if (termScore > 0)
@@ -183,42 +207,77 @@ public sealed class KeywordRecallSearchService : IRecallSearchService
     private static string BuildSearchableText(RecallRule rule) =>
         string.Join(' ', Fields.Select(f => f.Select(rule)));
 
+    /// <summary>
+    /// Distinct content query tokens (length >= 2, stop words removed), in
+    /// first-seen order. If the query is made up entirely of stop words, falls
+    /// back to the unfiltered tokens so the query still does something.
+    /// </summary>
     private static List<string> Tokenize(string text)
     {
-        if (string.IsNullOrWhiteSpace(text))
+        var all = new List<string>();
+        var content = new List<string>();
+        foreach (var token in EnumerateTokens(text))
         {
-            return [];
-        }
-
-        var tokens = new List<string>();
-        foreach (var raw in text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
-        {
-            var token = new string(raw.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
-            if (token.Length >= 2 && !tokens.Contains(token))
+            if (!all.Contains(token))
             {
-                tokens.Add(token);
+                all.Add(token);
+                if (!StopWords.Contains(token))
+                {
+                    content.Add(token);
+                }
             }
         }
 
-        return tokens;
+        return content.Count > 0 ? content : all;
     }
 
-    private static int CountOccurrences(string haystack, string needle)
+    /// <summary>Occurrence count per token within a single field's text.</summary>
+    private static Dictionary<string, int> TokenCounts(string text)
     {
-        if (haystack.Length == 0 || needle.Length == 0)
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var token in EnumerateTokens(text))
         {
-            return 0;
+            counts[token] = counts.GetValueOrDefault(token) + 1;
         }
 
-        var count = 0;
-        var index = 0;
-        while ((index = haystack.IndexOf(needle, index, StringComparison.Ordinal)) >= 0)
+        return counts;
+    }
+
+    /// <summary>
+    /// Splits text on any non-alphanumeric boundary and lowercases each token,
+    /// so "console.writeline" yields "console" and "writeline". Single-character
+    /// tokens are dropped. Used for both queries and rule fields so they match
+    /// on whole words.
+    /// </summary>
+    private static IEnumerable<string> EnumerateTokens(string? text)
+    {
+        if (string.IsNullOrEmpty(text))
         {
-            count++;
-            index += needle.Length;
+            yield break;
         }
 
-        return count;
+        var builder = new System.Text.StringBuilder();
+        foreach (var ch in text)
+        {
+            if (char.IsLetterOrDigit(ch))
+            {
+                builder.Append(char.ToLowerInvariant(ch));
+            }
+            else if (builder.Length > 0)
+            {
+                if (builder.Length >= 2)
+                {
+                    yield return builder.ToString();
+                }
+
+                builder.Clear();
+            }
+        }
+
+        if (builder.Length >= 2)
+        {
+            yield return builder.ToString();
+        }
     }
 
     private static double CosineSimilarity(float[] a, float[] b)

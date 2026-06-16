@@ -65,6 +65,7 @@ public sealed class CaptureFeedbackTool : IMcpTool
             ["event_id"] = result.Event.Id,
             ["rule_id"] = result.Rule.Id,
             ["status"] = result.Rule.Status.ToString(),
+            ["reused_existing_rule"] = result.ReusedExistingRule,
             ["rule"] = McpToolHelpers.ToGuidanceNode(result.Rule),
         };
     }

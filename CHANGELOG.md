@@ -4,6 +4,19 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-06-16
+
+### Fixed
+- **Search no longer returns unrelated rules.** Relevance matched query terms
+  as substrings, so a term like `in` matched inside words such as `domain` or
+  `instead`, and `console.writeline` was indexed as a single token. Matching is
+  now whole-word, the tokenizer splits on punctuation, and common stop words are
+  dropped from queries so matches must land on content words.
+- **Capturing feedback no longer creates duplicate rules.** Identical guidance
+  for the same scope is now recorded against the existing rule instead of
+  inserting a copy. This applies to every caller (CLI and MCP); the MCP feedback
+  tools and the CLI report whether an existing rule was reused.
+
 ## [0.2.1] - 2026-06-16
 
 ### Fixed

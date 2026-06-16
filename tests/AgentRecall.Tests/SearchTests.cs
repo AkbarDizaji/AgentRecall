@@ -131,4 +131,45 @@ public class SearchTests
         Assert.Single(results);
         Assert.Equal("AgentRecall", results[0].Rule.ScopeValue);
     }
+
+    [Fact]
+    public async Task Search_MatchesWholeWords_NotSubstrings()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        // The console rule should match; the invoice/domain rule must not, even
+        // though its text contains "in" inside "domain"/"instead"/"Invoice".
+        var consoleId = await Seed(db, Rule(
+            "writing console output",
+            "Always add ** in console.writeline.",
+            RuleStatus.Active, tags: "log"));
+        await Seed(db, Rule(
+            "refactoring the invoice model",
+            "Refactor the Invoice domain model to use a Money value object instead of separate decimals.",
+            RuleStatus.Active, tags: "design"));
+
+        var results = await Search(db, "what should add automaticly in console");
+
+        Assert.Single(results);
+        Assert.Equal(consoleId, results[0].Rule.Id);
+    }
+
+    [Fact]
+    public async Task Search_SplitsOnPunctuation_SoDottedWordsAreFound()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        var id = await Seed(db, Rule(
+            "writing console output",
+            "Always add ** in console.writeline.",
+            RuleStatus.Active));
+
+        // "writeline" only appears glued to "console" by a dot in the rule text.
+        var results = await Search(db, "writeline");
+
+        Assert.Single(results);
+        Assert.Equal(id, results[0].Rule.Id);
+    }
 }

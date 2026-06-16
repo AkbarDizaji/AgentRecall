@@ -179,6 +179,58 @@ public class FeedbackTests
         Assert.Contains("not found", output.ToString());
     }
 
+    [Fact]
+    public async Task AddFeedback_DeduplicatesEquivalentRule()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        var first = new FeedbackInput { Task = "logging", Feedback = "always add ** in console.writeline", Tags = "log" };
+        // Different task and trailing punctuation, same guidance and scope.
+        var again = new FeedbackInput { Task = "another logging task", Feedback = "Always add ** in console.writeline.", Tags = "log" };
+
+        int firstRuleId;
+        await using (var scope = db.CreateScope())
+        {
+            var service = scope.ServiceProvider.GetRequiredService<IFeedbackService>();
+
+            var r1 = await service.AddAsync(first);
+            Assert.False(r1.ReusedExistingRule);
+            firstRuleId = r1.Rule.Id;
+
+            var r2 = await service.AddAsync(again);
+            Assert.True(r2.ReusedExistingRule);
+            Assert.Equal(firstRuleId, r2.Rule.Id);
+            // The repeated feedback is still recorded as its own event.
+            Assert.NotEqual(r1.Event.Id, r2.Event.Id);
+        }
+
+        await using (var scope = db.CreateScope())
+        {
+            var rules = scope.ServiceProvider.GetRequiredService<IRecallRuleRepository>();
+            var events = scope.ServiceProvider.GetRequiredService<IRecallEventRepository>();
+
+            Assert.Single(await rules.ListAsync());
+            Assert.Equal(2, (await events.ListAsync()).Count);
+        }
+    }
+
+    [Fact]
+    public async Task AddFeedback_DistinctGuidance_CreatesSeparateRules()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        await using var scope = db.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IFeedbackService>();
+
+        var a = await service.AddAsync(new FeedbackInput { Task = "logging", Feedback = "always add ** in console.writeline" });
+        var b = await service.AddAsync(new FeedbackInput { Task = "logging", Feedback = "prefer structured logging over console output" });
+
+        Assert.False(b.ReusedExistingRule);
+        Assert.NotEqual(a.Rule.Id, b.Rule.Id);
+    }
+
     private static async Task Init(TestDatabase db)
     {
         await using var scope = db.CreateScope();

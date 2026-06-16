@@ -165,7 +165,8 @@ public static class CommandRouter
         {
             var result = await feedbackService.AddAsync(input, cancellationToken).ConfigureAwait(false);
             output.WriteLine($"Recorded feedback as event #{result.Event.Id}.");
-            output.WriteLine($"Created {result.Rule.Status} rule #{result.Rule.Id}: {result.Rule.RuleText}");
+            var verb = result.ReusedExistingRule ? "Reused existing" : "Created";
+            output.WriteLine($"{verb} {result.Rule.Status} rule #{result.Rule.Id}: {result.Rule.RuleText}");
             return 0;
         }
         catch (Exception ex)
