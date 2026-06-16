@@ -7,7 +7,9 @@ namespace AgentRecall.Infrastructure.Persistence;
 
 /// <summary>
 /// Creates the data directory and SQLite schema using EF Core's
-/// <c>EnsureCreated</c>. Migrations are not used yet.
+/// <c>EnsureCreated</c>, then runs <see cref="SchemaReconciler"/> to bring any
+/// pre-existing database created by an earlier version up to the current model.
+/// Migrations are not used yet.
 /// </summary>
 public sealed class DatabaseInitializer : IDatabaseInitializer
 {
@@ -39,6 +41,11 @@ public sealed class DatabaseInitializer : IDatabaseInitializer
         {
             _logger.LogDebug("AgentRecall database already present at {Path}", _options.DatabasePath);
         }
+
+        // EnsureCreated never touches an existing database, so a file created by
+        // an earlier version can be missing columns or indexes the current model
+        // expects. Reconcile additively to close that gap for every user.
+        await SchemaReconciler.ReconcileAsync(_db, _logger, cancellationToken).ConfigureAwait(false);
 
         return _options.DatabasePath;
     }

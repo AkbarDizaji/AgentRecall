@@ -4,6 +4,16 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-06-16
+
+### Fixed
+- Databases created by an earlier version are now reconciled to the current
+  schema on startup. `EnsureCreated` only builds the schema for a brand-new
+  file and never updates an existing one, so upgrading could fail with errors
+  like `table Rules has no column named LastUsedAt`. A new schema reconciler
+  reads the expected tables, columns, and indexes from the EF model and
+  additively adds whatever is missing, preserving existing data.
+
 ## [0.2.0] - 2026-06-15
 
 ### Added
