@@ -39,11 +39,30 @@ public static class DevcontainerScaffolder
         # named `agentrecall-data` Docker volume.
         set -euo pipefail
 
-        # The named DB volume mounts root-owned on first create; hand it to the current
-        # user so the CLI and MCP server can write to it.
-        if [ -d "$HOME/.agentrecall" ]; then
-          sudo chown -R "$(id -u):$(id -g)" "$HOME/.agentrecall" || true
-        fi
+        # Where AgentRecall stores its database. Matches the devcontainer.json mount and
+        # env; falls back to the per-user default when that env var isn't set.
+        DATA_DIR="${AGENTRECALL_AgentRecall__DataDirectory:-$HOME/.agentrecall}"
+
+        # A named Docker volume mounts root-owned on first create, so a non-root container
+        # user can't write to it. Make it writable using whatever the image actually
+        # offers (we may already be root, or have sudo, or neither) — best effort, never
+        # fatal, and never assuming `sudo` exists.
+        ensure_writable() {
+          mkdir -p "$DATA_DIR" 2>/dev/null || true
+          [ -w "$DATA_DIR" ] && return 0
+          if [ "$(id -u)" = "0" ]; then
+            chown -R "$(id -u):$(id -g)" "$DATA_DIR" 2>/dev/null || true
+          elif command -v sudo >/dev/null 2>&1; then
+            sudo chown -R "$(id -u):$(id -g)" "$DATA_DIR" 2>/dev/null || true
+          fi
+          if [ ! -w "$DATA_DIR" ]; then
+            echo "AgentRecall: $DATA_DIR is not writable by $(id -un), and this image" \
+                 "offers no way to fix it (not root, no sudo)." >&2
+            echo "AgentRecall: add sudo to the image, set \"remoteUser\": \"root\", or" \
+                 "chown the volume in your Dockerfile, then rebuild." >&2
+          fi
+        }
+        ensure_writable
 
         # Install or upgrade AgentRecall from NuGet. `tool update` installs when absent
         # and upgrades when present, so it is safe to re-run on every rebuild.
@@ -52,15 +71,16 @@ public static class DevcontainerScaffolder
         # Put the global tools directory on PATH for the rest of this script.
         export PATH="$PATH:$HOME/.dotnet/tools"
 
-        # Create the database (no-op when it already exists on the volume).
-        agentrecall init || true
+        # Create the database (no-op when it already exists on the volume). Warn rather
+        # than abort, so a not-yet-writable volume doesn't fail the whole postCreate chain.
+        agentrecall init || echo "AgentRecall: 'agentrecall init' failed; see the warning above." >&2
 
         # Re-register the MCP server with Claude Code, if the CLI is installed.
         if command -v claude >/dev/null 2>&1; then
           claude mcp add agentrecall agentrecall mcp 2>/dev/null || true
         fi
 
-        echo "AgentRecall ready: $(agentrecall --version)"
+        echo "AgentRecall ready: $(agentrecall --version 2>/dev/null || echo 'install failed')"
 
         """;
 

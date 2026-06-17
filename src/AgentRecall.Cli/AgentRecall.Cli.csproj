@@ -38,7 +38,7 @@
     <RepositoryUrl>https://github.com/AkbarDizaji/AgentRecall</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>0.2.3 adds `agentrecall devcontainer init`, which scaffolds dev container wiring so the tool reinstalls automatically on every "Rebuild Container" (reinstall from NuGet, persisted database volume, MCP re-registration). Full notes: https://github.com/AkbarDizaji/AgentRecall/blob/main/CHANGELOG.md</PackageReleaseNotes>
+    <PackageReleaseNotes>0.2.4 fixes the `agentrecall devcontainer init` setup script so it no longer requires `sudo`: it fixes the persisted volume's ownership using whatever the image offers and warns instead of aborting when it can't, so minimal images without sudo no longer fail postCreate. Full notes: https://github.com/AkbarDizaji/AgentRecall/blob/main/CHANGELOG.md</PackageReleaseNotes>
   </PropertyGroup>
 
   <ItemGroup>

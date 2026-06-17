@@ -33,6 +33,12 @@ public class DevcontainerScaffolderTests
             Assert.Contains("dotnet tool update --global AgentRecall", script);
             Assert.Contains("claude mcp add agentrecall agentrecall mcp", script);
 
+            // The ownership fix must not assume sudo exists (minimal images lack it):
+            // every sudo use is gated behind a `command -v sudo` check.
+            Assert.Contains("command -v sudo", script);
+            Assert.DoesNotContain("\n  sudo ", script);
+            Assert.DoesNotContain("\nsudo ", script);
+
             var json = File.ReadAllText(jsonPath);
             Assert.Contains("bash .devcontainer/agentrecall-post-create.sh", json);
             Assert.Contains("source=agentrecall-data", json);
