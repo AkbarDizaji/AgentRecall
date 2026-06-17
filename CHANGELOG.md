@@ -4,6 +4,22 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.5] - 2026-06-17
+
+### Fixed
+- **A globally-installed `agentrecall` is no longer "not found" in dev container
+  terminals.** The tool lives in `~/.dotnet/tools`, and VS Code often opens
+  terminals as non-login shells that don't read `~/.profile`, so the install
+  succeeded but the command wasn't on PATH. The setup script now detects a missing
+  `~/.dotnet/tools`, appends it to `~/.bashrc`, and prints the exact `remoteEnv`
+  snippet to set it permanently.
+
+### Changed
+- **Dev container setup scripts are easier to debug.** Both the generated
+  `agentrecall-post-create.sh` and this repo's own `post-create.sh` now log each
+  step (`restore`, `pack`, `tool update`, …) and install a failure trap that names
+  the command that aborted and states plainly that AgentRecall was not installed.
+
 ## [0.2.4] - 2026-06-17
 
 ### Fixed

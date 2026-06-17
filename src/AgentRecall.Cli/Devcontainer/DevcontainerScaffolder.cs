@@ -39,14 +39,24 @@ public static class DevcontainerScaffolder
         # named `agentrecall-data` Docker volume.
         set -euo pipefail
 
+        TOOLS_DIR="$HOME/.dotnet/tools"
+
         # Where AgentRecall stores its database. Matches the devcontainer.json mount and
         # env; falls back to the per-user default when that env var isn't set.
         DATA_DIR="${AGENTRECALL_AgentRecall__DataDirectory:-$HOME/.agentrecall}"
+
+        # Name each step and, on failure, say which command aborted the script and that
+        # AgentRecall was not installed — so a rebuild failure is easy to diagnose
+        # instead of surfacing later as a confusing "command not found".
+        STEP="startup"
+        log()  { echo "==> $1"; STEP="$1"; }
+        trap 'code=$?; echo "" >&2; echo "AgentRecall: setup FAILED during: $STEP (exit $code)." >&2; echo "AgentRecall: the tool was NOT installed; fix the error above and rebuild, or" >&2; echo "             run \"bash .devcontainer/agentrecall-post-create.sh\" to retry." >&2' ERR
 
         # A named Docker volume mounts root-owned on first create, so a non-root container
         # user can't write to it. Make it writable using whatever the image actually
         # offers (we may already be root, or have sudo, or neither) — best effort, never
         # fatal, and never assuming `sudo` exists.
+        log "ensure data directory is writable"
         ensure_writable() {
           mkdir -p "$DATA_DIR" 2>/dev/null || true
           [ -w "$DATA_DIR" ] && return 0
@@ -66,18 +76,41 @@ public static class DevcontainerScaffolder
 
         # Install or upgrade AgentRecall from NuGet. `tool update` installs when absent
         # and upgrades when present, so it is safe to re-run on every rebuild.
+        log "install/upgrade AgentRecall from NuGet"
         dotnet tool update --global AgentRecall
 
-        # Put the global tools directory on PATH for the rest of this script.
-        export PATH="$PATH:$HOME/.dotnet/tools"
+        # Make ~/.dotnet/tools discoverable in interactive terminals. VS Code often starts
+        # bash as a NON-login shell, so ~/.profile isn't sourced and a freshly installed
+        # global tool reads as "not found" even though the install succeeded. Persist the
+        # PATH entry to ~/.bashrc (idempotent) and print the exact remoteEnv snippet.
+        log "ensure $TOOLS_DIR is on PATH"
+        case ":$PATH:" in
+          *":$TOOLS_DIR:"*)
+            : # already on PATH for this shell
+            ;;
+          *)
+            echo "AgentRecall: $TOOLS_DIR is not on PATH; the tool may be 'not found' in new terminals." >&2
+            if ! { [ -f "$HOME/.bashrc" ] && grep -qF "$TOOLS_DIR" "$HOME/.bashrc"; }; then
+              printf '\n# Added by AgentRecall: put .NET global tools on PATH for non-login shells\nexport PATH="$PATH:%s"\n' "$TOOLS_DIR" >> "$HOME/.bashrc" 2>/dev/null \
+                && echo "AgentRecall: appended a PATH export to ~/.bashrc for new terminals." >&2
+            fi
+            echo "AgentRecall: to set it permanently for VS Code, add to .devcontainer/devcontainer.json:" >&2
+            echo "             \"remoteEnv\": { \"PATH\": \"\${containerEnv:PATH}:$TOOLS_DIR\" }" >&2
+            ;;
+        esac
+        export PATH="$PATH:$TOOLS_DIR"
 
         # Create the database (no-op when it already exists on the volume). Warn rather
         # than abort, so a not-yet-writable volume doesn't fail the whole postCreate chain.
+        log "initialize the database"
         agentrecall init || echo "AgentRecall: 'agentrecall init' failed; see the warning above." >&2
 
         # Re-register the MCP server with Claude Code, if the CLI is installed.
+        log "register the MCP server with Claude Code"
         if command -v claude >/dev/null 2>&1; then
           claude mcp add agentrecall agentrecall mcp 2>/dev/null || true
+        else
+          echo "    (claude CLI not found; skipping MCP registration)"
         fi
 
         echo "AgentRecall ready: $(agentrecall --version 2>/dev/null || echo 'install failed')"

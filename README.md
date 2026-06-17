@@ -80,9 +80,18 @@ agentrecall devcontainer init
 
 It writes `.devcontainer/agentrecall-post-create.sh`, which reinstalls AgentRecall
 from NuGet, persists the database on a named Docker volume, and re-registers the
-MCP server on every create/rebuild. If your project has no `devcontainer.json`,
+MCP server on every create/rebuild. The script logs each step and, on failure,
+names the command that aborted it. If your project has no `devcontainer.json`,
 one is generated and wired to run the script; if you already have one, it's left
-untouched and the exact keys to merge in are printed.
+untouched and the exact keys to merge in are printed — the JSONC is never
+rewritten.
+
+> **PATH note.** A global tool lives in `~/.dotnet/tools`, and VS Code often opens
+> integrated terminals as non-login shells that don't read `~/.profile`, so
+> `agentrecall` can be installed yet "not found". The generated manifest adds the
+> directory via `remoteEnv`, and the setup script also appends it to `~/.bashrc`;
+> for an existing `devcontainer.json`, add
+> `"remoteEnv": { "PATH": "${containerEnv:PATH}:/home/vscode/.dotnet/tools" }`.
 
 ---
 

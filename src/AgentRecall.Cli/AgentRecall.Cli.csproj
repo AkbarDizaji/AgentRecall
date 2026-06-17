@@ -38,7 +38,7 @@
     <RepositoryUrl>https://github.com/AkbarDizaji/AgentRecall</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>0.2.4 fixes the `agentrecall devcontainer init` setup script so it no longer requires `sudo`: it fixes the persisted volume's ownership using whatever the image offers and warns instead of aborting when it can't, so minimal images without sudo no longer fail postCreate. Full notes: https://github.com/AkbarDizaji/AgentRecall/blob/main/CHANGELOG.md</PackageReleaseNotes>
+    <PackageReleaseNotes>0.2.5 makes dev container setup more reliable: it ensures ~/.dotnet/tools is on PATH (so a globally-installed agentrecall isn't "not found" in non-login VS Code terminals) by updating ~/.bashrc and printing the remoteEnv snippet, and the setup scripts now log each step and name the command that failed. Full notes: https://github.com/AkbarDizaji/AgentRecall/blob/main/CHANGELOG.md</PackageReleaseNotes>
   </PropertyGroup>
 
   <ItemGroup>

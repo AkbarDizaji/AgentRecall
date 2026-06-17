@@ -39,6 +39,16 @@ public class DevcontainerScaffolderTests
             Assert.DoesNotContain("\n  sudo ", script);
             Assert.DoesNotContain("\nsudo ", script);
 
+            // Makes the tool discoverable in non-login interactive shells, and tells the
+            // user the exact remoteEnv snippet to set it permanently.
+            Assert.Contains(".bashrc", script);
+            Assert.Contains("remoteEnv", script);
+            Assert.Contains(".dotnet/tools", script);
+
+            // Step logging + failure trap so a broken rebuild names the failing command.
+            Assert.Contains("trap", script);
+            Assert.Contains("was NOT installed", script);
+
             var json = File.ReadAllText(jsonPath);
             Assert.Contains("bash .devcontainer/agentrecall-post-create.sh", json);
             Assert.Contains("source=agentrecall-data", json);
