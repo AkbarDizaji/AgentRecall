@@ -86,6 +86,14 @@ one is generated and wired to run the script; if you already have one, it's left
 untouched and the exact keys to merge in are printed — the JSONC is never
 rewritten.
 
+It also wires the **`UserPromptSubmit` hook** into `.claude/settings.json` (see
+[Guarantee it with a hook](#guarantee-it-with-a-hook-deterministic-injection)),
+so relevant rules are injected automatically on every prompt rather than only
+when the agent decides to call an MCP tool, and appends the **`CLAUDE.md`
+guidance block** so the agent recalls rules and captures accepted PR comments as
+Active rules by default. Existing settings, `CLAUDE.md` content, and JSONC are
+merged or left untouched — never overwritten — and a re-run is a no-op.
+
 > **PATH note.** A global tool lives in `~/.dotnet/tools`, and VS Code often opens
 > integrated terminals as non-login shells that don't read `~/.profile`, so
 > `agentrecall` can be installed yet "not found". The generated manifest adds the
@@ -191,6 +199,13 @@ agentrecall import pr-comments ./comments.json --task "PR #42: add refunds" --sc
 
 Then review what it captured with `agentrecall rules list` and approve the keepers.
 
+If the comments have already been **accepted** — you acted on them, so they're not
+guesses to vet — add `--accepted` and they're recorded as **Active** rules
+straight away (the MCP tool takes the same `accepted: true`). The scaffolded
+`CLAUDE.md` guidance tells the agent to do this on its own: when you ask it to
+apply what a review comment says, it captures that comment as an Active rule
+without being asked.
+
 ### Evaluate retrieval quality
 
 Retrieval is only useful if the right rule comes back for a task. `eval retrieval`
@@ -223,7 +238,7 @@ on a retrieval regression. The same check also runs as a unit test.
 | `import build-log <file>` | Ingest build failures. |
 | `import test-log <file>` | Ingest test failures. |
 | `import lint-log <file>` | Ingest lint failures. |
-| `import pr-comments <file>` | Capture PR review comments as pending rules (`--task`, `--scope-level`, `--scope-value`, `--tags`). |
+| `import pr-comments <file>` | Capture PR review comments as rules (`--task`, `--scope-level`, `--scope-value`, `--tags`; `--accepted` records them Active instead of pending). |
 | `inject-context "<task>"` | Build agent-ready context (must-follow, warnings, preferred/anti-patterns) for a task. |
 | `eval retrieval` | Evaluate retrieval quality against the bundled dataset (`--dataset <path>`); non-zero exit below baseline. |
 | `mcp` | Run the MCP server over stdio (for Claude Code). |

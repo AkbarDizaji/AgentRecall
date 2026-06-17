@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using AgentRecall.Cli.Devcontainer;
 using Xunit;
 
@@ -98,6 +99,134 @@ public class DevcontainerScaffolderTests
             var second = DevcontainerScaffolder.Init(root);
 
             Assert.True(second.ScriptOverwritten);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Init_WithNoClaudeSettings_CreatesHook()
+    {
+        var root = NewTempProject();
+        try
+        {
+            var result = DevcontainerScaffolder.Init(root);
+
+            Assert.Equal(HookSetupOutcome.Created, result.HookOutcome);
+
+            var settingsPath = Path.Combine(root, DevcontainerScaffolder.ClaudeSettingsRelativePath);
+            var node = JsonNode.Parse(File.ReadAllText(settingsPath))!;
+            var command = node["hooks"]!["UserPromptSubmit"]![0]!["hooks"]![0]!["command"]!.GetValue<string>();
+            Assert.Equal(DevcontainerScaffolder.HookCommand, command);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void EnsureHook_PreservesExistingSettingsAndIsIdempotent()
+    {
+        var root = NewTempProject();
+        try
+        {
+            var settingsPath = Path.Combine(root, DevcontainerScaffolder.ClaudeSettingsRelativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
+            File.WriteAllText(settingsPath, "{ \"model\": \"opus\", \"hooks\": { \"Stop\": [] } }");
+
+            var first = DevcontainerScaffolder.EnsureUserPromptSubmitHook(root);
+            Assert.Equal(HookSetupOutcome.Merged, first);
+
+            var node = JsonNode.Parse(File.ReadAllText(settingsPath))!;
+            // Unrelated settings survive the merge.
+            Assert.Equal("opus", node["model"]!.GetValue<string>());
+            Assert.NotNull(node["hooks"]!["Stop"]);
+            Assert.NotNull(node["hooks"]!["UserPromptSubmit"]);
+
+            // A second run is a no-op.
+            var second = DevcontainerScaffolder.EnsureUserPromptSubmitHook(root);
+            Assert.Equal(HookSetupOutcome.AlreadyPresent, second);
+
+            // Still exactly one matcher — no duplicate appended.
+            var matchers = node["hooks"]!["UserPromptSubmit"]!.AsArray();
+            Assert.Single(matchers);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Init_WithNoClaudeMd_CreatesGuidance()
+    {
+        var root = NewTempProject();
+        try
+        {
+            var result = DevcontainerScaffolder.Init(root);
+
+            Assert.Equal(GuidanceOutcome.Created, result.GuidanceOutcome);
+
+            var claudeMd = File.ReadAllText(Path.Combine(root, DevcontainerScaffolder.ClaudeMdRelativePath));
+            Assert.Contains(DevcontainerScaffolder.ClaudeMdHeading, claudeMd);
+            // Encodes the accept-on-action capture policy.
+            Assert.Contains("accepted", claudeMd);
+            Assert.Contains("import_pr_comments", claudeMd);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void EnsureGuidance_AppendsToExistingFileAndIsIdempotent()
+    {
+        var root = NewTempProject();
+        try
+        {
+            var path = Path.Combine(root, DevcontainerScaffolder.ClaudeMdRelativePath);
+            const string original = "# My Project\n\nExisting notes.\n";
+            File.WriteAllText(path, original);
+
+            var first = DevcontainerScaffolder.EnsureClaudeMdGuidance(root);
+            Assert.Equal(GuidanceOutcome.Appended, first);
+
+            var afterFirst = File.ReadAllText(path);
+            Assert.StartsWith(original, afterFirst); // prior content preserved verbatim
+            Assert.Contains(DevcontainerScaffolder.ClaudeMdHeading, afterFirst);
+
+            var second = DevcontainerScaffolder.EnsureClaudeMdGuidance(root);
+            Assert.Equal(GuidanceOutcome.AlreadyPresent, second);
+
+            // Heading appears exactly once — no duplicate block.
+            var occurrences = File.ReadAllText(path).Split(DevcontainerScaffolder.ClaudeMdHeading).Length - 1;
+            Assert.Equal(1, occurrences);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void EnsureHook_WithMalformedSettings_LeavesFileUntouched()
+    {
+        var root = NewTempProject();
+        try
+        {
+            var settingsPath = Path.Combine(root, DevcontainerScaffolder.ClaudeSettingsRelativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
+            const string garbage = "{ this is not json";
+            File.WriteAllText(settingsPath, garbage);
+
+            var outcome = DevcontainerScaffolder.EnsureUserPromptSubmitHook(root);
+
+            Assert.Equal(HookSetupOutcome.SettingsUnparseable, outcome);
+            Assert.Equal(garbage, File.ReadAllText(settingsPath));
         }
         finally
         {

@@ -95,6 +95,30 @@ public class PullRequestImportTests
     }
 
     [Fact]
+    public async Task Import_WhenAccepted_RecordsActiveRules()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        var comments = new List<PullRequestComment>
+        {
+            new() { Body = "Use parameterized queries to avoid injection." },
+            new() { Body = "LGTM!" }, // praise → skipped regardless of acceptance
+        };
+
+        await using var scope = db.CreateScope();
+        var importer = scope.ServiceProvider.GetRequiredService<IPullRequestImportService>();
+
+        var result = await importer.ImportAsync(comments, new PullRequestImportOptions { Accepted = true });
+
+        Assert.Equal(1, result.RulesCreated);
+
+        var rules = scope.ServiceProvider.GetRequiredService<IRecallRuleRepository>();
+        var all = await rules.ListAsync();
+        Assert.All(all, r => Assert.Equal(RuleStatus.Active, r.Status));
+    }
+
+    [Fact]
     public async Task Import_PreservesOriginalCommentAsEvent()
     {
         await using var db = new TestDatabase();

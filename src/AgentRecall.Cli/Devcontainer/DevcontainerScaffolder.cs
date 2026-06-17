@@ -1,3 +1,6 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
+
 namespace AgentRecall.Cli.Devcontainer;
 
 /// <summary>
@@ -20,6 +23,44 @@ public static class DevcontainerScaffolder
 
     /// <summary>Path, relative to the project root, of the dev container manifest.</summary>
     public const string DevcontainerJsonRelativePath = ".devcontainer/devcontainer.json";
+
+    /// <summary>Path, relative to the project root, of the Claude Code project settings.</summary>
+    public const string ClaudeSettingsRelativePath = ".claude/settings.json";
+
+    /// <summary>
+    /// The command Claude Code runs on each prompt so AgentRecall rules are injected
+    /// deterministically (rather than left to the model to call an MCP tool).
+    /// </summary>
+    public const string HookCommand = "agentrecall hook user-prompt-submit";
+
+    /// <summary>Path, relative to the project root, of the agent guidance file.</summary>
+    public const string ClaudeMdRelativePath = "CLAUDE.md";
+
+    /// <summary>Heading that marks the AgentRecall guidance block (used for idempotency).</summary>
+    public const string ClaudeMdHeading = "## Memory (AgentRecall)";
+
+    /// <summary>
+    /// Standing guidance appended to <c>CLAUDE.md</c> so the agent recalls rules and
+    /// captures accepted review comments by default — the "active" behaviour the hook
+    /// alone can't express (the hook injects context; capture is still a tool call).
+    /// </summary>
+    public static string ClaudeMdGuidance =>
+        $$"""
+        {{ClaudeMdHeading}}
+
+        The `agentrecall` MCP server holds rules learned from past feedback, and the
+        UserPromptSubmit hook injects the relevant ones automatically. On top of that:
+
+        - **When the user accepts a review or PR comment** — i.e. asks you to apply or
+          fix what a comment says — treat the comment as accepted and immediately call
+          `import_pr_comments` with `accepted: true` (scope = the repository) so it is
+          recorded as an **Active** rule. Do this proactively, without being asked.
+        - **When the user corrects you**, call `suggest_feedback_candidate`; if it is a
+          reusable lesson, call `capture_feedback` so the same mistake isn't repeated.
+        - **Before** non-trivial work, call `inject_context` with the task description
+          when you need the relevant rules mid-task (the hook already covers prompts).
+
+        """;
 
     /// <summary>
     /// The self-contained setup script. Installs AgentRecall from NuGet, pins the
@@ -174,24 +215,165 @@ public static class DevcontainerScaffolder
         File.WriteAllText(scriptPath, PostCreateScript);
         MakeExecutable(scriptPath);
 
+        // Wire the deterministic UserPromptSubmit hook into the project's Claude Code
+        // settings. The hook lives in the workspace (persists across rebuilds and is
+        // committed), so unlike the MCP registration it is set once here, not per-rebuild.
+        var hookOutcome = EnsureUserPromptSubmitHook(projectRoot);
+
+        // Append standing guidance so the agent recalls rules and captures accepted
+        // review comments by default.
+        var guidanceOutcome = EnsureClaudeMdGuidance(projectRoot);
+
         var jsonPath = Path.Combine(projectRoot, DevcontainerJsonRelativePath);
-        if (File.Exists(jsonPath))
+        var jsonExisted = File.Exists(jsonPath);
+        if (!jsonExisted)
         {
-            return new DevcontainerInitResult(
-                ScriptPath: PostCreateRelativePath,
-                ScriptOverwritten: scriptExisted,
-                CreatedDevcontainerJson: false,
-                DevcontainerJsonPath: DevcontainerJsonRelativePath,
-                ManualSteps: ExistingManifestInstructions);
+            File.WriteAllText(jsonPath, DevcontainerJson);
         }
 
-        File.WriteAllText(jsonPath, DevcontainerJson);
         return new DevcontainerInitResult(
             ScriptPath: PostCreateRelativePath,
             ScriptOverwritten: scriptExisted,
-            CreatedDevcontainerJson: true,
+            CreatedDevcontainerJson: !jsonExisted,
             DevcontainerJsonPath: DevcontainerJsonRelativePath,
-            ManualSteps: null);
+            ManualSteps: jsonExisted ? ExistingManifestInstructions : null,
+            HookOutcome: hookOutcome,
+            ClaudeSettingsPath: ClaudeSettingsRelativePath,
+            GuidanceOutcome: guidanceOutcome,
+            ClaudeMdPath: ClaudeMdRelativePath);
+    }
+
+    /// <summary>
+    /// Ensures <c>CLAUDE.md</c> contains the AgentRecall guidance block, appending it
+    /// when absent. Idempotent: detected by <see cref="ClaudeMdHeading"/>, so an
+    /// existing block (and the rest of the file) is never duplicated or rewritten.
+    /// </summary>
+    public static GuidanceOutcome EnsureClaudeMdGuidance(string projectRoot)
+    {
+        var path = Path.Combine(projectRoot, ClaudeMdRelativePath);
+
+        if (File.Exists(path))
+        {
+            var existing = File.ReadAllText(path);
+            if (existing.Contains(ClaudeMdHeading, StringComparison.Ordinal))
+            {
+                return GuidanceOutcome.AlreadyPresent;
+            }
+
+            // Separate from prior content with a blank line, without rewriting it.
+            var separator = existing.EndsWith('\n') ? "\n" : "\n\n";
+            File.AppendAllText(path, separator + ClaudeMdGuidance);
+            return GuidanceOutcome.Appended;
+        }
+
+        File.WriteAllText(path, ClaudeMdGuidance);
+        return GuidanceOutcome.Created;
+    }
+
+    /// <summary>
+    /// Ensures the project's <c>.claude/settings.json</c> registers the AgentRecall
+    /// <c>UserPromptSubmit</c> hook, creating or merging without disturbing other
+    /// settings. Idempotent: a second run reports the hook is already present.
+    /// </summary>
+    public static HookSetupOutcome EnsureUserPromptSubmitHook(string projectRoot)
+    {
+        var path = Path.Combine(projectRoot, ClaudeSettingsRelativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+
+        var existed = File.Exists(path);
+        JsonObject root;
+        if (existed)
+        {
+            var text = File.ReadAllText(path);
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                root = new JsonObject();
+            }
+            else
+            {
+                JsonNode? parsed;
+                try
+                {
+                    parsed = JsonNode.Parse(
+                        text,
+                        documentOptions: new JsonDocumentOptions
+                        {
+                            CommentHandling = JsonCommentHandling.Skip,
+                            AllowTrailingCommas = true,
+                        });
+                }
+                catch (JsonException)
+                {
+                    // A malformed settings file is the user's to fix; never clobber it.
+                    return HookSetupOutcome.SettingsUnparseable;
+                }
+
+                if (parsed is not JsonObject obj)
+                {
+                    return HookSetupOutcome.SettingsUnparseable;
+                }
+
+                root = obj;
+            }
+        }
+        else
+        {
+            root = new JsonObject();
+        }
+
+        if (root["hooks"] is not JsonObject hooks)
+        {
+            hooks = new JsonObject();
+            root["hooks"] = hooks;
+        }
+
+        if (hooks["UserPromptSubmit"] is not JsonArray matchers)
+        {
+            matchers = new JsonArray();
+            hooks["UserPromptSubmit"] = matchers;
+        }
+
+        if (HookAlreadyRegistered(matchers))
+        {
+            return HookSetupOutcome.AlreadyPresent;
+        }
+
+        matchers.Add(new JsonObject
+        {
+            ["hooks"] = new JsonArray
+            {
+                new JsonObject
+                {
+                    ["type"] = "command",
+                    ["command"] = HookCommand,
+                },
+            },
+        });
+
+        File.WriteAllText(path, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+        return existed ? HookSetupOutcome.Merged : HookSetupOutcome.Created;
+    }
+
+    /// <summary>True when any matcher already runs the AgentRecall hook command.</summary>
+    private static bool HookAlreadyRegistered(JsonArray matchers)
+    {
+        foreach (var matcher in matchers)
+        {
+            if (matcher?["hooks"] is not JsonArray inner)
+            {
+                continue;
+            }
+
+            foreach (var entry in inner)
+            {
+                if (entry?["command"]?.GetValue<string>() == HookCommand)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -236,15 +418,52 @@ public static class DevcontainerScaffolder
     }
 }
 
+/// <summary>How the UserPromptSubmit hook was wired into Claude Code settings.</summary>
+public enum HookSetupOutcome
+{
+    /// <summary>Settings file created with the hook.</summary>
+    Created,
+
+    /// <summary>Hook merged into an existing settings file.</summary>
+    Merged,
+
+    /// <summary>The hook was already registered; nothing changed.</summary>
+    AlreadyPresent,
+
+    /// <summary>The existing settings file is not valid JSON and was left untouched.</summary>
+    SettingsUnparseable,
+}
+
+/// <summary>How the AgentRecall guidance block was applied to CLAUDE.md.</summary>
+public enum GuidanceOutcome
+{
+    /// <summary>CLAUDE.md created with the guidance block.</summary>
+    Created,
+
+    /// <summary>Guidance appended to an existing CLAUDE.md.</summary>
+    Appended,
+
+    /// <summary>The guidance block was already present; nothing changed.</summary>
+    AlreadyPresent,
+}
+
 /// <summary>Outcome of <see cref="DevcontainerScaffolder.Init"/>.</summary>
 /// <param name="ScriptPath">Relative path of the generated setup script.</param>
 /// <param name="ScriptOverwritten">Whether an existing script was overwritten.</param>
 /// <param name="CreatedDevcontainerJson">Whether a fresh manifest was written.</param>
 /// <param name="DevcontainerJsonPath">Relative path of the manifest.</param>
 /// <param name="ManualSteps">Steps to apply to an existing manifest, or null.</param>
+/// <param name="HookOutcome">How the UserPromptSubmit hook was wired in.</param>
+/// <param name="ClaudeSettingsPath">Relative path of the Claude Code settings file.</param>
+/// <param name="GuidanceOutcome">How the CLAUDE.md guidance block was applied.</param>
+/// <param name="ClaudeMdPath">Relative path of the guidance file.</param>
 public sealed record DevcontainerInitResult(
     string ScriptPath,
     bool ScriptOverwritten,
     bool CreatedDevcontainerJson,
     string DevcontainerJsonPath,
-    string? ManualSteps);
+    string? ManualSteps,
+    HookSetupOutcome HookOutcome,
+    string ClaudeSettingsPath,
+    GuidanceOutcome GuidanceOutcome,
+    string ClaudeMdPath);

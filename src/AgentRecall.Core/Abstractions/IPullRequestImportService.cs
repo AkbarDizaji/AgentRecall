@@ -16,6 +16,13 @@ public sealed record PullRequestImportOptions
 
     /// <summary>Extra comma-separated tags to add alongside the "pr-review" tag.</summary>
     public string? Tags { get; init; }
+
+    /// <summary>
+    /// Whether these comments have been accepted (the user acted on them), which
+    /// records them as Active rules. Defaults to <c>false</c>, so a bulk import of
+    /// not-yet-vetted review comments stays Pending for explicit review.
+    /// </summary>
+    public bool Accepted { get; init; }
 }
 
 /// <summary>Summary of what a pull-request import produced.</summary>

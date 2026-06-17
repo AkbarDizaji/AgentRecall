@@ -38,7 +38,7 @@
     <RepositoryUrl>https://github.com/AkbarDizaji/AgentRecall</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>0.2.5 makes dev container setup more reliable: it ensures ~/.dotnet/tools is on PATH (so a globally-installed agentrecall isn't "not found" in non-login VS Code terminals) by updating ~/.bashrc and printing the remoteEnv snippet, and the setup scripts now log each step and name the command that failed. Full notes: https://github.com/AkbarDizaji/AgentRecall/blob/main/CHANGELOG.md</PackageReleaseNotes>
+    <PackageReleaseNotes>0.2.6 makes dev container recall automatic: `agentrecall devcontainer init` now wires the deterministic UserPromptSubmit hook into .claude/settings.json and appends a CLAUDE.md guidance block (merging, never overwriting). import_pr_comments gains an `accepted` flag (CLI --accepted) that records acted-on comments as Active rules instead of Pending. Full notes: https://github.com/AkbarDizaji/AgentRecall/blob/main/CHANGELOG.md</PackageReleaseNotes>
   </PropertyGroup>
 
   <ItemGroup>

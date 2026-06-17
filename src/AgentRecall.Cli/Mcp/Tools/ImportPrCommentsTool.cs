@@ -18,9 +18,12 @@ public sealed class ImportPrCommentsTool : IMcpTool
 
     public string Description =>
         "Capture pull-request review comments as feedback. Pass the review comments; " +
-        "each one that reads as a reusable correction becomes a pending rule (tagged " +
+        "each one that reads as a reusable correction becomes a rule (tagged " +
         "pr-review), and non-actionable comments (praise, questions, nits) are " +
-        "skipped. Use this to remember reviewer feedback after a PR review.";
+        "skipped. Use this to remember reviewer feedback after a PR review. " +
+        "Set accepted=true when the user has acted on or agreed with the comments " +
+        "(e.g. asked you to apply them) — accepted comments are recorded as Active " +
+        "rules; otherwise they are recorded as Pending for later review.";
 
     public JsonObject InputSchema => new()
     {
@@ -37,6 +40,12 @@ public sealed class ImportPrCommentsTool : IMcpTool
             ["scope_level"] = ScopeLevelProp(),
             ["scope_value"] = Prop("string", "Scope identifier (e.g. repo name)."),
             ["tags"] = Prop("string", "Extra comma-separated tags (pr-review is always added)."),
+            ["accepted"] = new JsonObject
+            {
+                ["type"] = "boolean",
+                ["description"] = "True when the user has accepted/acted on these comments; " +
+                    "records them as Active rules instead of Pending. Defaults to false.",
+            },
         },
         ["required"] = new JsonArray { "comments" },
     };
@@ -55,12 +64,15 @@ public sealed class ImportPrCommentsTool : IMcpTool
             scopeLevel = parsed;
         }
 
+        var accepted = McpArgs.GetBool(arguments, "accepted") ?? false;
+
         var options = new PullRequestImportOptions
         {
             PullRequestTitle = McpArgs.GetString(arguments, "pr_title"),
             ScopeLevel = scopeLevel,
             ScopeValue = McpArgs.GetString(arguments, "scope_value"),
             Tags = McpArgs.GetString(arguments, "tags"),
+            Accepted = accepted,
         };
 
         var importer = services.GetRequiredService<IPullRequestImportService>();
@@ -72,7 +84,7 @@ public sealed class ImportPrCommentsTool : IMcpTool
             ["rules_created"] = result.RulesCreated,
             ["skipped"] = result.Skipped,
             ["rule_ids"] = new JsonArray([.. result.RuleIds.Select(id => (JsonNode)id)]),
-            ["status"] = "Pending",
+            ["status"] = accepted ? "Active" : "Pending",
         };
     }
 

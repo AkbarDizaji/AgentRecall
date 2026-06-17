@@ -136,6 +136,36 @@ public static class CommandRouter
             var verb = result.ScriptOverwritten ? "Updated" : "Wrote";
             output.WriteLine($"{verb} {result.ScriptPath} (installs AgentRecall from NuGet on container create/rebuild).");
 
+            switch (result.HookOutcome)
+            {
+                case Devcontainer.HookSetupOutcome.Created:
+                    output.WriteLine($"Wrote {result.ClaudeSettingsPath} with the UserPromptSubmit hook (automatic rule injection).");
+                    break;
+                case Devcontainer.HookSetupOutcome.Merged:
+                    output.WriteLine($"Added the UserPromptSubmit hook to {result.ClaudeSettingsPath} (automatic rule injection).");
+                    break;
+                case Devcontainer.HookSetupOutcome.AlreadyPresent:
+                    output.WriteLine($"UserPromptSubmit hook already present in {result.ClaudeSettingsPath}; left it as is.");
+                    break;
+                case Devcontainer.HookSetupOutcome.SettingsUnparseable:
+                    output.WriteLine($"Could not parse {result.ClaudeSettingsPath}; left it untouched.");
+                    output.WriteLine($"Add this hook manually: a UserPromptSubmit command hook running \"{Devcontainer.DevcontainerScaffolder.HookCommand}\".");
+                    break;
+            }
+
+            switch (result.GuidanceOutcome)
+            {
+                case Devcontainer.GuidanceOutcome.Created:
+                    output.WriteLine($"Wrote {result.ClaudeMdPath} with AgentRecall guidance (recall + capture accepted PR comments as Active).");
+                    break;
+                case Devcontainer.GuidanceOutcome.Appended:
+                    output.WriteLine($"Appended AgentRecall guidance to {result.ClaudeMdPath} (recall + capture accepted PR comments as Active).");
+                    break;
+                case Devcontainer.GuidanceOutcome.AlreadyPresent:
+                    output.WriteLine($"AgentRecall guidance already in {result.ClaudeMdPath}; left it as is.");
+                    break;
+            }
+
             if (result.CreatedDevcontainerJson)
             {
                 output.WriteLine($"Created {result.DevcontainerJsonPath} wired to run it.");
@@ -367,7 +397,7 @@ public static class CommandRouter
             output.WriteLine("  agentrecall import build-log <file>");
             output.WriteLine("  agentrecall import test-log <file>");
             output.WriteLine("  agentrecall import lint-log <file>");
-            output.WriteLine("  agentrecall import pr-comments <file> [--task <pr title>] [--scope-level <level>] [--scope-value <text>] [--tags <a,b>]");
+            output.WriteLine("  agentrecall import pr-comments <file> [--task <pr title>] [--scope-level <level>] [--scope-value <text>] [--tags <a,b>] [--accepted]");
             return 1;
         }
 
@@ -405,7 +435,7 @@ public static class CommandRouter
         var filePath = args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal) ? args[0] : null;
         if (string.IsNullOrWhiteSpace(filePath))
         {
-            output.WriteLine("Usage: agentrecall import pr-comments <file> [--task <pr title>] [--scope-level <level>] [--scope-value <text>] [--tags <a,b>]");
+            output.WriteLine("Usage: agentrecall import pr-comments <file> [--task <pr title>] [--scope-level <level>] [--scope-value <text>] [--tags <a,b>] [--accepted]");
             return 1;
         }
 
@@ -425,6 +455,8 @@ public static class CommandRouter
             ScopeLevel = scopeLevel,
             ScopeValue = options.GetValueOrDefault("scope-value"),
             Tags = options.GetValueOrDefault("tags"),
+            // --accepted records the comments as Active rules (the user acted on them).
+            Accepted = options.ContainsKey("accepted"),
         };
 
         await using var scope = services.CreateAsyncScope();
@@ -434,7 +466,8 @@ public static class CommandRouter
         try
         {
             var result = await importer.ImportFileAsync(filePath, importOptions, cancellationToken).ConfigureAwait(false);
-            output.WriteLine($"Imported PR comments: {result.CommentsFound} comment(s), {result.RulesCreated} pending rule(s) created, {result.Skipped} skipped.");
+            var statusWord = importOptions.Accepted ? "active" : "pending";
+            output.WriteLine($"Imported PR comments: {result.CommentsFound} comment(s), {result.RulesCreated} {statusWord} rule(s) created, {result.Skipped} skipped.");
             if (result.RuleIds.Count > 0)
             {
                 output.WriteLine($"Created rule(s): {string.Join(", ", result.RuleIds.Select(id => $"#{id}"))}. Review with: agentrecall rules list");

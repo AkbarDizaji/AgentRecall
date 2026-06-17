@@ -50,9 +50,10 @@ public sealed class PullRequestImportService : IPullRequestImportService
                 ScopeLevel = options.ScopeLevel,
                 ScopeValue = options.ScopeValue,
                 Tags = Tags(options.Tags),
-                // Bulk-imported review comments stay Pending for review, regardless
-                // of the global auto-approve default.
-                AutoApprove = false,
+                // Accepted comments (the user acted on them) are recorded Active;
+                // otherwise a bulk import stays Pending for explicit review,
+                // regardless of the global auto-approve default.
+                AutoApprove = options.Accepted ? true : false,
             }, cancellationToken).ConfigureAwait(false);
 
             ruleIds.Add(result.Rule.Id);

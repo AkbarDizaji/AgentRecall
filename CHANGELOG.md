@@ -4,6 +4,21 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6] - 2026-06-17
+
+### Added
+- **`agentrecall devcontainer init` now makes recall and capture automatic, not
+  just available.** Alongside the MCP registration it wires the deterministic
+  `UserPromptSubmit` hook into `.claude/settings.json` (so relevant rules are
+  injected on every prompt) and appends a `CLAUDE.md` guidance block. Existing
+  settings and `CLAUDE.md` content are merged or left untouched — never
+  overwritten — and re-running is a no-op.
+- **`import_pr_comments` accepts an `accepted` flag** (CLI `--accepted`, MCP
+  `accepted: true`). Accepted comments — ones the user acted on — are recorded as
+  **Active** rules instead of Pending. The scaffolded `CLAUDE.md` tells the agent
+  to use it: when the user asks it to apply what a review comment says, that
+  comment is treated as accepted and captured as an Active rule automatically.
+
 ## [0.2.5] - 2026-06-17
 
 ### Fixed
