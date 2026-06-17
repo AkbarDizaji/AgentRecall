@@ -67,6 +67,23 @@ dotnet tool update -g AgentRecall
 dotnet tool uninstall -g AgentRecall
 ```
 
+### Dev containers
+
+A global tool installs under `~/.dotnet/tools`, which lives on the container
+filesystem and is wiped by "Rebuild Container" — so a manual `dotnet tool install`
+disappears on every rebuild. Run this once from your project root to make the
+install survive rebuilds:
+
+```bash
+agentrecall devcontainer init
+```
+
+It writes `.devcontainer/agentrecall-post-create.sh`, which reinstalls AgentRecall
+from NuGet, persists the database on a named Docker volume, and re-registers the
+MCP server on every create/rebuild. If your project has no `devcontainer.json`,
+one is generated and wired to run the script; if you already have one, it's left
+untouched and the exact keys to merge in are printed.
+
 ---
 
 ## Quick start
@@ -185,6 +202,7 @@ on a retrieval regression. The same check also runs as a unit test.
 | Command | Description |
 | --- | --- |
 | `init` | Create the local data directory and database. |
+| `devcontainer init` | Scaffold dev container wiring so AgentRecall reinstalls on every rebuild (optional `[path]`). |
 | `feedback add` | Record feedback and extract a rule from it. |
 | `search "<query>"` | Search rules by keyword (`--scope-level`, `--scope-value`, `--limit`). |
 | `rules list` | List all rules. |

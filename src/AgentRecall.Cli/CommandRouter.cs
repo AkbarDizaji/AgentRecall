@@ -48,6 +48,9 @@ public static class CommandRouter
             case "init":
                 return await InitAsync(services, output, logger, cancellationToken).ConfigureAwait(false);
 
+            case "devcontainer":
+                return DevcontainerInit(rest, output);
+
             case "feedback":
                 return await FeedbackAsync(rest, services, output, logger, cancellationToken).ConfigureAwait(false);
 
@@ -107,6 +110,49 @@ public static class CommandRouter
         {
             logger.LogError(ex, "Database initialization failed.");
             output.WriteLine($"Initialization failed: {ex.Message}");
+            return 1;
+        }
+    }
+
+    private static int DevcontainerInit(string[] args, TextWriter output)
+    {
+        var sub = args.Length > 0 ? args[0] : string.Empty;
+        if (sub != "init")
+        {
+            output.WriteLine("Usage: agentrecall devcontainer init [path]");
+            output.WriteLine("(scaffolds dev container wiring so AgentRecall reinstalls on every rebuild)");
+            return 1;
+        }
+
+        // Optional positional path; defaults to the current directory.
+        var projectRoot = args.Length > 1 && !args[1].StartsWith("--", StringComparison.Ordinal)
+            ? args[1]
+            : Directory.GetCurrentDirectory();
+
+        try
+        {
+            var result = Devcontainer.DevcontainerScaffolder.Init(projectRoot);
+
+            var verb = result.ScriptOverwritten ? "Updated" : "Wrote";
+            output.WriteLine($"{verb} {result.ScriptPath} (installs AgentRecall from NuGet on container create/rebuild).");
+
+            if (result.CreatedDevcontainerJson)
+            {
+                output.WriteLine($"Created {result.DevcontainerJsonPath} wired to run it.");
+                output.WriteLine("Rebuild the container to apply.");
+            }
+            else
+            {
+                output.WriteLine($"Found an existing {result.DevcontainerJsonPath}; left it untouched.");
+                output.WriteLine();
+                output.WriteLine(result.ManualSteps);
+            }
+
+            return 0;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            output.WriteLine($"Failed to scaffold dev container: {ex.Message}");
             return 1;
         }
     }
@@ -779,6 +825,8 @@ public static class CommandRouter
         output.WriteLine();
         output.WriteLine("Commands:");
         output.WriteLine("  init                 Create the local data directory and database");
+        output.WriteLine("  devcontainer init    Scaffold dev container wiring so AgentRecall");
+        output.WriteLine("                       reinstalls automatically on every rebuild");
         output.WriteLine("  feedback add         Record feedback and extract a pending rule");
         output.WriteLine("  rules list           List all rules");
         output.WriteLine("  rules show <id>      Show a single rule in detail");

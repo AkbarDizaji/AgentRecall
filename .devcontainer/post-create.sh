@@ -25,3 +25,8 @@ dotnet tool update --global --add-source ./nupkg AgentRecall
 if command -v claude >/dev/null 2>&1; then
   claude mcp add agentrecall agentrecall mcp 2>/dev/null || true
 fi
+
+# Confirm the tool resolves on PATH so a botched install surfaces in the create log
+# rather than failing silently the first time someone runs `agentrecall`.
+export PATH="$PATH:/home/vscode/.dotnet/tools"
+echo "AgentRecall ready: $(agentrecall --version)"

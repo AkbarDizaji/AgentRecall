@@ -4,6 +4,18 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-06-17
+
+### Added
+- **`agentrecall devcontainer init`** scaffolds the dev container wiring so the
+  tool reinstalls automatically on every "Rebuild Container". A global .NET tool
+  lives on the container filesystem and is wiped by a rebuild; the generated
+  `.devcontainer/agentrecall-post-create.sh` reinstalls AgentRecall from NuGet,
+  persists the database on a named Docker volume, and re-registers the MCP server
+  on each create. When the project has no `devcontainer.json` a complete one is
+  generated; an existing manifest is left untouched and the keys to merge are
+  printed.
+
 ## [0.2.2] - 2026-06-16
 
 ### Fixed
