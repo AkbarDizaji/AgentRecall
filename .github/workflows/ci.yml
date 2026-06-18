@@ -57,8 +57,11 @@ jobs:
           --results-directory TestResults
 
       - name: Evaluate retrieval quality
+        # The CLI multi-targets net8.0 and net10.0; pick the framework the runner
+        # has a runtime for so `dotnet run` isn't ambiguous.
         run: >-
           dotnet run --project src/AgentRecall.Cli
+          --framework net10.0
           --configuration "$CONFIGURATION"
           --no-build
           -- eval retrieval
