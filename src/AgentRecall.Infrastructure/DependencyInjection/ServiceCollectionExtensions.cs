@@ -3,6 +3,7 @@ using AgentRecall.Core.Compression;
 using AgentRecall.Core.Configuration;
 using AgentRecall.Core.Context;
 using AgentRecall.Core.Extraction;
+using AgentRecall.Core.Memory;
 using AgentRecall.Core.Policy;
 using AgentRecall.Core.Services;
 using AgentRecall.Infrastructure.Embeddings;
@@ -35,6 +36,8 @@ public static class ServiceCollectionExtensions
         // Feedback capture and rule extraction.
         services.AddSingleton<IRecallRuleQualityValidator, RecallRuleQualityValidator>();
         services.AddSingleton<IRecallExtractor, RuleBasedRecallExtractor>();
+        // "Lessons, not facts": screen candidates before storing them as rules.
+        services.AddSingleton<IMemoryWorthinessClassifier, MemoryWorthinessClassifier>();
         services.AddScoped<IFeedbackService, FeedbackService>();
 
         // Retrieval. NullEmbeddingProvider keeps search keyword-only.

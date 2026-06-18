@@ -254,6 +254,7 @@ public class ContextInjectionTests
                 Feedback = "Always use Moq argument matchers like It.IsAny<T>() consistently in Moq tests.",
                 Tags = "moq,testing,matchers",
             });
+            Assert.NotNull(captured.Rule);
             ruleId = captured.Rule.Id;
 
             // Approve/promote it.

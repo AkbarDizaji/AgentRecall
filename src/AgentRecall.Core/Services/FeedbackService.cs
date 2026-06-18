@@ -3,6 +3,7 @@ using AgentRecall.Core.Abstractions;
 using AgentRecall.Core.Configuration;
 using AgentRecall.Core.Domain;
 using AgentRecall.Core.Feedback;
+using AgentRecall.Core.Memory;
 
 namespace AgentRecall.Core.Services;
 
@@ -26,17 +27,20 @@ public sealed class FeedbackService : IFeedbackService
     private readonly IRecallEventRepository _events;
     private readonly IRecallRuleRepository _rules;
     private readonly IRecallExtractor _extractor;
+    private readonly IMemoryWorthinessClassifier _classifier;
     private readonly AgentRecallOptions _options;
 
     public FeedbackService(
         IRecallEventRepository events,
         IRecallRuleRepository rules,
         IRecallExtractor extractor,
+        IMemoryWorthinessClassifier classifier,
         AgentRecallOptions options)
     {
         _events = events ?? throw new ArgumentNullException(nameof(events));
         _rules = rules ?? throw new ArgumentNullException(nameof(rules));
         _extractor = extractor ?? throw new ArgumentNullException(nameof(extractor));
+        _classifier = classifier ?? throw new ArgumentNullException(nameof(classifier));
         _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
@@ -44,12 +48,35 @@ public sealed class FeedbackService : IFeedbackService
     {
         ArgumentNullException.ThrowIfNull(input);
 
+        // Approve on capture by default; the per-call override wins over the
+        // configured default, so callers can force Pending (or Active). Acceptance
+        // (e.g. an accepted PR comment) surfaces here as approve == true.
+        var approve = input.AutoApprove ?? _options.AutoApproveFeedback;
+
+        // Screen the candidate against the "lessons, not facts" policy. A low-value
+        // code fact is not stored; a code fact that hints at a reusable pattern is
+        // stored as the generalized lesson rather than the raw fact.
+        MemoryWorthinessResult? worthiness = null;
+        if (_options.MemoryWorthinessEnabled)
+        {
+            worthiness = _classifier.Classify(input.Feedback);
+
+            if (worthiness.Verdict == MemoryWorthiness.NotWorthStoring &&
+                !(approve && _options.AllowCodeFactsWhenAccepted))
+            {
+                return await RejectAsync(input, worthiness, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
         // Extract and persist the candidate rule first so the raw event can link to it.
         var rule = _extractor.Extract(input);
 
-        // Approve on capture by default; the per-call override wins over the
-        // configured default, so callers can force Pending (or Active).
-        var approve = input.AutoApprove ?? _options.AutoApproveFeedback;
+        // For a NeedsReview verdict, store the generalized lesson, never the raw fact.
+        if (worthiness is { Verdict: MemoryWorthiness.NeedsReview, SuggestedGeneralizedLesson: { Length: > 0 } lesson })
+        {
+            rule.RuleText = lesson;
+        }
+
         rule.Status = approve ? RuleStatus.Active : RuleStatus.Pending;
 
         // Reuse an equivalent existing rule rather than storing a duplicate.
@@ -72,7 +99,36 @@ public sealed class FeedbackService : IFeedbackService
             Details = BuildDetails(input),
         }, cancellationToken).ConfigureAwait(false);
 
-        return new FeedbackResult(recallEvent, rule) { ReusedExistingRule = reused };
+        return new FeedbackResult(recallEvent, rule)
+        {
+            ReusedExistingRule = reused,
+            Worthiness = worthiness,
+        };
+    }
+
+    /// <summary>
+    /// Handles a candidate rejected by the worthiness policy: stores no rule and,
+    /// only when <see cref="AgentRecallOptions.StoreRejectedCandidates"/> is set,
+    /// records an audit event linked to no rule.
+    /// </summary>
+    private async Task<FeedbackResult> RejectAsync(
+        FeedbackInput input,
+        MemoryWorthinessResult worthiness,
+        CancellationToken cancellationToken)
+    {
+        RecallEvent? recallEvent = null;
+        if (_options.StoreRejectedCandidates)
+        {
+            recallEvent = await _events.AddAsync(new RecallEvent
+            {
+                Type = RecallEventType.MistakeObserved,
+                RuleId = null,
+                Trigger = input.Task,
+                Details = $"Rejected as not memory-worthy: {worthiness.Reason}{Environment.NewLine}{BuildDetails(input)}",
+            }, cancellationToken).ConfigureAwait(false);
+        }
+
+        return new FeedbackResult(recallEvent, null) { Worthiness = worthiness };
     }
 
     private async Task<RecallRule?> FindEquivalentAsync(RecallRule candidate, CancellationToken cancellationToken)

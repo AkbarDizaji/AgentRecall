@@ -264,9 +264,28 @@ public static class CommandRouter
         try
         {
             var result = await feedbackService.AddAsync(input, cancellationToken).ConfigureAwait(false);
-            output.WriteLine($"Recorded feedback as event #{result.Event.Id}.");
+
+            if (result.Rule is null)
+            {
+                // Rejected by the memory-worthiness policy: a low-value code fact.
+                var reason = result.Worthiness?.Reason ?? "not memory-worthy";
+                output.WriteLine($"Not stored: {reason}");
+                output.WriteLine("Store a reusable lesson instead, or pass --feedback with the broader rule.");
+                return 0;
+            }
+
+            if (result.Event is not null)
+            {
+                output.WriteLine($"Recorded feedback as event #{result.Event.Id}.");
+            }
+
             var verb = result.ReusedExistingRule ? "Reused existing" : "Created";
             output.WriteLine($"{verb} {result.Rule.Status} rule #{result.Rule.Id}: {result.Rule.RuleText}");
+            if (result.Worthiness?.Verdict == Core.Memory.MemoryWorthiness.NeedsReview)
+            {
+                output.WriteLine("Stored the generalized lesson instead of the raw code fact.");
+            }
+
             return 0;
         }
         catch (Exception ex)

@@ -60,6 +60,29 @@ public static class DevcontainerScaffolder
         - **Before** non-trivial work, call `inject_context` with the task description
           when you need the relevant rules mid-task (the hook already covers prompts).
 
+        ### Store lessons, not facts
+
+        Do not store information that can be recovered from the repository with search
+        or grep. A method name, a class or property that exists, a file path, one
+        service calling another, or a bare "use method X" is a **code fact**, not a
+        memory — the agent can rediscover it.
+
+        Prefer storing:
+
+        - recurring mistakes
+        - review insights
+        - project conventions
+        - bug patterns
+        - cross-layer consistency rules
+
+        Before saving memory, ask: **"Is this a reusable lesson, or just a code fact?"**
+
+        - If it is a code fact, do not save it unless the user explicitly asks.
+        - If it reveals a broader pattern, save the **generalized lesson** instead of
+          the raw fact. For example, capture "When implementing feature gates, use the
+          canonical gate definition and verify backend and frontend conditions match."
+          rather than "Use `IsEventsFeatureEnabled`."
+
         """;
 
     /// <summary>

@@ -31,6 +31,8 @@ public class FeedbackTests
             var service = scope.ServiceProvider.GetRequiredService<IFeedbackService>();
             var result = await service.AddAsync(SampleInput());
 
+            Assert.NotNull(result.Event);
+            Assert.NotNull(result.Rule);
             Assert.True(result.Event.Id > 0);
             Assert.Equal(RecallEventType.MistakeObserved, result.Event.Type);
             Assert.Equal(result.Rule.Id, result.Event.RuleId);
@@ -56,6 +58,7 @@ public class FeedbackTests
             var result = await service.AddAsync(SampleInput());
 
             // Capturing approves by default now.
+            Assert.NotNull(result.Rule);
             Assert.Equal(RuleStatus.Active, result.Rule.Status);
             Assert.True(result.Rule.Id > 0);
             ruleId = result.Rule.Id;
@@ -85,6 +88,7 @@ public class FeedbackTests
 
         var result = await service.AddAsync(SampleInput() with { AutoApprove = false });
 
+        Assert.NotNull(result.Rule);
         Assert.Equal(RuleStatus.Pending, result.Rule.Status);
     }
 
@@ -99,6 +103,7 @@ public class FeedbackTests
 
         var result = await service.AddAsync(SampleInput());
 
+        Assert.NotNull(result.Rule);
         Assert.Equal(RuleStatus.Pending, result.Rule.Status);
     }
 
@@ -118,6 +123,7 @@ public class FeedbackTests
         });
 
         // No bad output → no distinct mistake, so "do"/"do not" won't duplicate.
+        Assert.NotNull(result.Rule);
         Assert.Equal(string.Empty, result.Rule.Mistake);
         Assert.Contains("parameterized queries", result.Rule.RuleText, StringComparison.OrdinalIgnoreCase);
     }
@@ -196,10 +202,14 @@ public class FeedbackTests
 
             var r1 = await service.AddAsync(first);
             Assert.False(r1.ReusedExistingRule);
+            Assert.NotNull(r1.Rule);
+            Assert.NotNull(r1.Event);
             firstRuleId = r1.Rule.Id;
 
             var r2 = await service.AddAsync(again);
             Assert.True(r2.ReusedExistingRule);
+            Assert.NotNull(r2.Rule);
+            Assert.NotNull(r2.Event);
             Assert.Equal(firstRuleId, r2.Rule.Id);
             // The repeated feedback is still recorded as its own event.
             Assert.NotEqual(r1.Event.Id, r2.Event.Id);
@@ -228,6 +238,8 @@ public class FeedbackTests
         var b = await service.AddAsync(new FeedbackInput { Task = "logging", Feedback = "prefer structured logging over console output" });
 
         Assert.False(b.ReusedExistingRule);
+        Assert.NotNull(a.Rule);
+        Assert.NotNull(b.Rule);
         Assert.NotEqual(a.Rule.Id, b.Rule.Id);
     }
 

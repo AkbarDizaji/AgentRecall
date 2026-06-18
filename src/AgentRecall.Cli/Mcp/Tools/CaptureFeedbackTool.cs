@@ -60,14 +60,7 @@ public sealed class CaptureFeedbackTool : IMcpTool
         var feedback = services.GetRequiredService<IFeedbackService>();
         var result = await feedback.AddAsync(input, cancellationToken).ConfigureAwait(false);
 
-        return new JsonObject
-        {
-            ["event_id"] = result.Event.Id,
-            ["rule_id"] = result.Rule.Id,
-            ["status"] = result.Rule.Status.ToString(),
-            ["reused_existing_rule"] = result.ReusedExistingRule,
-            ["rule"] = McpToolHelpers.ToGuidanceNode(result.Rule),
-        };
+        return McpToolHelpers.ToFeedbackResultNode(result);
     }
 
     private static JsonObject Prop(string type, string description) => new()

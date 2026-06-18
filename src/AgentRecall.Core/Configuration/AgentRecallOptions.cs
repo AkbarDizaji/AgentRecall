@@ -58,4 +58,26 @@ public sealed class AgentRecallOptions
 
     /// <summary>Whether the hook may inject Pending (unapproved) rules.</summary>
     public bool HookIncludePending { get; set; }
+
+    /// <summary>
+    /// When true (the default), captured feedback is screened by the memory-worthiness
+    /// classifier so low-value code facts are not stored as rules and code facts that
+    /// hint at a reusable pattern are stored as the generalized lesson instead. Set it
+    /// to false to store every candidate verbatim.
+    /// </summary>
+    public bool MemoryWorthinessEnabled { get; set; } = true;
+
+    /// <summary>
+    /// When true, a rejected (NotWorthStoring) candidate still records a
+    /// <see cref="Domain.RecallEvent"/> for audit, even though no rule is created.
+    /// Defaults to false to keep the event log clean.
+    /// </summary>
+    public bool StoreRejectedCandidates { get; set; }
+
+    /// <summary>
+    /// When true, an accepted candidate (e.g. an accepted PR comment) bypasses the
+    /// code-fact rejection and is stored even when the classifier rates it
+    /// NotWorthStoring. Defaults to false so acceptance never lowers memory quality.
+    /// </summary>
+    public bool AllowCodeFactsWhenAccepted { get; set; }
 }

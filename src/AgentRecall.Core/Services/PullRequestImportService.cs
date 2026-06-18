@@ -56,6 +56,14 @@ public sealed class PullRequestImportService : IPullRequestImportService
                 AutoApprove = options.Accepted ? true : false,
             }, cancellationToken).ConfigureAwait(false);
 
+            // The worthiness policy can reject a code fact even on an accepted
+            // comment — acceptance does not bypass it. Count those as skipped.
+            if (result.Rule is null)
+            {
+                skipped++;
+                continue;
+            }
+
             ruleIds.Add(result.Rule.Id);
         }
 
