@@ -33,6 +33,21 @@ public static class DevcontainerScaffolder
     /// </summary>
     public const string HookCommand = "agentrecall hook user-prompt-submit";
 
+    /// <summary>The Claude Code event the recall hook binds to.</summary>
+    public const string RecallHookEvent = "UserPromptSubmit";
+
+    /// <summary>
+    /// The command Claude Code runs after a turn so reusable lessons are captured
+    /// deterministically (rather than left to the model to call an MCP tool).
+    /// </summary>
+    public const string CaptureHookCommand = "agentrecall hook capture";
+
+    /// <summary>
+    /// The Claude Code event the capture hook binds to. <c>Stop</c> fires after the
+    /// assistant finishes a turn — the post-response hook AgentRecall captures from.
+    /// </summary>
+    public const string CaptureHookEvent = "Stop";
+
     /// <summary>Path, relative to the project root, of the agent guidance file.</summary>
     public const string ClaudeMdRelativePath = "CLAUDE.md";
 
@@ -48,24 +63,24 @@ public static class DevcontainerScaffolder
         $$"""
         {{ClaudeMdHeading}}
 
-        The `agentrecall` MCP server holds rules learned from past feedback, and the
-        UserPromptSubmit hook injects the relevant ones automatically. On top of that:
+        The `agentrecall` MCP server holds rules learned from past feedback. Recall and
+        capture are both wired as deterministic hooks: the UserPromptSubmit hook injects
+        the relevant rules automatically, and the Stop hook captures reusable lessons
+        from each turn automatically (no tool call required). On top of that:
 
         - **When the user accepts a review or PR comment** — i.e. asks you to apply or
-          fix what a comment says — treat the comment as accepted and immediately call
-          `import_pr_comments` with `accepted: true` (scope = the repository) so it is
-          recorded as an **Active** rule. Do this proactively, without being asked.
-        - **When the user corrects you**, call `suggest_feedback_candidate`; if it is a
-          reusable lesson, call `capture_feedback` so the same mistake isn't repeated.
+          fix what a comment says — you may still call `import_pr_comments` with
+          `accepted: true` (scope = the repository) to record it explicitly; the capture
+          hook also picks up accepted guidance on its own.
         - **Before** non-trivial work, call `inject_context` with the task description
           when you need the relevant rules mid-task (the hook already covers prompts).
 
         ### Store lessons, not facts
 
-        Do not store information that can be recovered from the repository with search
-        or grep. A method name, a class or property that exists, a file path, one
-        service calling another, or a bare "use method X" is a **code fact**, not a
-        memory — the agent can rediscover it.
+        Do not store information that can be recovered from the repository using search,
+        grep, or code navigation. A method/class/property that exists, a file path, a
+        config location, one service calling another, or a bare "use method X" is a
+        **code fact**, not a memory.
 
         Prefer storing:
 
@@ -74,13 +89,14 @@ public static class DevcontainerScaffolder
         - project conventions
         - bug patterns
         - cross-layer consistency rules
+        - engineering decisions
 
-        Before saving memory, ask: **"Is this a reusable lesson, or just a code fact?"**
+        Before saving memory, ask: **"Is this a reusable lesson or merely a code fact?"**
 
-        - If it is a code fact, do not save it unless the user explicitly asks.
-        - If it reveals a broader pattern, save the **generalized lesson** instead of
-          the raw fact. For example, capture "When implementing feature gates, use the
-          canonical gate definition and verify backend and frontend conditions match."
+        - If it is a code fact, do not save it.
+        - If it reveals a broader pattern, save the **generalized lesson** instead. For
+          example, capture "When implementing feature gates, use the canonical gate
+          definition and verify frontend and backend gate conditions remain consistent."
           rather than "Use `IsEventsFeatureEnabled`."
 
         """;
@@ -238,10 +254,13 @@ public static class DevcontainerScaffolder
         File.WriteAllText(scriptPath, PostCreateScript);
         MakeExecutable(scriptPath);
 
-        // Wire the deterministic UserPromptSubmit hook into the project's Claude Code
-        // settings. The hook lives in the workspace (persists across rebuilds and is
-        // committed), so unlike the MCP registration it is set once here, not per-rebuild.
+        // Wire the deterministic hooks into the project's Claude Code settings: the
+        // UserPromptSubmit hook injects recall context, and the Stop hook captures
+        // reusable lessons after each turn. The hooks live in the workspace (persist
+        // across rebuilds and are committed), so unlike the MCP registration they are
+        // set once here, not per-rebuild.
         var hookOutcome = EnsureUserPromptSubmitHook(projectRoot);
+        var captureHookOutcome = EnsureCaptureHook(projectRoot);
 
         // Append standing guidance so the agent recalls rules and captures accepted
         // review comments by default.
@@ -261,6 +280,7 @@ public static class DevcontainerScaffolder
             DevcontainerJsonPath: DevcontainerJsonRelativePath,
             ManualSteps: jsonExisted ? ExistingManifestInstructions : null,
             HookOutcome: hookOutcome,
+            CaptureHookOutcome: captureHookOutcome,
             ClaudeSettingsPath: ClaudeSettingsRelativePath,
             GuidanceOutcome: guidanceOutcome,
             ClaudeMdPath: ClaudeMdRelativePath);
@@ -295,10 +315,27 @@ public static class DevcontainerScaffolder
 
     /// <summary>
     /// Ensures the project's <c>.claude/settings.json</c> registers the AgentRecall
-    /// <c>UserPromptSubmit</c> hook, creating or merging without disturbing other
-    /// settings. Idempotent: a second run reports the hook is already present.
+    /// recall (<c>UserPromptSubmit</c>) hook, creating or merging without disturbing
+    /// other settings. Idempotent: a second run reports the hook is already present.
     /// </summary>
-    public static HookSetupOutcome EnsureUserPromptSubmitHook(string projectRoot)
+    public static HookSetupOutcome EnsureUserPromptSubmitHook(string projectRoot) =>
+        EnsureHook(projectRoot, RecallHookEvent, HookCommand);
+
+    /// <summary>
+    /// Ensures the project's <c>.claude/settings.json</c> registers the AgentRecall
+    /// capture (<c>Stop</c>) hook so reusable lessons are stored deterministically
+    /// after each turn. Creating or merging without disturbing other settings, and
+    /// idempotent like the recall hook.
+    /// </summary>
+    public static HookSetupOutcome EnsureCaptureHook(string projectRoot) =>
+        EnsureHook(projectRoot, CaptureHookEvent, CaptureHookCommand);
+
+    /// <summary>
+    /// Registers <paramref name="command"/> under the given Claude Code
+    /// <paramref name="eventName"/> in <c>.claude/settings.json</c>, merge-safe and
+    /// idempotent: the command appears at most once per event.
+    /// </summary>
+    private static HookSetupOutcome EnsureHook(string projectRoot, string eventName, string command)
     {
         var path = Path.Combine(projectRoot, ClaudeSettingsRelativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -350,13 +387,13 @@ public static class DevcontainerScaffolder
             root["hooks"] = hooks;
         }
 
-        if (hooks["UserPromptSubmit"] is not JsonArray matchers)
+        if (hooks[eventName] is not JsonArray matchers)
         {
             matchers = new JsonArray();
-            hooks["UserPromptSubmit"] = matchers;
+            hooks[eventName] = matchers;
         }
 
-        if (HookAlreadyRegistered(matchers))
+        if (HookAlreadyRegistered(matchers, command))
         {
             return HookSetupOutcome.AlreadyPresent;
         }
@@ -368,7 +405,7 @@ public static class DevcontainerScaffolder
                 new JsonObject
                 {
                     ["type"] = "command",
-                    ["command"] = HookCommand,
+                    ["command"] = command,
                 },
             },
         });
@@ -377,8 +414,8 @@ public static class DevcontainerScaffolder
         return existed ? HookSetupOutcome.Merged : HookSetupOutcome.Created;
     }
 
-    /// <summary>True when any matcher already runs the AgentRecall hook command.</summary>
-    private static bool HookAlreadyRegistered(JsonArray matchers)
+    /// <summary>True when any matcher already runs the given hook command.</summary>
+    private static bool HookAlreadyRegistered(JsonArray matchers, string command)
     {
         foreach (var matcher in matchers)
         {
@@ -389,7 +426,7 @@ public static class DevcontainerScaffolder
 
             foreach (var entry in inner)
             {
-                if (entry?["command"]?.GetValue<string>() == HookCommand)
+                if (entry?["command"]?.GetValue<string>() == command)
                 {
                     return true;
                 }
@@ -476,7 +513,8 @@ public enum GuidanceOutcome
 /// <param name="CreatedDevcontainerJson">Whether a fresh manifest was written.</param>
 /// <param name="DevcontainerJsonPath">Relative path of the manifest.</param>
 /// <param name="ManualSteps">Steps to apply to an existing manifest, or null.</param>
-/// <param name="HookOutcome">How the UserPromptSubmit hook was wired in.</param>
+/// <param name="HookOutcome">How the UserPromptSubmit (recall) hook was wired in.</param>
+/// <param name="CaptureHookOutcome">How the Stop (capture) hook was wired in.</param>
 /// <param name="ClaudeSettingsPath">Relative path of the Claude Code settings file.</param>
 /// <param name="GuidanceOutcome">How the CLAUDE.md guidance block was applied.</param>
 /// <param name="ClaudeMdPath">Relative path of the guidance file.</param>
@@ -487,6 +525,7 @@ public sealed record DevcontainerInitResult(
     string DevcontainerJsonPath,
     string? ManualSteps,
     HookSetupOutcome HookOutcome,
+    HookSetupOutcome CaptureHookOutcome,
     string ClaudeSettingsPath,
     GuidanceOutcome GuidanceOutcome,
     string ClaudeMdPath);

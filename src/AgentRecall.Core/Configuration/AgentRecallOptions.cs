@@ -60,6 +60,14 @@ public sealed class AgentRecallOptions
     public bool HookIncludePending { get; set; }
 
     /// <summary>
+    /// Whether the Stop-hook capture path runs. When true (the default), AgentRecall
+    /// inspects the just-finished turn for a reusable lesson and stores it
+    /// automatically, so capture is as deterministic as recall. When false, the
+    /// capture hook is a no-op even if it's wired into Claude Code's settings.
+    /// </summary>
+    public bool CaptureHookEnabled { get; set; } = true;
+
+    /// <summary>
     /// When true (the default), captured feedback is screened by the memory-worthiness
     /// classifier so low-value code facts are not stored as rules and code facts that
     /// hint at a reusable pattern are stored as the generalized lesson instead. Set it

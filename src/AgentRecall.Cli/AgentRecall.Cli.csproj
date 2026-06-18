@@ -42,7 +42,7 @@
     <RepositoryUrl>https://github.com/AkbarDizaji/AgentRecall</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>0.2.8 multi-targets the tool to net8.0 (LTS) and net10.0, so it installs on machines without the .NET 10 SDK — fixing the misleading "DotnetToolSettings.xml was not found" error on .NET 8/9 SDKs. Full notes: https://github.com/AkbarDizaji/AgentRecall/blob/main/CHANGELOG.md</PackageReleaseNotes>
+    <PackageReleaseNotes>0.2.9 makes capture as deterministic as recall: a new `agentrecall hook capture` runs as a Claude Code Stop hook and stores reusable lessons automatically after a turn (rejecting code facts, generalizing specific ones), so lessons are no longer lost to model discretion. Full notes: https://github.com/AkbarDizaji/AgentRecall/blob/main/CHANGELOG.md</PackageReleaseNotes>
   </PropertyGroup>
 
   <ItemGroup>

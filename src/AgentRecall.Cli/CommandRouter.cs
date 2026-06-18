@@ -160,22 +160,10 @@ public static class CommandRouter
             var verb = result.ScriptOverwritten ? "Updated" : "Wrote";
             output.WriteLine($"{verb} {result.ScriptPath} (installs AgentRecall from NuGet on container create/rebuild).");
 
-            switch (result.HookOutcome)
-            {
-                case Devcontainer.HookSetupOutcome.Created:
-                    output.WriteLine($"Wrote {result.ClaudeSettingsPath} with the UserPromptSubmit hook (automatic rule injection).");
-                    break;
-                case Devcontainer.HookSetupOutcome.Merged:
-                    output.WriteLine($"Added the UserPromptSubmit hook to {result.ClaudeSettingsPath} (automatic rule injection).");
-                    break;
-                case Devcontainer.HookSetupOutcome.AlreadyPresent:
-                    output.WriteLine($"UserPromptSubmit hook already present in {result.ClaudeSettingsPath}; left it as is.");
-                    break;
-                case Devcontainer.HookSetupOutcome.SettingsUnparseable:
-                    output.WriteLine($"Could not parse {result.ClaudeSettingsPath}; left it untouched.");
-                    output.WriteLine($"Add this hook manually: a UserPromptSubmit command hook running \"{Devcontainer.DevcontainerScaffolder.HookCommand}\".");
-                    break;
-            }
+            WriteHookOutcome(output, result.HookOutcome, result.ClaudeSettingsPath,
+                "UserPromptSubmit", "automatic rule injection", Devcontainer.DevcontainerScaffolder.HookCommand);
+            WriteHookOutcome(output, result.CaptureHookOutcome, result.ClaudeSettingsPath,
+                "Stop", "automatic lesson capture", Devcontainer.DevcontainerScaffolder.CaptureHookCommand);
 
             switch (result.GuidanceOutcome)
             {
@@ -208,6 +196,32 @@ public static class CommandRouter
         {
             output.WriteLine($"Failed to scaffold dev container: {ex.Message}");
             return 1;
+        }
+    }
+
+    private static void WriteHookOutcome(
+        TextWriter output,
+        Devcontainer.HookSetupOutcome outcome,
+        string settingsPath,
+        string eventName,
+        string purpose,
+        string command)
+    {
+        switch (outcome)
+        {
+            case Devcontainer.HookSetupOutcome.Created:
+                output.WriteLine($"Wrote {settingsPath} with the {eventName} hook ({purpose}).");
+                break;
+            case Devcontainer.HookSetupOutcome.Merged:
+                output.WriteLine($"Added the {eventName} hook to {settingsPath} ({purpose}).");
+                break;
+            case Devcontainer.HookSetupOutcome.AlreadyPresent:
+                output.WriteLine($"{eventName} hook already present in {settingsPath}; left it as is.");
+                break;
+            case Devcontainer.HookSetupOutcome.SettingsUnparseable:
+                output.WriteLine($"Could not parse {settingsPath}; left it untouched.");
+                output.WriteLine($"Add this hook manually: a {eventName} command hook running \"{command}\".");
+                break;
         }
     }
 
@@ -717,25 +731,53 @@ public static class CommandRouter
         TextWriter output,
         CancellationToken cancellationToken)
     {
-        if (args.Length == 0 || args[0] != "user-prompt-submit")
+        var sub = args.Length > 0 ? args[0] : string.Empty;
+
+        switch (sub)
         {
-            output.WriteLine("Usage: agentrecall hook user-prompt-submit");
-            output.WriteLine("(reads the Claude Code hook payload on stdin; intended for a UserPromptSubmit hook)");
-            return 1;
+            case "user-prompt-submit":
+            {
+                var payload = await Console.In.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+                var context = await Hooks.UserPromptSubmitHook
+                    .RunAsync(payload, services, Console.Error, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (!string.IsNullOrEmpty(context))
+                {
+                    output.WriteLine(context);
+                }
+
+                // Always succeed so the hook never blocks the prompt.
+                return 0;
+            }
+
+            case "capture":
+            {
+                var payload = await Console.In.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+                var message = await Hooks.CaptureHook
+                    .RunAsync(payload, services, Console.Error, cancellationToken)
+                    .ConfigureAwait(false);
+
+                // Surface a captured/skipped decision as a non-blocking Stop-hook
+                // systemMessage. Nothing is written when there was no decision.
+                if (!string.IsNullOrEmpty(message))
+                {
+                    output.WriteLine(new System.Text.Json.Nodes.JsonObject
+                    {
+                        ["systemMessage"] = message,
+                    }.ToJsonString());
+                }
+
+                // Always succeed so the hook never blocks Claude Code.
+                return 0;
+            }
+
+            default:
+                output.WriteLine("Usage: agentrecall hook <user-prompt-submit|capture>");
+                output.WriteLine("(reads the Claude Code hook payload on stdin; user-prompt-submit injects");
+                output.WriteLine(" recall context, capture stores reusable lessons after a turn)");
+                return 1;
         }
-
-        var payload = await Console.In.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
-        var context = await Hooks.UserPromptSubmitHook
-            .RunAsync(payload, services, Console.Error, cancellationToken)
-            .ConfigureAwait(false);
-
-        if (!string.IsNullOrEmpty(context))
-        {
-            output.WriteLine(context);
-        }
-
-        // Always succeed so the hook never blocks the prompt.
-        return 0;
     }
 
     private static async Task<int> EvalAsync(string[] args, TextWriter output, CancellationToken cancellationToken)

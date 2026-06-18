@@ -4,6 +4,26 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.9] - 2026-06-18
+
+### Added
+- **Deterministic capture, to match deterministic recall.** Recall already runs
+  automatically via the `UserPromptSubmit` hook; capture previously depended on the
+  model choosing to call an MCP tool, so lessons were frequently lost. A new
+  `agentrecall hook capture` command runs as a Claude Code `Stop` hook (after the
+  assistant finishes a turn): it reads the turn from the hook payload or transcript,
+  and when the user's message is a genuine correction it stores the lesson through
+  the same memory-worthiness policy as every other path — code facts are rejected,
+  specific facts are generalized, and accepted guidance is stored Active. The hook
+  never throws and never blocks (always exits 0), and surfaces a one-line
+  `systemMessage` only when a capture decision was actually made.
+  `agentrecall devcontainer init` now wires both hooks (recall + capture),
+  merge-safe and idempotent.
+
+  Claude Code exposes no hook that delivers the prompt/response inline after a turn;
+  the `Stop` hook is the post-response trigger, and it provides a `transcript_path`
+  the capture hook parses — so capture is deterministic without any LLM call.
+
 ## [0.2.8] - 2026-06-18
 
 ### Fixed

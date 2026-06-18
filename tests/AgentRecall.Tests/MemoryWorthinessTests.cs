@@ -297,6 +297,6 @@ public class MemoryWorthinessTests
         var guidance = DevcontainerScaffolder.ClaudeMdGuidance;
 
         Assert.Contains("Store lessons, not facts", guidance, StringComparison.Ordinal);
-        Assert.Contains("Is this a reusable lesson, or just a code fact?", guidance, StringComparison.Ordinal);
+        Assert.Contains("Is this a reusable lesson or merely a code fact?", guidance, StringComparison.Ordinal);
     }
 }
