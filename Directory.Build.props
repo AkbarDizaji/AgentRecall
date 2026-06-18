@@ -6,9 +6,27 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 
     <!-- Single source of truth for the AgentRecall version. -->
-    <VersionPrefix>0.2.7</VersionPrefix>
+    <VersionPrefix>0.2.8</VersionPrefix>
 
     <!-- Only the CLI project opts back in (as a packed tool). -->
     <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!--
+    Dependency versions are chosen per target framework so the tool installs on
+    machines without the .NET 10 SDK. net8.0 (LTS) uses the 8.0.x stack; net10.0
+    uses the 10.0.x stack. Referencing projects pull these via $(EfCoreVersion) /
+    $(ExtensionsVersion) instead of hard-coding a version.
+  -->
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net8.0'">
+    <EfCoreVersion>8.0.0</EfCoreVersion>
+    <ExtensionsVersion>8.0.0</ExtensionsVersion>
+    <!-- Patched Caching.Memory (8.0.1) requires DI.Abstractions >= 8.0.2. -->
+    <DiAbstractionsVersion>8.0.2</DiAbstractionsVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(TargetFramework)' != 'net8.0'">
+    <EfCoreVersion>10.0.9</EfCoreVersion>
+    <ExtensionsVersion>10.0.9</ExtensionsVersion>
+    <DiAbstractionsVersion>10.0.9</DiAbstractionsVersion>
   </PropertyGroup>
 </Project>

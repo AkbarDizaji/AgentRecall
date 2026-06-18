@@ -4,6 +4,27 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.8] - 2026-06-18
+
+### Fixed
+- **The tool now installs on machines without the .NET 10 SDK.** AgentRecall was
+  packed for `net10.0` only, so `dotnet tool install -g AgentRecall` on a .NET 8 or
+  9 SDK failed with the misleading "The settings file in the tool's NuGet package
+  is invalid: Settings file 'DotnetToolSettings.xml' was not found in the package."
+  — NuGet could not find a compatible `tools/<tfw>` asset. The tool now
+  multi-targets `net8.0` (LTS) and `net10.0`, so older SDKs install and run the
+  `net8.0` build while .NET 10 keeps using `net10.0`.
+
+### Added
+- **"Lessons, not facts" memory-quality policy.** A deterministic
+  `MemoryWorthinessClassifier` screens captured feedback before a rule is created:
+  low-value code facts (a method/property exists, a file path, one service calling
+  another, a bare "use method X") are rejected, reusable lessons are stored, and a
+  code fact that hints at a reusable pattern is stored as a generalized lesson. It
+  runs across every capture flow (`feedback add`, `capture_feedback`, `add_feedback`,
+  PR-comment import) and is configurable via `MemoryWorthinessEnabled`,
+  `StoreRejectedCandidates`, and `AllowCodeFactsWhenAccepted`.
+
 ## [0.2.7] - 2026-06-18
 
 ### Added
