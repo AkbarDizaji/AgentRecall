@@ -10,6 +10,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="AgentRecall.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Update="agentrecall.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
@@ -38,7 +42,7 @@
     <RepositoryUrl>https://github.com/AkbarDizaji/AgentRecall</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>0.2.6 makes dev container recall automatic: `agentrecall devcontainer init` now wires the deterministic UserPromptSubmit hook into .claude/settings.json and appends a CLAUDE.md guidance block (merging, never overwriting). import_pr_comments gains an `accepted` flag (CLI --accepted) that records acted-on comments as Active rules instead of Pending. Full notes: https://github.com/AkbarDizaji/AgentRecall/blob/main/CHANGELOG.md</PackageReleaseNotes>
+    <PackageReleaseNotes>0.2.7 makes AgentRecall put itself on PATH automatically: the first run adds the .NET tools directory to your persisted PATH (shell profile on macOS/Linux, user PATH on Windows), fixing the common "command not found" right after install. Also adds `agentrecall setup` and bootstrap install scripts. Full notes: https://github.com/AkbarDizaji/AgentRecall/blob/main/CHANGELOG.md</PackageReleaseNotes>
   </PropertyGroup>
 
   <ItemGroup>

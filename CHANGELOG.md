@@ -4,6 +4,21 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.7] - 2026-06-18
+
+### Added
+- **AgentRecall now puts itself on PATH automatically.** A .NET global tool has no
+  post-install hook, so a fresh `dotnet tool install -g AgentRecall` is frequently
+  "not found" until the tools directory is on PATH (a common first-run failure,
+  especially on Windows PowerShell). The first time the tool runs it adds its
+  directory to the persisted user PATH — the shell profile on macOS/Linux, the
+  user `PATH` on Windows (preserving `REG_EXPAND_SZ` so entries like `%JAVA_HOME%`
+  keep working) — and prints a one-time notice. The machine-facing `mcp` and `hook`
+  commands skip this to keep their stdio clean.
+- **`agentrecall setup`** performs the same PATH fix on demand, and bootstrap
+  install scripts (`scripts/install.sh`, `scripts/install.ps1`) install and
+  configure PATH in one step.
+
 ## [0.2.6] - 2026-06-17
 
 ### Added

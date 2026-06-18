@@ -51,6 +51,9 @@ public static class CommandRouter
             case "devcontainer":
                 return DevcontainerInit(rest, output);
 
+            case "setup":
+                return SetupPath(output);
+
             case "feedback":
                 return await FeedbackAsync(rest, services, output, logger, cancellationToken).ConfigureAwait(false);
 
@@ -111,6 +114,27 @@ public static class CommandRouter
             logger.LogError(ex, "Database initialization failed.");
             output.WriteLine($"Initialization failed: {ex.Message}");
             return 1;
+        }
+    }
+
+    private static int SetupPath(TextWriter output)
+    {
+        var result = Setup.PathSetup.Ensure();
+        switch (result.Outcome)
+        {
+            case Setup.PathSetupOutcome.AlreadyConfigured:
+                output.WriteLine($"PATH already includes {result.ToolsDirectory}. You're all set.");
+                return 0;
+
+            case Setup.PathSetupOutcome.Added:
+                output.WriteLine($"Added {result.ToolsDirectory} to your {result.Detail}.");
+                output.WriteLine("Open a new terminal so `agentrecall` is found automatically.");
+                return 0;
+
+            default:
+                output.WriteLine($"Could not update PATH automatically: {result.Detail}");
+                output.WriteLine($"Add {result.ToolsDirectory} to your PATH manually, then restart your shell.");
+                return 1;
         }
     }
 
@@ -858,6 +882,7 @@ public static class CommandRouter
         output.WriteLine();
         output.WriteLine("Commands:");
         output.WriteLine("  init                 Create the local data directory and database");
+        output.WriteLine("  setup                Ensure the .NET tools directory is on your PATH");
         output.WriteLine("  devcontainer init    Scaffold dev container wiring so AgentRecall");
         output.WriteLine("                       reinstalls automatically on every rebuild");
         output.WriteLine("  feedback add         Record feedback and extract a pending rule");

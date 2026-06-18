@@ -50,15 +50,35 @@ AgentRecall is a .NET global tool. You need the [.NET SDK](https://dotnet.micros
 dotnet tool install -g AgentRecall
 ```
 
-This adds an `agentrecall` command to your PATH. Verify it:
+This installs `agentrecall` into the .NET tools directory (`~/.dotnet/tools` on
+macOS/Linux, `%USERPROFILE%\.dotnet\tools` on Windows). Verify it:
 
 ```bash
 agentrecall --version
 ```
 
-> If `agentrecall` isn't found afterward, make sure the .NET tools directory is on
-> your PATH (`~/.dotnet/tools` on macOS/Linux, `%USERPROFILE%\.dotnet\tools` on
-> Windows), then restart your shell.
+**PATH is handled for you.** A .NET global tool has no post-install step, so a
+fresh install often isn't on `PATH` in your current shell — which is why
+`agentrecall` can report "command not found" right after a successful install.
+The first time AgentRecall runs it adds its directory to your PATH permanently
+(your shell profile on macOS/Linux, the user `PATH` on Windows) and prints a
+one-time notice; open a new terminal and it's found automatically. If the very
+first invocation is the one that can't be found, either open a new terminal, or
+run it once by full path / via the bootstrap below.
+
+Bootstrap install (installs **and** fixes PATH in one step):
+
+```bash
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/AkbarDizaji/AgentRecall/main/scripts/install.sh | bash
+```
+
+```powershell
+# Windows (PowerShell)
+iwr -useb https://raw.githubusercontent.com/AkbarDizaji/AgentRecall/main/scripts/install.ps1 | iex
+```
+
+You can also fix PATH any time with `agentrecall setup`.
 
 Update or remove it later with:
 
@@ -226,6 +246,7 @@ on a retrieval regression. The same check also runs as a unit test.
 | Command | Description |
 | --- | --- |
 | `init` | Create the local data directory and database. |
+| `setup` | Ensure the .NET tools directory is on your PATH (runs automatically on first use). |
 | `devcontainer init` | Scaffold dev container wiring so AgentRecall reinstalls on every rebuild (optional `[path]`). |
 | `feedback add` | Record feedback and extract a rule from it. |
 | `search "<query>"` | Search rules by keyword (`--scope-level`, `--scope-value`, `--limit`). |
