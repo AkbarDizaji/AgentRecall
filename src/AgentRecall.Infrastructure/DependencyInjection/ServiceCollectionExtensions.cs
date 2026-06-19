@@ -5,6 +5,7 @@ using AgentRecall.Core.Context;
 using AgentRecall.Core.Extraction;
 using AgentRecall.Core.Memory;
 using AgentRecall.Core.Policy;
+using AgentRecall.Core.Reporting;
 using AgentRecall.Core.Services;
 using AgentRecall.Infrastructure.Embeddings;
 using AgentRecall.Infrastructure.Persistence;
@@ -62,6 +63,9 @@ public static class ServiceCollectionExtensions
 
         // Proactive memory helpers.
         services.AddSingleton<IFeedbackCandidateAnalyzer, FeedbackCandidateAnalyzer>();
+
+        // Learning reports: local-only analytics over rules and the event ledger.
+        services.AddScoped<ILearningReportService, LearningReportService>();
 
         return services;
     }

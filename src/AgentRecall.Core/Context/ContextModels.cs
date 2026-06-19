@@ -60,6 +60,14 @@ public sealed record ContextRequest
     /// default: only Active and Promoted rules are returned.
     /// </summary>
     public bool IncludePending { get; init; }
+
+    /// <summary>
+    /// When true, records that the selected rules were retrieved: a RuleApplied
+    /// event per rule plus a LastUsedAt bump, so learning reports can measure
+    /// which rules are actually helping. Off by default so pure ranking (and its
+    /// tests) stays side-effect free; the real retrieval entry points opt in.
+    /// </summary>
+    public bool RecordUsage { get; init; }
 }
 
 /// <summary>A rule selected for injection, with its score and an explanation.</summary>

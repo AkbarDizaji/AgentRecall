@@ -49,6 +49,8 @@ public static class UserPromptSubmitHook
                 ScopeValue = repository,
                 Limit = options.HookMaxRules,
                 IncludePending = options.HookIncludePending,
+                // Rules surfaced to the agent count as retrievals for learning reports.
+                RecordUsage = true,
             };
 
             await using var scope = services.CreateAsyncScope();

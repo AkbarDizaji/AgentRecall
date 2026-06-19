@@ -5,6 +5,7 @@ using AgentRecall.Core.Context;
 using AgentRecall.Core.Domain;
 using AgentRecall.Core.Evaluation;
 using AgentRecall.Core.Feedback;
+using AgentRecall.Core.Reporting;
 using AgentRecall.Core.Search;
 using AgentRecall.Core.Services;
 using AgentRecall.Infrastructure.DependencyInjection;
@@ -71,6 +72,9 @@ public static class CommandRouter
 
             case "eval":
                 return await EvalAsync(rest, output, cancellationToken).ConfigureAwait(false);
+
+            case "report":
+                return await ReportAsync(rest, services, output, cancellationToken).ConfigureAwait(false);
 
             case "hook":
                 return await HookAsync(rest, services, output, cancellationToken).ConfigureAwait(false);
@@ -573,6 +577,8 @@ public static class CommandRouter
             ScopeValue = options.GetValueOrDefault("scope-value"),
             FileNames = options.TryGetValue("file-path", out var filePath) && !string.IsNullOrWhiteSpace(filePath) ? [filePath] : [],
             IncludePending = options.ContainsKey("include-pending"),
+            // This is a real retrieval, so record it for the learning reports.
+            RecordUsage = true,
         };
 
         if (options.TryGetValue("limit", out var rawLimit))
@@ -882,6 +888,261 @@ public static class CommandRouter
         }
     }
 
+    private static readonly System.Text.Json.JsonSerializerOptions ReportJsonOptions = new()
+    {
+        PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+        WriteIndented = true,
+        // This output goes to a terminal, not a browser, so emit rule text such as
+        // "Result<T>" literally rather than HTML-escaping the angle brackets.
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
+    private static async Task<int> ReportAsync(
+        string[] args,
+        IServiceProvider services,
+        TextWriter output,
+        CancellationToken cancellationToken)
+    {
+        var sub = args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal) ? args[0] : string.Empty;
+        var options = ParseOptions(args);
+        var json = options.ContainsKey("json");
+
+        await using var scope = services.CreateAsyncScope();
+        await EnsureInitializedAsync(scope, cancellationToken).ConfigureAwait(false);
+        var reports = scope.ServiceProvider.GetRequiredService<ILearningReportService>();
+
+        switch (sub)
+        {
+            case "monthly":
+            {
+                var now = DateTimeOffset.UtcNow;
+                var year = now.Year;
+                var month = now.Month;
+                if (options.TryGetValue("month", out var rawMonth))
+                {
+                    if (!TryParseMonth(rawMonth, out year, out month))
+                    {
+                        output.WriteLine($"Invalid --month '{rawMonth}'. Expected YYYY-MM, e.g. 2026-06.");
+                        return 1;
+                    }
+                }
+
+                var report = await reports.GetMonthlyReportAsync(year, month, cancellationToken).ConfigureAwait(false);
+                if (json) { WriteJson(output, report); return 0; }
+                WriteMonthlyReport(output, report);
+                return 0;
+            }
+
+            case "lifecycle":
+            {
+                var report = await reports.GetLifecycleReportAsync(cancellationToken).ConfigureAwait(false);
+                if (json) { WriteJson(output, report); return 0; }
+                WriteLifecycleReport(output, report);
+                return 0;
+            }
+
+            case "usage":
+            {
+                var usageOptions = new UsageReportOptions { AsOf = DateTimeOffset.UtcNow };
+                if (options.TryGetValue("top", out var rawTop))
+                {
+                    if (!int.TryParse(rawTop, out var top) || top <= 0)
+                    {
+                        output.WriteLine($"Invalid --top '{rawTop}'. Expected a positive integer.");
+                        return 1;
+                    }
+
+                    usageOptions = usageOptions with { Top = top };
+                }
+
+                if (options.TryGetValue("stale-days", out var rawStale))
+                {
+                    if (!int.TryParse(rawStale, out var staleDays) || staleDays < 0)
+                    {
+                        output.WriteLine($"Invalid --stale-days '{rawStale}'. Expected a non-negative integer.");
+                        return 1;
+                    }
+
+                    usageOptions = usageOptions with { StaleDays = staleDays };
+                }
+
+                var report = await reports.GetUsageReportAsync(usageOptions, cancellationToken).ConfigureAwait(false);
+                if (json) { WriteJson(output, report); return 0; }
+                WriteUsageReport(output, report);
+                return 0;
+            }
+
+            case "dna":
+            {
+                var top = 5;
+                if (options.TryGetValue("top", out var rawTop))
+                {
+                    if (!int.TryParse(rawTop, out top) || top <= 0)
+                    {
+                        output.WriteLine($"Invalid --top '{rawTop}'. Expected a positive integer.");
+                        return 1;
+                    }
+                }
+
+                var report = await reports.GetDnaReportAsync(top, cancellationToken).ConfigureAwait(false);
+                if (json) { WriteJson(output, report); return 0; }
+                WriteDnaReport(output, report);
+                return 0;
+            }
+
+            default:
+                output.WriteLine("Usage:");
+                output.WriteLine("  agentrecall report monthly [--month YYYY-MM] [--json]");
+                output.WriteLine("  agentrecall report lifecycle [--json]");
+                output.WriteLine("  agentrecall report usage [--top <n>] [--stale-days <n>] [--json]");
+                output.WriteLine("  agentrecall report dna [--top <n>] [--json]");
+                return 1;
+        }
+    }
+
+    private static void WriteJson<T>(TextWriter output, T report) =>
+        output.WriteLine(System.Text.Json.JsonSerializer.Serialize(report, ReportJsonOptions));
+
+    private static bool TryParseMonth(string raw, out int year, out int month)
+    {
+        year = 0;
+        month = 0;
+        var parts = raw.Split('-');
+        return parts.Length == 2
+            && int.TryParse(parts[0], out year)
+            && int.TryParse(parts[1], out month)
+            && month is >= 1 and <= 12;
+    }
+
+    private static void WriteMonthlyReport(TextWriter output, MonthlyLearningReport r)
+    {
+        output.WriteLine("AgentRecall Learning Report");
+        output.WriteLine($"Period: {r.Period}");
+        output.WriteLine();
+        output.WriteLine($"Lessons Captured:            {r.LessonsCaptured}");
+        output.WriteLine($"Lessons Promoted:            {r.LessonsPromoted}");
+        output.WriteLine($"Lessons Superseded:          {r.LessonsSuperseded}");
+        output.WriteLine($"Lessons Rejected:            {r.LessonsRejected}");
+        output.WriteLine($"Frequently Used Rules:       {r.FrequentlyUsedRules}");
+        output.WriteLine($"Average Confidence:          {r.AverageConfidence:0.00}");
+        output.WriteLine($"Most Retrieved Rule:         {(r.MostRetrievedRule is null ? "(none)" : $"\"{r.MostRetrievedRule.RuleText}\" ({r.MostRetrievedRule.RetrievalCount}x)")}");
+        output.WriteLine($"Most Common Lesson Category: {r.MostCommonCategory ?? "(none)"}");
+    }
+
+    private static void WriteLifecycleReport(TextWriter output, RuleLifecycleReport r)
+    {
+        output.WriteLine("Rule Lifecycle");
+        output.WriteLine();
+        output.WriteLine($"Created:      {r.Created}");
+        output.WriteLine($"Promoted:     {r.Promoted}");
+        output.WriteLine($"Superseded:   {r.Superseded}");
+        output.WriteLine($"Archived:     {r.Archived}");
+        output.WriteLine($"Rejected:     {r.Rejected}");
+        output.WriteLine($"Still Active: {r.StillActive}");
+    }
+
+    private static void WriteUsageReport(TextWriter output, LearningUsageReport r)
+    {
+        output.WriteLine("Top Retrieved Rules");
+        output.WriteLine();
+        if (r.TopRetrievedRules.Count == 0)
+        {
+            output.WriteLine("  (no retrievals recorded yet)");
+        }
+        else
+        {
+            var rank = 1;
+            foreach (var rule in r.TopRetrievedRules)
+            {
+                output.WriteLine($"  {rank}. {Truncate(rule.RuleText, 80)}");
+                output.WriteLine($"     Retrieved: {rule.RetrievalCount} times");
+                rank++;
+            }
+        }
+
+        output.WriteLine();
+        output.WriteLine("Most Valuable Lessons");
+        output.WriteLine();
+        if (r.MostValuableLessons.Count == 0)
+        {
+            output.WriteLine("  (no retrievals recorded yet)");
+        }
+        else
+        {
+            var rank = 1;
+            foreach (var lesson in r.MostValuableLessons)
+            {
+                output.WriteLine($"  {rank}. {Truncate(lesson.RuleText, 80)}");
+                output.WriteLine($"     Score: {lesson.Score:0.0}  (retrieved {lesson.RetrievalCount}x × confidence {lesson.Confidence:0.00})");
+                rank++;
+            }
+        }
+
+        output.WriteLine();
+        output.WriteLine("Knowledge Growth");
+        output.WriteLine();
+        if (r.KnowledgeGrowth.Count == 0)
+        {
+            output.WriteLine("  (no rules yet)");
+        }
+        else
+        {
+            foreach (var point in r.KnowledgeGrowth)
+            {
+                output.WriteLine($"  {point.Period}: {point.CumulativeRules} rules");
+            }
+        }
+
+        output.WriteLine();
+        output.WriteLine("Potentially Stale Rules");
+        output.WriteLine();
+        if (r.StaleRules.Count == 0)
+        {
+            output.WriteLine("  (none)");
+        }
+        else
+        {
+            var rank = 1;
+            foreach (var rule in r.StaleRules)
+            {
+                var lastRetrieved = rule.DaysSinceLastRetrieved is { } days ? $"{days} days ago" : "never retrieved";
+                output.WriteLine($"  {rank}. {Truncate(rule.RuleText, 80)}");
+                output.WriteLine($"     Last Retrieved: {lastRetrieved}  |  Confidence: {rule.Confidence:0.00}");
+                rank++;
+            }
+        }
+    }
+
+    private static void WriteDnaReport(TextWriter output, ProjectDnaReport r)
+    {
+        output.WriteLine("Project DNA");
+        output.WriteLine();
+        output.WriteLine("Top Conventions");
+        output.WriteLine();
+        if (r.TopConventions.Count == 0)
+        {
+            output.WriteLine("  (no active rules yet)");
+        }
+        else
+        {
+            foreach (var convention in r.TopConventions)
+            {
+                output.WriteLine($"  {convention.Rank}. {Truncate(convention.RuleText, 90)}");
+            }
+        }
+
+        if (r.CoreCategories.Count > 0)
+        {
+            output.WriteLine();
+            output.WriteLine("Core Categories");
+            output.WriteLine();
+            foreach (var category in r.CoreCategories)
+            {
+                output.WriteLine($"  {category.Category} ({category.Count})");
+            }
+        }
+    }
+
     /// <summary>Ensures the database exists before a command touches it.</summary>
     private static Task EnsureInitializedAsync(AsyncServiceScope scope, CancellationToken cancellationToken) =>
         scope.ServiceProvider.GetRequiredService<IDatabaseInitializer>().InitializeAsync(cancellationToken);
@@ -965,6 +1226,11 @@ public static class CommandRouter
         output.WriteLine("  import pr-comments <file>");
         output.WriteLine("                       Capture PR review comments as pending rules");
         output.WriteLine("  eval retrieval       Evaluate retrieval quality against the bundled dataset");
+        output.WriteLine("  report monthly       Monthly learning report (captures, promotions, usage)");
+        output.WriteLine("  report lifecycle     Cradle-to-grave rule lifecycle counts");
+        output.WriteLine("  report usage         Top retrieved, most valuable, growth, and stale rules");
+        output.WriteLine("  report dna           Distil the project's conventions for onboarding");
+        output.WriteLine("                       (any report supports --json)");
         output.WriteLine("  hook user-prompt-submit");
         output.WriteLine("                       Gated context injection for a Claude Code UserPromptSubmit hook");
         output.WriteLine("  mcp                  Run the MCP server over stdio (for Claude Code)");

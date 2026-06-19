@@ -41,4 +41,13 @@ public enum RecallEventType
 
     /// <summary>Several rules were merged into a single canonical rule.</summary>
     RulesCompressed = 5,
+
+    /// <summary>A rule was promoted to high-trust status.</summary>
+    RulePromoted = 6,
+
+    /// <summary>A rule was archived (retired from search).</summary>
+    RuleArchived = 7,
+
+    /// <summary>A captured candidate was rejected as not memory-worthy.</summary>
+    RuleRejected = 8,
 }

@@ -121,7 +121,7 @@ public sealed class FeedbackService : IFeedbackService
         {
             recallEvent = await _events.AddAsync(new RecallEvent
             {
-                Type = RecallEventType.MistakeObserved,
+                Type = RecallEventType.RuleRejected,
                 RuleId = null,
                 Trigger = input.Task,
                 Details = $"Rejected as not memory-worthy: {worthiness.Reason}{Environment.NewLine}{BuildDetails(input)}",

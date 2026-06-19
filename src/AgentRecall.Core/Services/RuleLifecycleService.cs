@@ -50,7 +50,9 @@ public sealed class RuleLifecycleService : IRuleLifecycleService
 
         rule.Status = RuleStatus.Promoted;
         rule.UpdatedAt = DateTimeOffset.UtcNow;
-        return await _rules.UpdateAsync(rule, cancellationToken).ConfigureAwait(false);
+        var promoted = await _rules.UpdateAsync(rule, cancellationToken).ConfigureAwait(false);
+        await RecordPromotionAsync(promoted.Id, "promote", cancellationToken).ConfigureAwait(false);
+        return promoted;
     }
 
     public async Task<SupersedeResult> SupersedeAsync(int oldId, int newId, CancellationToken cancellationToken = default)
@@ -93,7 +95,17 @@ public sealed class RuleLifecycleService : IRuleLifecycleService
 
         rule.Status = RuleStatus.Archived;
         rule.UpdatedAt = DateTimeOffset.UtcNow;
-        return await _rules.UpdateAsync(rule, cancellationToken).ConfigureAwait(false);
+        var archived = await _rules.UpdateAsync(rule, cancellationToken).ConfigureAwait(false);
+
+        await _events.AddAsync(new RecallEvent
+        {
+            Type = RecallEventType.RuleArchived,
+            RuleId = archived.Id,
+            Trigger = "archive",
+            Details = $"Rule #{archived.Id} archived.",
+        }, cancellationToken).ConfigureAwait(false);
+
+        return archived;
     }
 
     public async Task<RecallRule> ReinforceAsync(int id, double amount, CancellationToken cancellationToken = default)
@@ -106,14 +118,32 @@ public sealed class RuleLifecycleService : IRuleLifecycleService
 
         // Automatically promote a sufficiently-confident rule that is still in an
         // earlier state.
+        var autoPromoted = false;
         if (rule.Confidence >= PromoteConfidenceThreshold &&
             rule.Status is RuleStatus.Active or RuleStatus.Pending)
         {
             rule.Status = RuleStatus.Promoted;
+            autoPromoted = true;
         }
 
-        return await _rules.UpdateAsync(rule, cancellationToken).ConfigureAwait(false);
+        var updated = await _rules.UpdateAsync(rule, cancellationToken).ConfigureAwait(false);
+        if (autoPromoted)
+        {
+            await RecordPromotionAsync(updated.Id, "reinforce", cancellationToken).ConfigureAwait(false);
+        }
+
+        return updated;
     }
+
+    /// <summary>Records a promotion in the event ledger so reports can attribute it to a period.</summary>
+    private Task RecordPromotionAsync(int ruleId, string trigger, CancellationToken cancellationToken) =>
+        _events.AddAsync(new RecallEvent
+        {
+            Type = RecallEventType.RulePromoted,
+            RuleId = ruleId,
+            Trigger = trigger,
+            Details = $"Rule #{ruleId} promoted.",
+        }, cancellationToken);
 
     private async Task<RecallRule> GetOrThrowAsync(int id, CancellationToken cancellationToken)
     {

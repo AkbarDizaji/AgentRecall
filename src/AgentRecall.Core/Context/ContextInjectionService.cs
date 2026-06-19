@@ -39,15 +39,18 @@ public sealed class ContextInjectionService : IContextInjectionService
     };
 
     private readonly IRecallRuleRepository _rules;
+    private readonly IRecallEventRepository _events;
     private readonly IPolicyEngine _policy;
     private readonly IConceptExpander _concepts;
 
     public ContextInjectionService(
         IRecallRuleRepository rules,
+        IRecallEventRepository events,
         IPolicyEngine policy,
         IConceptExpander concepts)
     {
         _rules = rules ?? throw new ArgumentNullException(nameof(rules));
+        _events = events ?? throw new ArgumentNullException(nameof(events));
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _concepts = concepts ?? throw new ArgumentNullException(nameof(concepts));
     }
@@ -115,7 +118,41 @@ public sealed class ContextInjectionService : IContextInjectionService
             .ThenBy(a => a.Rule.Id)
             .ToList();
 
-        return PackIntoBudget(ranked, request.TokenBudget, request.Limit, prunedByPolicy);
+        var result = PackIntoBudget(ranked, request.TokenBudget, request.Limit, prunedByPolicy);
+
+        if (request.RecordUsage)
+        {
+            await RecordRetrievalAsync(result, cancellationToken).ConfigureAwait(false);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Records that the injected rules were retrieved: one RuleApplied event per
+    /// rule and a LastUsedAt bump. This is the signal learning reports use to rank
+    /// which rules are actually helping and to detect rules that have gone stale.
+    /// </summary>
+    private async Task RecordRetrievalAsync(ContextInjectionResult result, CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var retrieved = result.All
+            .Select(injected => injected.Rule)
+            .DistinctBy(rule => rule.Id);
+
+        foreach (var rule in retrieved)
+        {
+            await _events.AddAsync(new RecallEvent
+            {
+                Type = RecallEventType.RuleApplied,
+                RuleId = rule.Id,
+                Trigger = "retrieval",
+                Details = $"Rule #{rule.Id} retrieved for context injection.",
+            }, cancellationToken).ConfigureAwait(false);
+
+            rule.LastUsedAt = now;
+            await _rules.UpdateAsync(rule, cancellationToken).ConfigureAwait(false);
+        }
     }
 
     private Assessment Assess(
