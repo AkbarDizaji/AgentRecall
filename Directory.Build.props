@@ -5,6 +5,17 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 
+    <!--
+      NU1903 stays a warning rather than an error. It flags CVE-2025-6965 in the
+      transitive native package SQLitePCLRaw.lib.e_sqlite3 (pulled in by EF Core
+      Sqlite). The 2.1.x line has no patched release; the fix only ships in the
+      3.x bundle, which EF Core 8/10 do not support. The bug needs
+      attacker-controlled SQL, which a local-first tool with a local database
+      does not expose. Keep it visible so we can drop this once EF Core ships a
+      3.x-compatible bundle.
+    -->
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1903</WarningsNotAsErrors>
+
     <!-- Single source of truth for the AgentRecall version. -->
     <VersionPrefix>0.3.0</VersionPrefix>
 
