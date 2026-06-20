@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using AgentRecall.Core.Domain;
 
 namespace AgentRecall.Core.Memory;
 
@@ -58,7 +59,8 @@ public sealed class MemoryWorthinessClassifier : IMemoryWorthinessClassifier
             return new MemoryWorthinessResult(
                 MemoryWorthiness.WorthStoring,
                 "Captures a reusable engineering lesson (conditional, cross-layer, or stated principle).",
-                0.9);
+                0.9,
+                Category: Categorize(lower));
         }
 
         // 2. A low-value code fact is rejected — unless it hints at a reusable pattern.
@@ -68,25 +70,40 @@ public sealed class MemoryWorthinessClassifier : IMemoryWorthinessClassifier
             var pattern = DetectGeneralizablePattern(lower);
             if (pattern is not null)
             {
+                // The raw detail is a fact, but it reveals a repo convention worth
+                // keeping (as the generalized lesson) once reviewed.
                 return new MemoryWorthinessResult(
                     MemoryWorthiness.NeedsReview,
                     $"The specific code detail is a fact, but the underlying {pattern.Value.Topic} is reusable.",
                     0.7,
-                    pattern.Value.Lesson);
+                    pattern.Value.Lesson,
+                    RuleCategory.RepositoryConvention);
             }
 
             return new MemoryWorthinessResult(
                 MemoryWorthiness.NotWorthStoring,
                 $"Looks like a {fact}, which is recoverable from the repository with search.",
-                0.85);
+                0.85,
+                Category: RuleCategory.CodeFact);
         }
 
         // 3. Nothing distinctive: keep it as guidance, but with modest confidence.
         return new MemoryWorthinessResult(
             MemoryWorthiness.WorthStoring,
             "No low-value code-fact pattern detected; storing as guidance.",
-            0.5);
+            0.5,
+            Category: Categorize(lower));
     }
+
+    /// <summary>
+    /// Splits a store-worthy candidate into a reusable engineering lesson (a
+    /// general principle or cross-layer consistency rule that survives refactors)
+    /// or a repository convention (conditional guidance about what to use here).
+    /// </summary>
+    private static RuleCategory Categorize(string lower) =>
+        LessonPhrases.Any(p => lower.Contains(p, StringComparison.Ordinal))
+            ? RuleCategory.EngineeringLesson
+            : RuleCategory.RepositoryConvention;
 
     private static bool HasLessonSignal(string lower)
     {
@@ -110,11 +127,15 @@ public sealed class MemoryWorthinessClassifier : IMemoryWorthinessClassifier
             .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
             .Any(IsCodeSymbol);
 
-        // "X has Y", "Y exists", "there is a Y" — a member/type existence fact.
+        // "X has Y", "X exposes Y", "Y exists", "there is a Y" — a member/type
+        // existence fact.
         if (hasSymbol && (lower.Contains(" has ", StringComparison.Ordinal) ||
                           lower.Contains(" exists", StringComparison.Ordinal) ||
                           lower.Contains("there is", StringComparison.Ordinal) ||
-                          lower.Contains(" contains ", StringComparison.Ordinal)))
+                          lower.Contains(" contains ", StringComparison.Ordinal) ||
+                          lower.Contains(" exposes ", StringComparison.Ordinal) ||
+                          lower.Contains(" defines ", StringComparison.Ordinal) ||
+                          lower.Contains(" provides ", StringComparison.Ordinal)))
         {
             return "method/property existence fact";
         }

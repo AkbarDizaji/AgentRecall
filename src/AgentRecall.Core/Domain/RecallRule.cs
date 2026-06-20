@@ -13,6 +13,13 @@ public sealed class RecallRule
 
     public RuleStatus Status { get; set; } = RuleStatus.Active;
 
+    /// <summary>
+    /// What kind of knowledge this rule captures. Defaults to
+    /// <see cref="RuleCategory.Unknown"/> so rules from earlier versions keep
+    /// working unchanged.
+    /// </summary>
+    public RuleCategory Category { get; set; } = RuleCategory.Unknown;
+
     /// <summary>What situation triggers this rule (the cue to recall it).</summary>
     public string Trigger { get; set; } = string.Empty;
 

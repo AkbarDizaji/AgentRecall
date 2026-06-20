@@ -606,18 +606,17 @@ public static class CommandRouter
 
         output.WriteLine(result.Explanation);
 
-        WriteBucket(output, "Must-follow", result.MustFollow, showReason: true);
-        WriteBucket(output, "Warnings", result.Warnings, showReason: false);
-
-        WriteList(output, "Preferred patterns", ContextProjection.PreferredPatterns(result));
-        WriteList(output, "Anti-patterns", ContextProjection.AntiPatterns(result));
+        // Every bucket is rendered in the same conditional shape rules are stored in.
+        WriteBucket(output, "Must Follow", result.MustFollow);
+        WriteBucket(output, "Warnings", result.Warnings);
+        WriteBucket(output, "Preferred Patterns", result.Suggested);
 
         var ids = ContextProjection.SourceRuleIds(result);
         output.WriteLine($"Source rule IDs: {string.Join(", ", ids.Select(id => $"#{id}"))}");
         return 0;
     }
 
-    private static void WriteBucket(TextWriter output, string title, IReadOnlyList<Core.Context.InjectedRule> rules, bool showReason)
+    private static void WriteBucket(TextWriter output, string title, IReadOnlyList<Core.Context.InjectedRule> rules)
     {
         if (rules.Count == 0)
         {
@@ -628,26 +627,14 @@ public static class CommandRouter
         output.WriteLine($"{title}:");
         foreach (var injected in rules)
         {
-            output.WriteLine($"  #{injected.Rule.Id} [score {injected.Score:0.00}] {Truncate(injected.Rule.RuleText, 90)}");
-            if (showReason && !string.IsNullOrWhiteSpace(injected.Rule.TechnicalContext))
+            // Render each rule as a conditional block: When … / Do / Avoid / Because / Source.
+            var block = Core.Context.ConditionalRuleFormatter.Format(injected.Rule, indent: 4, includeSource: true);
+            var lines = block.Replace("\r", string.Empty, StringComparison.Ordinal).Split('\n');
+            output.WriteLine($"- {lines[0]}");
+            for (var i = 1; i < lines.Length; i++)
             {
-                output.WriteLine($"      reason: {Truncate(injected.Rule.TechnicalContext, 90)}");
+                output.WriteLine(lines[i]);
             }
-        }
-    }
-
-    private static void WriteList(TextWriter output, string title, IReadOnlyList<string> items)
-    {
-        if (items.Count == 0)
-        {
-            return;
-        }
-
-        output.WriteLine();
-        output.WriteLine($"{title}:");
-        foreach (var item in items)
-        {
-            output.WriteLine($"  - {Truncate(item, 100)}");
         }
     }
 
@@ -1180,6 +1167,7 @@ public static class CommandRouter
     private static void WriteRule(TextWriter output, RecallRule rule)
     {
         output.WriteLine($"Rule #{rule.Id} (v{rule.Version}) [{rule.Status}]");
+        output.WriteLine($"  Category:          {rule.Category}");
         output.WriteLine($"  Trigger:           {rule.Trigger}");
         output.WriteLine($"  Mistake:           {rule.Mistake}");
         output.WriteLine($"  Rule:              {rule.RuleText}");

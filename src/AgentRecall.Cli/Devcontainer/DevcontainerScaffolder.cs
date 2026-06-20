@@ -99,6 +99,27 @@ public static class DevcontainerScaffolder
           definition and verify frontend and backend gate conditions remain consistent."
           rather than "Use `IsEventsFeatureEnabled`."
 
+        ### Store rules as conditional knowledge
+
+        AgentRecall stores rules as conditional knowledge. Prefer saving:
+
+        - **When** <condition>, **do** <action>
+        - **Avoid** <anti-pattern>
+        - **Because** <reason>
+
+        Do not save:
+
+        - raw code facts
+        - method existence facts
+        - file path facts
+        - implementation details that can be recovered from search
+
+        Store **repository conventions** when they reduce repeated agent mistakes, even
+        if they mention specific methods — e.g. "When implementing Events backend gates,
+        use `IsEventsFeatureEnabled` instead of `IsVenueMigratedFor`." Store
+        **engineering lessons** for reusable why/patterns that survive refactors — e.g.
+        "Frontend and backend feature gate definitions must match."
+
         """;
 
     /// <summary>

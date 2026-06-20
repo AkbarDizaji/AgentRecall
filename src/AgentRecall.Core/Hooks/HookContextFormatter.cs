@@ -24,18 +24,44 @@ public static class HookContextFormatter
         var sb = new StringBuilder();
         sb.AppendLine("## AgentRecall Technical Context");
 
-        AppendSection(sb, "Must Follow", result.MustFollow.Select(r => r.Rule.RuleText));
-        AppendSection(sb, "Warnings", result.Warnings.Select(r => r.Rule.RuleText));
-        AppendSection(sb, "Preferred Patterns", result.Suggested.Select(r => r.Rule.RuleText));
-        AppendSection(sb, "Anti Patterns", result.All.Select(r => r.Rule.Mistake));
-        AppendSection(sb, "Source Rules", result.All.Select(r => $"#{r.Rule.Id}"));
+        // Each section renders its rules as conditional blocks (When / Do / Avoid /
+        // Because) so the agent receives knowledge in the same shape it is stored.
+        AppendConditionalSection(sb, "Must Follow", result.MustFollow);
+        AppendConditionalSection(sb, "Warnings", result.Warnings);
+        AppendConditionalSection(sb, "Preferred Patterns", result.Suggested);
+
+        // A compact source list stays at the end so the agent can cite every rule.
+        AppendSourceRules(sb, result.All.Select(r => $"#{r.Rule.Id}"));
 
         return sb.ToString().TrimEnd();
     }
 
-    private static void AppendSection(StringBuilder sb, string title, IEnumerable<string> items)
+    private static void AppendConditionalSection(StringBuilder sb, string title, IReadOnlyList<Context.InjectedRule> rules)
     {
-        var list = items
+        if (rules.Count == 0)
+        {
+            return;
+        }
+
+        sb.AppendLine();
+        sb.AppendLine($"{title}:");
+        foreach (var injected in rules)
+        {
+            // The block's own lines are indented; the "- " bullet sits in front of
+            // the condition so the Do/Avoid/Because lines nest beneath it.
+            var block = Context.ConditionalRuleFormatter.Format(injected.Rule, indent: 2, includeSource: true);
+            var lines = block.Replace("\r", string.Empty, StringComparison.Ordinal).Split('\n');
+            sb.AppendLine($"- {Truncate(lines[0], MaxItemLength)}");
+            for (var i = 1; i < lines.Length; i++)
+            {
+                sb.AppendLine($"  {Truncate(lines[i], MaxItemLength)}");
+            }
+        }
+    }
+
+    private static void AppendSourceRules(StringBuilder sb, IEnumerable<string> ids)
+    {
+        var list = ids
             .Where(i => !string.IsNullOrWhiteSpace(i))
             .Select(i => i.Trim())
             .Distinct()
@@ -47,10 +73,10 @@ public static class HookContextFormatter
         }
 
         sb.AppendLine();
-        sb.AppendLine($"{title}:");
+        sb.AppendLine("Source Rules:");
         foreach (var item in list)
         {
-            sb.AppendLine($"- {Truncate(item, MaxItemLength)}");
+            sb.AppendLine($"- {item}");
         }
     }
 

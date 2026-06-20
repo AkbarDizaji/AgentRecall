@@ -17,6 +17,16 @@ internal static class ExtractionHeuristics
     public static readonly string[] Prohibitive =
         ["don't", "do not", "dont", "never", "avoid", "stop ", "shouldn't", "should not", "no need", "without", "must not", "cannot", "can't"];
 
+    // Words that already open a condition, so a trigger built from them needs no
+    // "working on" prefix and no gerund rewrite.
+    private static readonly HashSet<string> ConditionalOpeners = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "when", "whenever", "while", "if", "before", "after", "once", "during",
+    };
+
+    // Markers that separate a recommended action from the anti-pattern it replaces.
+    private static readonly string[] SubstitutionMarkers = [" instead of ", " rather than "];
+
     // Leading imperative verbs mapped to their gerund, for readable triggers.
     private static readonly Dictionary<string, string> Gerunds = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -100,6 +110,13 @@ internal static class ExtractionHeuristics
         var first = space < 0 ? text : text[..space];
         var rest = space < 0 ? string.Empty : text[(space + 1)..];
 
+        // Already a condition ("When implementing X"): keep it, just clean it up.
+        if (ConditionalOpeners.Contains(first))
+        {
+            var cleaned = char.ToUpperInvariant(text[0]) + text[1..];
+            return Truncate(cleaned, 90);
+        }
+
         string condition;
         if (Gerunds.TryGetValue(first, out var gerund))
         {
@@ -115,6 +132,72 @@ internal static class ExtractionHeuristics
         }
 
         return Truncate("When " + condition, 90);
+    }
+
+    /// <summary>
+    /// When the text opens with a condition and a comma ("When X, do Y"), splits it
+    /// into the condition and the remaining action. Returns false otherwise.
+    /// </summary>
+    public static bool TrySplitConditional(string? text, out string condition, out string action)
+    {
+        condition = string.Empty;
+        action = string.Empty;
+
+        var trimmed = (text ?? string.Empty).TrimStart();
+        if (trimmed.Length == 0)
+        {
+            return false;
+        }
+
+        var space = trimmed.IndexOf(' ', StringComparison.Ordinal);
+        var first = space < 0 ? trimmed : trimmed[..space];
+        if (!ConditionalOpeners.Contains(first))
+        {
+            return false;
+        }
+
+        var comma = trimmed.IndexOf(',', StringComparison.Ordinal);
+        if (comma < 0)
+        {
+            return false;
+        }
+
+        condition = trimmed[..comma].Trim();
+        action = trimmed[(comma + 1)..].Trim();
+        return condition.Length > 0 && action.Length > 0;
+    }
+
+    /// <summary>
+    /// Splits "use X instead of Y" / "use X rather than Y" into the recommended
+    /// action (X) and the anti-pattern it replaces (Y). Returns false when there is
+    /// no substitution marker.
+    /// </summary>
+    public static bool TrySplitSubstitution(string sentence, out string action, out string avoid)
+    {
+        action = string.Empty;
+        avoid = string.Empty;
+
+        foreach (var marker in SubstitutionMarkers)
+        {
+            var index = sentence.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (index < 0)
+            {
+                continue;
+            }
+
+            var left = sentence[..index].Trim();
+            var right = sentence[(index + marker.Length)..].Trim();
+            if (left.Length == 0 || right.Length == 0)
+            {
+                return false;
+            }
+
+            action = left;
+            avoid = right;
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>Whether two pieces of guidance describe the same subject.</summary>

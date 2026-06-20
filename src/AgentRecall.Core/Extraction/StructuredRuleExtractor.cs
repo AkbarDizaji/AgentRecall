@@ -49,29 +49,56 @@ public static class StructuredRuleExtractor
         var fixedOutput = (input.FixedOutput ?? string.Empty).Trim();
         var badOutput = (input.BadOutput ?? string.Empty).Trim();
 
-        var trigger = ExtractionHeuristics.NormalizeTrigger(task.Length > 0 ? task : feedback);
+        // When no task is given and the feedback itself states the condition
+        // ("When X, do Y"), prefer the condition as the trigger and derive the
+        // action from the remainder — not the whole sentence.
+        string trigger;
+        string actionSource;
+        if (task.Length == 0 && ExtractionHeuristics.TrySplitConditional(feedback, out var condition, out var remainder))
+        {
+            trigger = ExtractionHeuristics.NormalizeTrigger(condition);
+            actionSource = remainder;
+        }
+        else
+        {
+            trigger = ExtractionHeuristics.NormalizeTrigger(task.Length > 0 ? task : feedback);
+            actionSource = feedback;
+        }
 
-        var sentences = ExtractionHeuristics.SplitSentences(feedback);
+        var sentences = ExtractionHeuristics.SplitSentences(actionSource);
         var prescriptive = sentences.FirstOrDefault(ExtractionHeuristics.IsPrescriptive);
         var prohibitive = sentences.FirstOrDefault(ExtractionHeuristics.IsProhibitive);
 
         // The "do" prefers a clean positive sentence, then a fixed-output sample,
         // then the first sentence as a last resort.
-        var doText = prescriptive is not null
-            ? ExtractionHeuristics.NormalizeSentence(prescriptive)
-            : fixedOutput.Length > 0
-                ? ExtractionHeuristics.NormalizeSentence("Use " + fixedOutput)
-                : sentences.Count > 0
-                    ? ExtractionHeuristics.NormalizeSentence(sentences[0])
-                    : string.Empty;
+        var doSource = prescriptive
+            ?? (fixedOutput.Length > 0
+                ? "Use " + fixedOutput
+                : sentences.Count > 0 ? sentences[0] : string.Empty);
 
-        // The "do not" comes from a prohibition or the bad-output sample — never a
-        // restatement of the "do".
+        // "Use X instead of Y" yields a positive action (X) and the anti-pattern it
+        // replaces (Y), so the action never carries the thing to avoid.
+        string doText;
+        string? avoidFromSubstitution = null;
+        if (ExtractionHeuristics.TrySplitSubstitution(doSource, out var action, out var replaced))
+        {
+            doText = ExtractionHeuristics.NormalizeSentence(action);
+            avoidFromSubstitution = replaced;
+        }
+        else
+        {
+            doText = ExtractionHeuristics.NormalizeSentence(doSource);
+        }
+
+        // The "do not" comes from an explicit prohibition, the bad-output sample, or
+        // the replaced anti-pattern — never a restatement of the "do".
         var doNot = prohibitive is not null
             ? ExtractionHeuristics.NormalizeSentence(prohibitive)
             : badOutput.Length > 0
                 ? ExtractionHeuristics.NormalizeSentence("Avoid " + badOutput)
-                : string.Empty;
+                : avoidFromSubstitution is not null
+                    ? ExtractionHeuristics.NormalizeSentence("Avoid " + avoidFromSubstitution)
+                    : string.Empty;
 
         if (doNot.Length > 0 && ExtractionHeuristics.Equivalent(doText, doNot))
         {

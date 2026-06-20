@@ -24,6 +24,12 @@ public sealed class FeedbackService : IFeedbackService
     private static readonly HashSet<RuleStatus> NotReusable =
         [RuleStatus.Superseded, RuleStatus.Archived, RuleStatus.Retired];
 
+    /// <summary>Default confidence for a reusable engineering lesson.</summary>
+    public const double EngineeringLessonConfidence = 0.7;
+
+    /// <summary>Default confidence for a repository convention (lower than a lesson).</summary>
+    public const double RepositoryConventionConfidence = 0.55;
+
     private readonly IRecallEventRepository _events;
     private readonly IRecallRuleRepository _rules;
     private readonly IRecallExtractor _extractor;
@@ -77,6 +83,12 @@ public sealed class FeedbackService : IFeedbackService
             rule.RuleText = lesson;
         }
 
+        // Record the classified category and let it set the default trust: an
+        // engineering lesson survives refactors, so it is trusted more than a
+        // repository convention that names specific symbols.
+        rule.Category = worthiness?.Category ?? RuleCategory.Unknown;
+        ApplyCategoryConfidence(rule);
+
         rule.Status = approve ? RuleStatus.Active : RuleStatus.Pending;
 
         // Reuse an equivalent existing rule rather than storing a duplicate.
@@ -129,6 +141,27 @@ public sealed class FeedbackService : IFeedbackService
         }
 
         return new FeedbackResult(recallEvent, null) { Worthiness = worthiness };
+    }
+
+    /// <summary>
+    /// Sets the rule's confidence from its category, but only when the rule is
+    /// structurally sound (the quality validator leaves a core-field-missing rule
+    /// at a low ceiling, which must not be raised).
+    /// </summary>
+    private static void ApplyCategoryConfidence(RecallRule rule)
+    {
+        var sound = !string.IsNullOrWhiteSpace(rule.RuleText) && !string.IsNullOrWhiteSpace(rule.Trigger);
+        if (!sound)
+        {
+            return;
+        }
+
+        rule.Confidence = rule.Category switch
+        {
+            RuleCategory.EngineeringLesson => EngineeringLessonConfidence,
+            RuleCategory.RepositoryConvention => RepositoryConventionConfidence,
+            _ => rule.Confidence,
+        };
     }
 
     private async Task<RecallRule?> FindEquivalentAsync(RecallRule candidate, CancellationToken cancellationToken)

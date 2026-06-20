@@ -24,6 +24,9 @@ public sealed class AgentRecallDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Status).HasConversion<string>();
             entity.Property(e => e.ScopeLevel).HasConversion<string>();
+            // Stored as a string with a default so the additive schema reconciler
+            // can backfill the column on databases created before categories existed.
+            entity.Property(e => e.Category).HasConversion<string>().HasDefaultValue(RuleCategory.Unknown);
             entity.Property(e => e.Trigger).IsRequired();
             entity.Property(e => e.Priority).HasDefaultValue(0);
             entity.Property(e => e.Deprecated).HasDefaultValue(false);

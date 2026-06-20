@@ -1,4 +1,18 @@
+using AgentRecall.Core.Domain;
+
 namespace AgentRecall.Core.Memory;
+
+/// <summary>
+/// What the classifier decided to do with a candidate. A readable projection of
+/// <see cref="MemoryWorthiness"/>: WorthStoring → Store, NotWorthStoring → Reject,
+/// NeedsReview → NeedsReview.
+/// </summary>
+public enum MemoryDecision
+{
+    Store,
+    Reject,
+    NeedsReview,
+}
 
 /// <summary>
 /// Verdict for whether a candidate memory is worth storing as a
@@ -32,11 +46,22 @@ public enum MemoryWorthiness
 /// For <see cref="MemoryWorthiness.NeedsReview"/>, the reusable lesson to store in
 /// place of the raw code fact; otherwise <c>null</c>.
 /// </param>
+/// <param name="Category">Which kind of knowledge the candidate is.</param>
 public sealed record MemoryWorthinessResult(
     MemoryWorthiness Verdict,
     string Reason,
     double Confidence,
-    string? SuggestedGeneralizedLesson = null);
+    string? SuggestedGeneralizedLesson = null,
+    RuleCategory Category = RuleCategory.Unknown)
+{
+    /// <summary>The store/reject/review decision, projected from <see cref="Verdict"/>.</summary>
+    public MemoryDecision Decision => Verdict switch
+    {
+        MemoryWorthiness.WorthStoring => MemoryDecision.Store,
+        MemoryWorthiness.NeedsReview => MemoryDecision.NeedsReview,
+        _ => MemoryDecision.Reject,
+    };
+}
 
 /// <summary>
 /// Decides whether a candidate memory is a reusable engineering lesson worth

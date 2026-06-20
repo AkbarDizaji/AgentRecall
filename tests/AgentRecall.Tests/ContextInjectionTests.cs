@@ -308,7 +308,9 @@ public class ContextInjectionTests
 
         Assert.Equal(0, code);
         var text = output.ToString();
-        Assert.Contains("Must-follow:", text);
+        // Rules are rendered as conditional blocks under a "Must Follow" section.
+        Assert.Contains("Must Follow:", text);
+        Assert.Contains("Do:", text);
         Assert.Contains($"#{id}", text);
         Assert.Contains("Source rule IDs:", text);
     }

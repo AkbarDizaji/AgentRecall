@@ -30,6 +30,34 @@ public enum ScopeLevel
     File = 4,
 }
 
+/// <summary>
+/// What kind of knowledge a <see cref="RecallRule"/> captures. Drives whether a
+/// candidate is stored and how much it is trusted.
+/// </summary>
+public enum RuleCategory
+{
+    /// <summary>Not yet classified (the default for rules from earlier versions).</summary>
+    Unknown = 0,
+
+    /// <summary>
+    /// Describes what exists in code (a member, a file path, one component calling
+    /// another). Recoverable with search, so rejected by default.
+    /// </summary>
+    CodeFact = 1,
+
+    /// <summary>
+    /// Tells the agent what to use in this repository under a specific condition.
+    /// Stored, usually repo-scoped, with lower default trust than a lesson.
+    /// </summary>
+    RepositoryConvention = 2,
+
+    /// <summary>
+    /// A reusable why/pattern that survives refactors (consistency rules, bug
+    /// patterns, reasoned principles). Stored with higher default trust.
+    /// </summary>
+    EngineeringLesson = 3,
+}
+
 /// <summary>The kind of activity recorded by a <see cref="RecallEvent"/>.</summary>
 public enum RecallEventType
 {
