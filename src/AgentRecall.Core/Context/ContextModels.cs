@@ -103,6 +103,12 @@ public sealed record ContextInjectionResult
     public required int TokenBudget { get; init; }
     public required string Explanation { get; init; }
 
+    /// <summary>
+    /// Conflicts whose resolution changed what was injected: the selected rule is
+    /// present and the rules it beat were suppressed. Empty when nothing conflicts.
+    /// </summary>
+    public IReadOnlyList<Conflicts.ResolvedConflict> Conflicts { get; init; } = [];
+
     /// <summary>All injected rules, highest priority first.</summary>
     public IEnumerable<InjectedRule> All => MustFollow.Concat(Warnings).Concat(Suggested);
 }

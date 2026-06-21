@@ -78,6 +78,20 @@ public sealed record LearningUsageReport
 
     /// <summary>Active rules that have not been retrieved for a long time.</summary>
     public required IReadOnlyList<StaleRuleStat> StaleRules { get; init; }
+
+    /// <summary>Total number of conflicts detected across the active corpus.</summary>
+    public required int TotalConflicts { get; init; }
+
+    /// <summary>Active rules that appear in the most conflicts, most first.</summary>
+    public required IReadOnlyList<ConflictingRuleStat> TopConflictingRules { get; init; }
+}
+
+/// <summary>An active rule and how many detected conflicts it participates in.</summary>
+public sealed record ConflictingRuleStat
+{
+    public required int RuleId { get; init; }
+    public required string RuleText { get; init; }
+    public required int ConflictCount { get; init; }
 }
 
 /// <summary>The project's distilled conventions, for fast onboarding.</summary>

@@ -33,6 +33,15 @@ public static class HookContextFormatter
         // A compact source list stays at the end so the agent can cite every rule.
         AppendSourceRules(sb, result.All.Select(r => $"#{r.Rule.Id}"));
 
+        // Surface a conflict only when resolution changed what was injected.
+        if (result.Conflicts.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine(Conflicts.ConflictRenderer.Hint);
+            sb.AppendLine();
+            sb.AppendLine(Conflicts.ConflictRenderer.Section(result.Conflicts));
+        }
+
         return sb.ToString().TrimEnd();
     }
 

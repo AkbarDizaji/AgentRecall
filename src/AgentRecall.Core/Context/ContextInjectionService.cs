@@ -42,17 +42,23 @@ public sealed class ContextInjectionService : IContextInjectionService
     private readonly IRecallEventRepository _events;
     private readonly IPolicyEngine _policy;
     private readonly IConceptExpander _concepts;
+    private readonly Conflicts.IRuleConflictDetector _conflictDetector;
+    private readonly Conflicts.IRuleResolutionService _resolution;
 
     public ContextInjectionService(
         IRecallRuleRepository rules,
         IRecallEventRepository events,
         IPolicyEngine policy,
-        IConceptExpander concepts)
+        IConceptExpander concepts,
+        Conflicts.IRuleConflictDetector conflictDetector,
+        Conflicts.IRuleResolutionService resolution)
     {
         _rules = rules ?? throw new ArgumentNullException(nameof(rules));
         _events = events ?? throw new ArgumentNullException(nameof(events));
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _concepts = concepts ?? throw new ArgumentNullException(nameof(concepts));
+        _conflictDetector = conflictDetector ?? throw new ArgumentNullException(nameof(conflictDetector));
+        _resolution = resolution ?? throw new ArgumentNullException(nameof(resolution));
     }
 
     public async Task<ContextInjectionResult> BuildContextAsync(ContextRequest request, CancellationToken cancellationToken = default)
@@ -120,12 +126,82 @@ public sealed class ContextInjectionService : IContextInjectionService
 
         var result = PackIntoBudget(ranked, request.TokenBudget, request.Limit, prunedByPolicy);
 
+        // Resolve conflicts among the rules that survived to injection. This catches
+        // competing guidance the polarity-based policy does not (e.g. unit vs
+        // integration tests): the loser is dropped and the conflict is recorded, so
+        // the agent sees a single chosen rule plus an explanation.
+        result = ResolveInjectedConflicts(result);
+
         if (request.RecordUsage)
         {
             await RecordRetrievalAsync(result, cancellationToken).ConfigureAwait(false);
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Detects conflicts among the injected rules, drops each loser, and records the
+    /// resolution. Returns the result unchanged when nothing conflicts.
+    /// </summary>
+    private ContextInjectionResult ResolveInjectedConflicts(ContextInjectionResult result)
+    {
+        var injected = result.All.Select(r => r.Rule).ToList();
+        if (injected.Count < 2)
+        {
+            return result;
+        }
+
+        var conflicts = _conflictDetector.Detect(injected);
+        if (conflicts.Count == 0)
+        {
+            return result;
+        }
+
+        var byId = injected.ToDictionary(r => r.Id);
+        var losers = new HashSet<int>();
+        var resolved = new List<Conflicts.ResolvedConflict>();
+
+        foreach (var conflict in conflicts)
+        {
+            var members = conflict.RuleIds.Select(id => byId[id]).ToList();
+
+            // Skip a conflict whose rules were already settled by an earlier one.
+            if (members.Any(m => losers.Contains(m.Id)))
+            {
+                continue;
+            }
+
+            var resolution = _resolution.Resolve(members);
+            var selected = byId[resolution.SelectedRuleId];
+            var ignored = members.Where(r => r.Id != selected.Id).ToList();
+
+            foreach (var loser in ignored)
+            {
+                losers.Add(loser.Id);
+            }
+
+            resolved.Add(new Conflicts.ResolvedConflict
+            {
+                Conflict = conflict,
+                Resolution = resolution,
+                Selected = selected,
+                Ignored = ignored,
+            });
+        }
+
+        if (losers.Count == 0)
+        {
+            return result;
+        }
+
+        return result with
+        {
+            MustFollow = result.MustFollow.Where(i => !losers.Contains(i.Rule.Id)).ToList(),
+            Warnings = result.Warnings.Where(i => !losers.Contains(i.Rule.Id)).ToList(),
+            Suggested = result.Suggested.Where(i => !losers.Contains(i.Rule.Id)).ToList(),
+            Conflicts = resolved,
+        };
     }
 
     /// <summary>

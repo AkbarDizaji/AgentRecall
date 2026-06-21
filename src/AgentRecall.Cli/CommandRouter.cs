@@ -418,6 +418,9 @@ public static class CommandRouter
                 }
             }
 
+            case "conflicts":
+                return await RulesConflictsAsync(args[1..], scope, output);
+
             default:
                 output.WriteLine("Usage:");
                 output.WriteLine("  agentrecall rules list");
@@ -426,8 +429,87 @@ public static class CommandRouter
                 output.WriteLine("  agentrecall rules promote <id>");
                 output.WriteLine("  agentrecall rules supersede <oldId> <newId>");
                 output.WriteLine("  agentrecall rules archive <id>");
+                output.WriteLine("  agentrecall rules conflicts [--scope-level <level>] [--scope-value <text>] [--json]");
                 return 1;
         }
+    }
+
+    private static async Task<int> RulesConflictsAsync(string[] args, AsyncServiceScope scope, TextWriter output)
+    {
+        var options = ParseOptions(args);
+        var json = options.ContainsKey("json");
+
+        var rulesRepo = scope.ServiceProvider.GetRequiredService<IRecallRuleRepository>();
+        var detector = scope.ServiceProvider.GetRequiredService<Core.Conflicts.IRuleConflictDetector>();
+        var resolver = scope.ServiceProvider.GetRequiredService<Core.Conflicts.IRuleResolutionService>();
+
+        // Only in-force rules can actually clash in practice.
+        IEnumerable<RecallRule> pool = (await rulesRepo.ListAsync().ConfigureAwait(false))
+            .Where(r => !r.Deprecated && r.Status is RuleStatus.Active or RuleStatus.Promoted);
+
+        if (options.TryGetValue("scope-level", out var rawLevel))
+        {
+            if (!Enum.TryParse<ScopeLevel>(rawLevel, ignoreCase: true, out var level))
+            {
+                output.WriteLine($"Invalid --scope-level '{rawLevel}'. Valid values: {string.Join(", ", Enum.GetNames<ScopeLevel>())}");
+                return 1;
+            }
+
+            pool = pool.Where(r => r.ScopeLevel == level);
+        }
+
+        if (options.TryGetValue("scope-value", out var scopeValue) && !string.IsNullOrWhiteSpace(scopeValue))
+        {
+            pool = pool.Where(r => string.Equals(r.ScopeValue, scopeValue, StringComparison.OrdinalIgnoreCase));
+        }
+
+        var rules = pool.ToList();
+        var byId = rules.ToDictionary(r => r.Id);
+
+        var items = detector.Detect(rules)
+            .Select(conflict =>
+            {
+                var members = conflict.RuleIds.Select(id => byId[id]).ToList();
+                return (Conflict: conflict, Resolution: resolver.Resolve(members));
+            })
+            .ToList();
+
+        if (json)
+        {
+            var payload = items.Select(it => new
+            {
+                conflictId = it.Conflict.ConflictId,
+                conflictType = it.Conflict.ConflictType.ToString(),
+                ruleIds = it.Conflict.RuleIds,
+                summary = it.Conflict.Summary,
+                detectedReason = it.Conflict.DetectedReason,
+                selectedRuleId = it.Resolution.SelectedRuleId,
+                ignoredRuleIds = it.Resolution.IgnoredRuleIds,
+                explanation = it.Resolution.Explanation,
+                confidence = it.Resolution.Confidence,
+            }).ToList();
+            WriteJson(output, payload);
+            return 0;
+        }
+
+        if (items.Count == 0)
+        {
+            output.WriteLine("No conflicts detected.");
+            return 0;
+        }
+
+        output.WriteLine($"{items.Count} conflict(s) detected:");
+        foreach (var it in items)
+        {
+            var selected = byId[it.Resolution.SelectedRuleId];
+            output.WriteLine();
+            output.WriteLine($"[{it.Conflict.ConflictType}] rules {string.Join(", ", it.Conflict.RuleIds.Select(id => $"#{id}"))} — {it.Conflict.Summary}");
+            output.WriteLine($"  Selected: #{selected.Id} {Truncate(selected.RuleText, 80)}");
+            output.WriteLine($"  Why: {string.Join("; ", it.Resolution.Explanation)}");
+            output.WriteLine($"  Ignored: {string.Join(", ", it.Resolution.IgnoredRuleIds.Select(id => $"#{id}"))}");
+        }
+
+        return 0;
     }
 
     private static async Task<int> ImportAsync(
@@ -613,6 +695,16 @@ public static class CommandRouter
 
         var ids = ContextProjection.SourceRuleIds(result);
         output.WriteLine($"Source rule IDs: {string.Join(", ", ids.Select(id => $"#{id}"))}");
+
+        // Only when conflict resolution actually changed what was injected.
+        if (result.Conflicts.Count > 0)
+        {
+            output.WriteLine();
+            output.WriteLine(Core.Conflicts.ConflictRenderer.Hint);
+            output.WriteLine();
+            output.WriteLine(Core.Conflicts.ConflictRenderer.Section(result.Conflicts));
+        }
+
         return 0;
     }
 
@@ -1098,6 +1190,24 @@ public static class CommandRouter
                 rank++;
             }
         }
+
+        output.WriteLine();
+        output.WriteLine($"Top Conflicting Rules ({r.TotalConflicts} conflict(s) total)");
+        output.WriteLine();
+        if (r.TopConflictingRules.Count == 0)
+        {
+            output.WriteLine("  (none)");
+        }
+        else
+        {
+            var rank = 1;
+            foreach (var rule in r.TopConflictingRules)
+            {
+                output.WriteLine($"  {rank}. #{rule.RuleId} {Truncate(rule.RuleText, 80)}");
+                output.WriteLine($"     In {rule.ConflictCount} conflict(s)");
+                rank++;
+            }
+        }
     }
 
     private static void WriteDnaReport(TextWriter output, ProjectDnaReport r)
@@ -1203,6 +1313,7 @@ public static class CommandRouter
         output.WriteLine("  rules supersede <oldId> <newId>");
         output.WriteLine("                       Replace one rule with another");
         output.WriteLine("  rules archive <id>   Archive a rule (excluded from search)");
+        output.WriteLine("  rules conflicts      List detected rule conflicts and the chosen winner (--json)");
         output.WriteLine("  search \"<query>\"     Search rules by keyword, ranked");
         output.WriteLine("  inject-context \"<task>\"");
         output.WriteLine("                       Build agent-ready context (must-follow, warnings,");

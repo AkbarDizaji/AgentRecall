@@ -17,11 +17,16 @@ public sealed class LearningReportService : ILearningReportService
 
     private readonly IRecallRuleRepository _rules;
     private readonly IRecallEventRepository _events;
+    private readonly Conflicts.IRuleConflictDetector _conflictDetector;
 
-    public LearningReportService(IRecallRuleRepository rules, IRecallEventRepository events)
+    public LearningReportService(
+        IRecallRuleRepository rules,
+        IRecallEventRepository events,
+        Conflicts.IRuleConflictDetector conflictDetector)
     {
         _rules = rules ?? throw new ArgumentNullException(nameof(rules));
         _events = events ?? throw new ArgumentNullException(nameof(events));
+        _conflictDetector = conflictDetector ?? throw new ArgumentNullException(nameof(conflictDetector));
     }
 
     public async Task<MonthlyLearningReport> GetMonthlyReportAsync(int year, int month, CancellationToken cancellationToken = default)
@@ -127,12 +132,36 @@ public sealed class LearningReportService : ILearningReportService
             .Take(options.Top)
             .ToList();
 
+        // Conflicts among the in-force corpus, ranked by how many each rule joins.
+        var inForce = rules.Where(r => !r.Deprecated && r.Status is RuleStatus.Active or RuleStatus.Promoted).ToList();
+        var conflicts = _conflictDetector.Detect(inForce);
+        var rulesById = rules.ToDictionary(r => r.Id);
+        var conflictCounts = conflicts
+            .SelectMany(c => c.RuleIds)
+            .GroupBy(id => id)
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        var topConflicting = conflictCounts
+            .Where(kv => rulesById.ContainsKey(kv.Key))
+            .OrderByDescending(kv => kv.Value)
+            .ThenBy(kv => kv.Key)
+            .Take(options.Top)
+            .Select(kv => new ConflictingRuleStat
+            {
+                RuleId = kv.Key,
+                RuleText = rulesById[kv.Key].RuleText,
+                ConflictCount = kv.Value,
+            })
+            .ToList();
+
         return new LearningUsageReport
         {
             TopRetrievedRules = topRetrieved,
             MostValuableLessons = mostValuable,
             KnowledgeGrowth = BuildKnowledgeGrowth(rules),
             StaleRules = BuildStaleRules(rules, options),
+            TotalConflicts = conflicts.Count,
+            TopConflictingRules = topConflicting,
         };
     }
 

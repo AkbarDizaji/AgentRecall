@@ -1,5 +1,6 @@
 using AgentRecall.Core.Abstractions;
 using AgentRecall.Core.Compression;
+using AgentRecall.Core.Conflicts;
 using AgentRecall.Core.Configuration;
 using AgentRecall.Core.Context;
 using AgentRecall.Core.Extraction;
@@ -63,6 +64,10 @@ public static class ServiceCollectionExtensions
 
         // Proactive memory helpers.
         services.AddSingleton<IFeedbackCandidateAnalyzer, FeedbackCandidateAnalyzer>();
+
+        // Conflict detection and explainable, deterministic resolution.
+        services.AddSingleton<IRuleConflictDetector, RuleConflictDetector>();
+        services.AddSingleton<IRuleResolutionService, RuleResolutionService>();
 
         // Learning reports: local-only analytics over rules and the event ledger.
         services.AddScoped<ILearningReportService, LearningReportService>();
