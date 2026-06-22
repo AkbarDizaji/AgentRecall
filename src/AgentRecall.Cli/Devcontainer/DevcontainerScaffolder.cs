@@ -123,8 +123,10 @@ public static class DevcontainerScaffolder
         """;
 
     /// <summary>
-    /// The self-contained setup script. Installs AgentRecall from NuGet, pins the
-    /// data directory onto the persisted volume, and re-registers the MCP server.
+    /// The self-contained setup script. Pins the data directory onto the persisted
+    /// volume and self-heals AgentRecall: when the binary is missing (common after a
+    /// rebuild) it reinstalls before touching the MCP registration, and only removes a
+    /// stale registration if the reinstall fails — without ever blocking startup.
     /// Idempotent, so it is safe to re-run on every create/rebuild.
     /// </summary>
     public static string PostCreateScript =>
@@ -175,46 +177,82 @@ public static class DevcontainerScaffolder
         }
         ensure_writable
 
-        # Install or upgrade AgentRecall from NuGet. `tool update` installs when absent
-        # and upgrades when present, so it is safe to re-run on every rebuild.
-        log "install/upgrade AgentRecall from NuGet"
-        dotnet tool update --global AgentRecall
-
-        # Make ~/.dotnet/tools discoverable in interactive terminals. VS Code often starts
-        # bash as a NON-login shell, so ~/.profile isn't sourced and a freshly installed
-        # global tool reads as "not found" even though the install succeeded. Persist the
-        # PATH entry to ~/.bashrc (idempotent) and print the exact remoteEnv snippet.
+        # Make ~/.dotnet/tools discoverable. VS Code often starts bash as a NON-login
+        # shell, so ~/.profile isn't sourced and a global tool reads as "not found" even
+        # when installed. Put it on PATH for this shell and persist to ~/.bashrc
+        # (idempotent), and print the exact remoteEnv snippet.
         log "ensure $TOOLS_DIR is on PATH"
         case ":$PATH:" in
           *":$TOOLS_DIR:"*)
             : # already on PATH for this shell
             ;;
           *)
-            echo "AgentRecall: $TOOLS_DIR is not on PATH; the tool may be 'not found' in new terminals." >&2
             if ! { [ -f "$HOME/.bashrc" ] && grep -qF "$TOOLS_DIR" "$HOME/.bashrc"; }; then
               printf '\n# Added by AgentRecall: put .NET global tools on PATH for non-login shells\nexport PATH="$PATH:%s"\n' "$TOOLS_DIR" >> "$HOME/.bashrc" 2>/dev/null \
                 && echo "AgentRecall: appended a PATH export to ~/.bashrc for new terminals." >&2
             fi
-            echo "AgentRecall: to set it permanently for VS Code, add to .devcontainer/devcontainer.json:" >&2
+            echo "AgentRecall: to set PATH for VS Code permanently, add to .devcontainer/devcontainer.json:" >&2
             echo "             \"remoteEnv\": { \"PATH\": \"\${containerEnv:PATH}:$TOOLS_DIR\" }" >&2
             ;;
         esac
         export PATH="$PATH:$TOOLS_DIR"
 
-        # Create the database (no-op when it already exists on the volume). Warn rather
-        # than abort, so a not-yet-writable volume doesn't fail the whole postCreate chain.
-        log "initialize the database"
-        agentrecall init || echo "AgentRecall: 'agentrecall init' failed; see the warning above." >&2
+        # Resolve the agentrecall binary: on PATH, or freshly installed under TOOLS_DIR.
+        find_agentrecall() {
+          command -v agentrecall 2>/dev/null && return 0
+          [ -x "$TOOLS_DIR/agentrecall" ] && { printf '%s\n' "$TOOLS_DIR/agentrecall"; return 0; }
+          return 1
+        }
 
-        # Re-register the MCP server with Claude Code, if the CLI is installed.
-        log "register the MCP server with Claude Code"
-        if command -v claude >/dev/null 2>&1; then
-          claude mcp add agentrecall agentrecall mcp 2>/dev/null || true
+        # Self-healing install. A rebuild wipes ~/.dotnet/tools while the MCP registration
+        # can persist on a volume. If the binary is missing we try to REPAIR it before
+        # touching the registration; only if repair fails do we remove the stale entry.
+        # The reinstall is guarded by `if`, so a failure never trips `set -e`/the ERR trap
+        # and never blocks container startup — we fall through to cleanup instead.
+        log "ensure AgentRecall is installed (self-heal if missing)"
+        AGENTRECALL_BIN="$(find_agentrecall || true)"
+        if [ -n "$AGENTRECALL_BIN" ]; then
+          echo "    (agentrecall present at $AGENTRECALL_BIN; no reinstall needed)"
         else
-          echo "    (claude CLI not found; skipping MCP registration)"
+          echo "AgentRecall: binary missing; attempting reinstall: dotnet tool update --global AgentRecall" >&2
+          if dotnet tool update --global AgentRecall; then
+            AGENTRECALL_BIN="$(find_agentrecall || true)"
+          else
+            echo "AgentRecall: reinstall command exited non-zero ($?)." >&2
+          fi
         fi
 
-        echo "AgentRecall ready: $(agentrecall --version 2>/dev/null || echo 'install failed')"
+        if [ -n "$AGENTRECALL_BIN" ]; then
+          # Repaired (or never broken). Initialize the DB and (re-)register the MCP server
+          # by ABSOLUTE path so Claude Code starts it regardless of its spawn PATH.
+          log "initialize the database"
+          "$AGENTRECALL_BIN" init || echo "AgentRecall: 'agentrecall init' failed; see the warning above." >&2
+
+          log "register the MCP server with Claude Code"
+          if command -v claude >/dev/null 2>&1; then
+            claude mcp remove agentrecall >/dev/null 2>&1 || true
+            claude mcp add agentrecall "$AGENTRECALL_BIN" mcp 2>/dev/null \
+              && echo "AgentRecall: MCP server registered ($AGENTRECALL_BIN)." \
+              || echo "AgentRecall: 'claude mcp add' failed; register manually: claude mcp add agentrecall \"$AGENTRECALL_BIN\" mcp" >&2
+          else
+            echo "    (claude CLI not found; skipping MCP registration)"
+          fi
+
+          echo "AgentRecall ready: $("$AGENTRECALL_BIN" --version 2>/dev/null || echo 'unknown')"
+        else
+          # Repair failed. Remove the stale registration so Claude Code does not try to
+          # start a server whose binary is missing, explain why, and continue (non-fatal).
+          log "remove stale MCP registration (repair failed)"
+          if command -v claude >/dev/null 2>&1; then
+            claude mcp remove agentrecall >/dev/null 2>&1 || true
+          fi
+          echo "AgentRecall: reinstall failed and the binary is still missing." >&2
+          echo "             Removed any stale MCP registration so Claude Code won't start a" >&2
+          echo "             missing server. Fix the install with:" >&2
+          echo "               dotnet tool update --global AgentRecall" >&2
+          echo "             then rerun: bash .devcontainer/agentrecall-post-create.sh" >&2
+          echo "AgentRecall: not operational (binary missing); see the warnings above."
+        fi
 
         """;
 

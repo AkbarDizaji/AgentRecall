@@ -196,9 +196,10 @@ public class DevcontainerAndCaptureE2ETests
         var script = DevcontainerScaffolder.PostCreateScript;
 
         Assert.Contains("dotnet tool update --global AgentRecall", script);
-        Assert.Contains("agentrecall init", script);
-        Assert.Contains("claude mcp add agentrecall agentrecall mcp", script);
-        Assert.Contains("agentrecall --version", script);
+        Assert.Contains("\"$AGENTRECALL_BIN\" init", script);
+        // Registered by absolute path so the MCP server starts regardless of PATH.
+        Assert.Contains("claude mcp add agentrecall \"$AGENTRECALL_BIN\" mcp", script);
+        Assert.Contains("\"$AGENTRECALL_BIN\" --version", script);
         Assert.Contains("AgentRecall ready", script);
     }
 

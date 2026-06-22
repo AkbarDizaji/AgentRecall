@@ -32,7 +32,13 @@ public class DevcontainerScaffolderTests
 
             var script = File.ReadAllText(scriptPath);
             Assert.Contains("dotnet tool update --global AgentRecall", script);
-            Assert.Contains("claude mcp add agentrecall agentrecall mcp", script);
+            // The MCP server is registered by ABSOLUTE path so it starts even when
+            // Claude Code spawns it with a PATH that lacks ~/.dotnet/tools.
+            Assert.Contains("claude mcp add agentrecall \"$AGENTRECALL_BIN\" mcp", script);
+            Assert.DoesNotContain("claude mcp add agentrecall agentrecall mcp", script);
+            // A missing binary clears any stale registration instead of leaving a
+            // server that points at a tool that isn't there.
+            Assert.Contains("claude mcp remove agentrecall", script);
 
             // The ownership fix must not assume sudo exists (minimal images lack it):
             // every sudo use is gated behind a `command -v sudo` check.
