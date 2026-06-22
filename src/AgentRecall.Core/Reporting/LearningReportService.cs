@@ -17,15 +17,18 @@ public sealed class LearningReportService : ILearningReportService
 
     private readonly IRecallRuleRepository _rules;
     private readonly IRecallEventRepository _events;
+    private readonly IRuleOutcomeRepository _outcomes;
     private readonly Conflicts.IRuleConflictDetector _conflictDetector;
 
     public LearningReportService(
         IRecallRuleRepository rules,
         IRecallEventRepository events,
+        IRuleOutcomeRepository outcomes,
         Conflicts.IRuleConflictDetector conflictDetector)
     {
         _rules = rules ?? throw new ArgumentNullException(nameof(rules));
         _events = events ?? throw new ArgumentNullException(nameof(events));
+        _outcomes = outcomes ?? throw new ArgumentNullException(nameof(outcomes));
         _conflictDetector = conflictDetector ?? throw new ArgumentNullException(nameof(conflictDetector));
     }
 
@@ -50,6 +53,19 @@ public sealed class LearningReportService : ILearningReportService
             .ToDictionary(g => g.Key, g => g.Count());
 
         var rulesById = rules.ToDictionary(r => r.Id);
+
+        var outcomes = await _outcomes.ListAsync(cancellationToken).ConfigureAwait(false);
+        var outcomesInPeriod = outcomes.Where(o => InPeriod(o.CreatedAt, start, end)).ToList();
+        var netByRule = outcomesInPeriod
+            .GroupBy(o => o.RuleId)
+            .Select(g => new OutcomeRuleStat
+            {
+                RuleId = g.Key,
+                RuleText = rulesById.TryGetValue(g.Key, out var r) ? r.RuleText : $"(rule #{g.Key})",
+                NetConfidenceChange = Math.Round(g.Sum(o => o.ConfidenceDelta), 2),
+                OutcomeCount = g.Count(),
+            })
+            .ToList();
 
         RetrievedRuleStat? mostRetrieved = null;
         foreach (var (ruleId, count) in retrievalsInPeriod
@@ -76,6 +92,21 @@ public sealed class LearningReportService : ILearningReportService
             AverageConfidence = captured.Count == 0 ? 0.0 : Math.Round(captured.Average(r => r.Confidence), 2),
             MostRetrievedRule = mostRetrieved,
             MostCommonCategory = MostCommonCategory(captured),
+            PositiveOutcomes = outcomesInPeriod.Count(o => o.ConfidenceDelta > 0),
+            NegativeOutcomes = outcomesInPeriod.Count(o => o.ConfidenceDelta < 0),
+            NetConfidenceChange = Math.Round(outcomesInPeriod.Sum(o => o.ConfidenceDelta), 2),
+            MostImprovedRules = netByRule
+                .Where(s => s.NetConfidenceChange > 0)
+                .OrderByDescending(s => s.NetConfidenceChange)
+                .ThenBy(s => s.RuleId)
+                .Take(3)
+                .ToList(),
+            MostDegradedRules = netByRule
+                .Where(s => s.NetConfidenceChange < 0)
+                .OrderBy(s => s.NetConfidenceChange)
+                .ThenBy(s => s.RuleId)
+                .Take(3)
+                .ToList(),
         };
     }
 
@@ -154,6 +185,54 @@ public sealed class LearningReportService : ILearningReportService
             })
             .ToList();
 
+        // Outcome-driven effectiveness across all recorded outcomes.
+        var outcomes = await _outcomes.ListAsync(cancellationToken).ConfigureAwait(false);
+        var outcomeStats = outcomes
+            .GroupBy(o => o.RuleId)
+            .Select(g => new
+            {
+                RuleId = g.Key,
+                Net = Math.Round(g.Sum(o => o.ConfidenceDelta), 2),
+                Count = g.Count(),
+                Negatives = g.Count(o => o.ConfidenceDelta < 0),
+            })
+            .Where(s => rulesById.ContainsKey(s.RuleId))
+            .ToList();
+
+        OutcomeRuleStat ToStat(int ruleId, double net, int count) => new()
+        {
+            RuleId = ruleId,
+            RuleText = rulesById[ruleId].RuleText,
+            NetConfidenceChange = net,
+            OutcomeCount = count,
+        };
+
+        var mostEffective = outcomeStats
+            .Where(s => s.Net > 0)
+            .OrderByDescending(s => s.Net)
+            .ThenBy(s => s.RuleId)
+            .Take(options.Top)
+            .Select(s => ToStat(s.RuleId, s.Net, s.Count))
+            .ToList();
+
+        var repeatedNegative = outcomeStats
+            .Where(s => s.Negatives >= 2)
+            .OrderByDescending(s => s.Negatives)
+            .ThenBy(s => s.RuleId)
+            .Take(options.Top)
+            .Select(s => ToStat(s.RuleId, s.Net, s.Count))
+            .ToList();
+
+        var validatedRuleIds = outcomes.Select(o => o.RuleId).ToHashSet();
+        var rarelyValidated = rules
+            .Select(r => (Rule: r, Count: retrievalCounts.GetValueOrDefault(r.Id)))
+            .Where(x => x.Count >= FrequentUseThreshold && !validatedRuleIds.Contains(x.Rule.Id))
+            .OrderByDescending(x => x.Count)
+            .ThenBy(x => x.Rule.Id)
+            .Take(options.Top)
+            .Select(x => new RetrievedRuleStat { RuleId = x.Rule.Id, RuleText = x.Rule.RuleText, RetrievalCount = x.Count })
+            .ToList();
+
         return new LearningUsageReport
         {
             TopRetrievedRules = topRetrieved,
@@ -162,6 +241,9 @@ public sealed class LearningReportService : ILearningReportService
             StaleRules = BuildStaleRules(rules, options),
             TotalConflicts = conflicts.Count,
             TopConflictingRules = topConflicting,
+            MostEffectiveRules = mostEffective,
+            RulesWithRepeatedNegativeOutcomes = repeatedNegative,
+            FrequentlyRetrievedButRarelyValidated = rarelyValidated,
         };
     }
 

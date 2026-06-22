@@ -88,4 +88,14 @@ public sealed class AgentRecallOptions
     /// NotWorthStoring. Defaults to false so acceptance never lowers memory quality.
     /// </summary>
     public bool AllowCodeFactsWhenAccepted { get; set; }
+
+    /// <summary>
+    /// When true (the default), recorded outcomes adjust rule confidence on evidence
+    /// and a retrieval record is written so outcomes can be attached later. When
+    /// false, outcome recording is a no-op and no confidence is adjusted.
+    /// </summary>
+    public bool OutcomeTrackingEnabled { get; set; } = true;
+
+    /// <summary>The confidence change applied per outcome type.</summary>
+    public OutcomeConfidenceDeltas OutcomeConfidenceDeltas { get; set; } = new();
 }

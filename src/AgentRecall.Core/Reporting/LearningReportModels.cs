@@ -40,6 +40,30 @@ public sealed record MonthlyLearningReport
 
     /// <summary>The most common tag among lessons captured in the period, or null when untagged.</summary>
     public string? MostCommonCategory { get; init; }
+
+    /// <summary>Outcomes recorded in the period that raised confidence.</summary>
+    public required int PositiveOutcomes { get; init; }
+
+    /// <summary>Outcomes recorded in the period that lowered confidence.</summary>
+    public required int NegativeOutcomes { get; init; }
+
+    /// <summary>Net confidence change from outcomes recorded in the period.</summary>
+    public required double NetConfidenceChange { get; init; }
+
+    /// <summary>Rules whose confidence rose most from outcomes in the period.</summary>
+    public required IReadOnlyList<OutcomeRuleStat> MostImprovedRules { get; init; }
+
+    /// <summary>Rules whose confidence fell most from outcomes in the period.</summary>
+    public required IReadOnlyList<OutcomeRuleStat> MostDegradedRules { get; init; }
+}
+
+/// <summary>A rule with its net outcome-driven confidence change and outcome count.</summary>
+public sealed record OutcomeRuleStat
+{
+    public required int RuleId { get; init; }
+    public required string RuleText { get; init; }
+    public required double NetConfidenceChange { get; init; }
+    public required int OutcomeCount { get; init; }
 }
 
 /// <summary>Cradle-to-grave counts across the whole rule corpus.</summary>
@@ -84,6 +108,15 @@ public sealed record LearningUsageReport
 
     /// <summary>Active rules that appear in the most conflicts, most first.</summary>
     public required IReadOnlyList<ConflictingRuleStat> TopConflictingRules { get; init; }
+
+    /// <summary>Rules with the largest net positive confidence change from outcomes.</summary>
+    public required IReadOnlyList<OutcomeRuleStat> MostEffectiveRules { get; init; }
+
+    /// <summary>Rules with multiple negative outcomes recorded.</summary>
+    public required IReadOnlyList<OutcomeRuleStat> RulesWithRepeatedNegativeOutcomes { get; init; }
+
+    /// <summary>Rules retrieved often but never validated by an outcome.</summary>
+    public required IReadOnlyList<RetrievedRuleStat> FrequentlyRetrievedButRarelyValidated { get; init; }
 }
 
 /// <summary>An active rule and how many detected conflicts it participates in.</summary>

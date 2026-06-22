@@ -109,6 +109,13 @@ public sealed record ContextInjectionResult
     /// </summary>
     public IReadOnlyList<Conflicts.ResolvedConflict> Conflicts { get; init; } = [];
 
+    /// <summary>
+    /// The id of the retrieval record written when usage was recorded, so outcomes
+    /// can later be attached to the rules that were injected. Null when usage was
+    /// not recorded or nothing was injected.
+    /// </summary>
+    public string? RetrievalId { get; init; }
+
     /// <summary>All injected rules, highest priority first.</summary>
     public IEnumerable<InjectedRule> All => MustFollow.Concat(Warnings).Concat(Suggested);
 }

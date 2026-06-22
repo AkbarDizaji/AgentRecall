@@ -76,6 +76,9 @@ public static class CommandRouter
             case "report":
                 return await ReportAsync(rest, services, output, cancellationToken).ConfigureAwait(false);
 
+            case "outcome":
+                return await OutcomeAsync(rest, services, output, cancellationToken).ConfigureAwait(false);
+
             case "hook":
                 return await HookAsync(rest, services, output, cancellationToken).ConfigureAwait(false);
 
@@ -367,6 +370,27 @@ public static class CommandRouter
                 return 0;
             }
 
+            case "explain":
+            {
+                if (args.Length < 2 || !int.TryParse(args[1], out var id))
+                {
+                    output.WriteLine("Usage: agentrecall rules explain <id>");
+                    return 1;
+                }
+
+                var rule = await rules.GetAsync(id, cancellationToken).ConfigureAwait(false);
+                if (rule is null)
+                {
+                    output.WriteLine($"Rule #{id} not found.");
+                    return 1;
+                }
+
+                var events = await scope.ServiceProvider.GetRequiredService<IRecallEventRepository>().ListAsync(cancellationToken).ConfigureAwait(false);
+                var outcomes = await scope.ServiceProvider.GetRequiredService<IRuleOutcomeRepository>().ListAsync(cancellationToken).ConfigureAwait(false);
+                WriteRuleExplanation(output, rule, events, outcomes);
+                return 0;
+            }
+
             case "approve":
             case "promote":
             case "archive":
@@ -430,8 +454,97 @@ public static class CommandRouter
                 output.WriteLine("  agentrecall rules supersede <oldId> <newId>");
                 output.WriteLine("  agentrecall rules archive <id>");
                 output.WriteLine("  agentrecall rules conflicts [--scope-level <level>] [--scope-value <text>] [--json]");
+                output.WriteLine("  agentrecall rules explain <id>");
                 return 1;
         }
+    }
+
+    private static async Task<int> OutcomeAsync(
+        string[] args,
+        IServiceProvider services,
+        TextWriter output,
+        CancellationToken cancellationToken)
+    {
+        if (args.Length == 0 || args[0] != "record")
+        {
+            output.WriteLine("Usage: agentrecall outcome record --type <type> [--rule-id <id>] [--retrieval-id <id>] [--reason <text>] [--allow-duplicate]");
+            output.WriteLine($"Types: {string.Join(", ", Enum.GetNames<OutcomeType>())}");
+            return 1;
+        }
+
+        var options = ParseOptions(args[1..]);
+
+        if (!options.TryGetValue("type", out var rawType) || !Enum.TryParse<OutcomeType>(rawType, ignoreCase: true, out var type))
+        {
+            output.WriteLine($"--type is required. Valid values: {string.Join(", ", Enum.GetNames<OutcomeType>())}");
+            return 1;
+        }
+
+        int? ruleId = null;
+        if (options.TryGetValue("rule-id", out var rawRuleId))
+        {
+            if (!int.TryParse(rawRuleId, out var parsed))
+            {
+                output.WriteLine($"Invalid --rule-id '{rawRuleId}'. Expected an integer.");
+                return 1;
+            }
+
+            ruleId = parsed;
+        }
+
+        var retrievalId = options.GetValueOrDefault("retrieval-id");
+        if (ruleId is null && string.IsNullOrWhiteSpace(retrievalId))
+        {
+            output.WriteLine("Provide --rule-id or --retrieval-id.");
+            return 1;
+        }
+
+        await using var scope = services.CreateAsyncScope();
+        await EnsureInitializedAsync(scope, cancellationToken).ConfigureAwait(false);
+        var tracker = scope.ServiceProvider.GetRequiredService<Core.Outcomes.IOutcomeTrackingService>();
+
+        var result = await tracker.RecordAsync(new Core.Outcomes.OutcomeRequest
+        {
+            RuleId = ruleId,
+            RetrievalId = retrievalId,
+            Type = type,
+            Reason = options.GetValueOrDefault("reason"),
+            AllowDuplicate = options.ContainsKey("allow-duplicate"),
+        }, cancellationToken).ConfigureAwait(false);
+
+        if (!result.Enabled)
+        {
+            output.WriteLine("Outcome tracking is disabled (set AgentRecall:OutcomeTrackingEnabled to true).");
+            return 0;
+        }
+
+        if (result.Error is not null)
+        {
+            output.WriteLine(result.Error);
+            return 1;
+        }
+
+        if (result.Adjustments.Count == 0)
+        {
+            var note = result.SkippedDuplicates > 0
+                ? $"No change: {result.SkippedDuplicates} duplicate outcome(s) skipped."
+                : "No matching rules to adjust.";
+            output.WriteLine(note);
+            return 0;
+        }
+
+        foreach (var adjustment in result.Adjustments)
+        {
+            output.WriteLine(
+                $"Rule #{adjustment.RuleId}: {adjustment.Type} {adjustment.PreviousConfidence:0.00} -> {adjustment.NewConfidence:0.00} ({adjustment.Delta:+0.00;-0.00;0}). {adjustment.Reason}");
+        }
+
+        if (result.SkippedDuplicates > 0)
+        {
+            output.WriteLine($"({result.SkippedDuplicates} duplicate outcome(s) skipped.)");
+        }
+
+        return 0;
     }
 
     private static async Task<int> RulesConflictsAsync(string[] args, AsyncServiceScope scope, TextWriter output)
@@ -1106,6 +1219,29 @@ public static class CommandRouter
         output.WriteLine($"Average Confidence:          {r.AverageConfidence:0.00}");
         output.WriteLine($"Most Retrieved Rule:         {(r.MostRetrievedRule is null ? "(none)" : $"\"{r.MostRetrievedRule.RuleText}\" ({r.MostRetrievedRule.RetrievalCount}x)")}");
         output.WriteLine($"Most Common Lesson Category: {r.MostCommonCategory ?? "(none)"}");
+        output.WriteLine($"Positive Outcomes:           {r.PositiveOutcomes}");
+        output.WriteLine($"Negative Outcomes:           {r.NegativeOutcomes}");
+        output.WriteLine($"Net Confidence Change:       {r.NetConfidenceChange:+0.00;-0.00;0.00}");
+
+        if (r.MostImprovedRules.Count > 0)
+        {
+            output.WriteLine();
+            output.WriteLine("Most Improved Rules:");
+            foreach (var rule in r.MostImprovedRules)
+            {
+                output.WriteLine($"  #{rule.RuleId} {Truncate(rule.RuleText, 70)} ({rule.NetConfidenceChange:+0.00;-0.00;0.00})");
+            }
+        }
+
+        if (r.MostDegradedRules.Count > 0)
+        {
+            output.WriteLine();
+            output.WriteLine("Most Degraded Rules:");
+            foreach (var rule in r.MostDegradedRules)
+            {
+                output.WriteLine($"  #{rule.RuleId} {Truncate(rule.RuleText, 70)} ({rule.NetConfidenceChange:+0.00;-0.00;0.00})");
+            }
+        }
     }
 
     private static void WriteLifecycleReport(TextWriter output, RuleLifecycleReport r)
@@ -1208,6 +1344,47 @@ public static class CommandRouter
                 rank++;
             }
         }
+
+        WriteOutcomeRuleSection(output, "Most Effective Rules", r.MostEffectiveRules);
+        WriteOutcomeRuleSection(output, "Rules With Repeated Negative Outcomes", r.RulesWithRepeatedNegativeOutcomes);
+
+        output.WriteLine();
+        output.WriteLine("Frequently Retrieved But Rarely Validated");
+        output.WriteLine();
+        if (r.FrequentlyRetrievedButRarelyValidated.Count == 0)
+        {
+            output.WriteLine("  (none)");
+        }
+        else
+        {
+            var rank = 1;
+            foreach (var rule in r.FrequentlyRetrievedButRarelyValidated)
+            {
+                output.WriteLine($"  {rank}. #{rule.RuleId} {Truncate(rule.RuleText, 80)}");
+                output.WriteLine($"     Retrieved {rule.RetrievalCount}x, no outcomes recorded");
+                rank++;
+            }
+        }
+    }
+
+    private static void WriteOutcomeRuleSection(TextWriter output, string title, IReadOnlyList<OutcomeRuleStat> rules)
+    {
+        output.WriteLine();
+        output.WriteLine(title);
+        output.WriteLine();
+        if (rules.Count == 0)
+        {
+            output.WriteLine("  (none)");
+            return;
+        }
+
+        var rank = 1;
+        foreach (var rule in rules)
+        {
+            output.WriteLine($"  {rank}. #{rule.RuleId} {Truncate(rule.RuleText, 80)}");
+            output.WriteLine($"     Net {rule.NetConfidenceChange:+0.00;-0.00;0.00} over {rule.OutcomeCount} outcome(s)");
+            rank++;
+        }
     }
 
     private static void WriteDnaReport(TextWriter output, ProjectDnaReport r)
@@ -1290,6 +1467,48 @@ public static class CommandRouter
         output.WriteLine($"  Updated:           {rule.UpdatedAt:u}");
     }
 
+    private static void WriteRuleExplanation(
+        TextWriter output,
+        RecallRule rule,
+        IReadOnlyList<RecallEvent> events,
+        IReadOnlyList<RuleOutcome> outcomes)
+    {
+        var ruleOutcomes = outcomes.Where(o => o.RuleId == rule.Id).ToList();
+        var retrievedCount = events.Count(e => e.Type == RecallEventType.RuleApplied && e.RuleId == rule.Id);
+        var netChange = Math.Round(ruleOutcomes.Sum(o => o.ConfidenceDelta), 2);
+
+        output.WriteLine("Rule:");
+        output.WriteLine(rule.RuleText);
+        output.WriteLine();
+        output.WriteLine("Confidence:");
+        output.WriteLine($"{rule.Confidence:0.00}");
+        output.WriteLine();
+        output.WriteLine("Why this confidence:");
+
+        var origin = rule.Status is RuleStatus.Active or RuleStatus.Promoted
+            ? "accepted feedback"
+            : "pending feedback";
+        output.WriteLine($"- Created from {origin} as a {rule.Category} rule");
+        output.WriteLine($"- Retrieved {retrievedCount} time(s)");
+
+        foreach (var group in ruleOutcomes
+            .GroupBy(o => o.Type)
+            .OrderByDescending(g => g.Count())
+            .ThenBy(g => g.Key.ToString(), StringComparer.Ordinal))
+        {
+            output.WriteLine($"- {group.Key}: {group.Count()} time(s)");
+        }
+
+        if (ruleOutcomes.Count == 0)
+        {
+            output.WriteLine("- No outcomes recorded yet");
+        }
+
+        output.WriteLine();
+        output.WriteLine("Net confidence change:");
+        output.WriteLine($"{netChange:+0.00;-0.00;0.00}");
+    }
+
     private static string Truncate(string value, int max) =>
         value.Length <= max ? value : value[..(max - 1)] + "…";
 
@@ -1314,6 +1533,8 @@ public static class CommandRouter
         output.WriteLine("                       Replace one rule with another");
         output.WriteLine("  rules archive <id>   Archive a rule (excluded from search)");
         output.WriteLine("  rules conflicts      List detected rule conflicts and the chosen winner (--json)");
+        output.WriteLine("  rules explain <id>   Explain a rule's confidence from its outcome history");
+        output.WriteLine("  outcome record       Record an outcome (TestsPassed, UserAccepted, …) and adjust confidence");
         output.WriteLine("  search \"<query>\"     Search rules by keyword, ranked");
         output.WriteLine("  inject-context \"<task>\"");
         output.WriteLine("                       Build agent-ready context (must-follow, warnings,");

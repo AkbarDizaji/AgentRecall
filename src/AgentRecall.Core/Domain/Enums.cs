@@ -79,3 +79,34 @@ public enum RecallEventType
     /// <summary>A captured candidate was rejected as not memory-worthy.</summary>
     RuleRejected = 8,
 }
+
+/// <summary>
+/// The real-world result observed after a rule was retrieved, used to move its
+/// confidence on evidence rather than leave it static.
+/// </summary>
+public enum OutcomeType
+{
+    /// <summary>No recognised outcome; records no confidence change.</summary>
+    Unknown = 0,
+
+    /// <summary>A build passed after the rule was injected.</summary>
+    BuildPassed = 1,
+
+    /// <summary>Tests passed after the rule was injected.</summary>
+    TestsPassed = 2,
+
+    /// <summary>Linting passed after the rule was injected.</summary>
+    LintPassed = 3,
+
+    /// <summary>The user accepted the work the rule guided.</summary>
+    UserAccepted = 4,
+
+    /// <summary>The user rejected the work the rule guided.</summary>
+    UserRejected = 5,
+
+    /// <summary>The same correction recurred even though the rule was injected.</summary>
+    CorrectionRepeated = 6,
+
+    /// <summary>The rule was retrieved but went unused.</summary>
+    RuleIgnored = 7,
+}

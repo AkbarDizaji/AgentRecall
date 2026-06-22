@@ -16,3 +16,13 @@ public interface IRecallEventRepository : IRepository<RecallEvent>
 public interface IRecallScopeRepository : IRepository<RecallScope>
 {
 }
+
+/// <summary>Persistence for <see cref="RetrievalRecord"/>.</summary>
+public interface IRetrievalRecordRepository : IRepository<RetrievalRecord>
+{
+}
+
+/// <summary>Persistence for <see cref="RuleOutcome"/>.</summary>
+public interface IRuleOutcomeRepository : IRepository<RuleOutcome>
+{
+}

@@ -40,6 +40,7 @@ public sealed class ContextInjectionService : IContextInjectionService
 
     private readonly IRecallRuleRepository _rules;
     private readonly IRecallEventRepository _events;
+    private readonly IRetrievalRecordRepository _retrievals;
     private readonly IPolicyEngine _policy;
     private readonly IConceptExpander _concepts;
     private readonly Conflicts.IRuleConflictDetector _conflictDetector;
@@ -48,6 +49,7 @@ public sealed class ContextInjectionService : IContextInjectionService
     public ContextInjectionService(
         IRecallRuleRepository rules,
         IRecallEventRepository events,
+        IRetrievalRecordRepository retrievals,
         IPolicyEngine policy,
         IConceptExpander concepts,
         Conflicts.IRuleConflictDetector conflictDetector,
@@ -55,6 +57,7 @@ public sealed class ContextInjectionService : IContextInjectionService
     {
         _rules = rules ?? throw new ArgumentNullException(nameof(rules));
         _events = events ?? throw new ArgumentNullException(nameof(events));
+        _retrievals = retrievals ?? throw new ArgumentNullException(nameof(retrievals));
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _concepts = concepts ?? throw new ArgumentNullException(nameof(concepts));
         _conflictDetector = conflictDetector ?? throw new ArgumentNullException(nameof(conflictDetector));
@@ -134,7 +137,8 @@ public sealed class ContextInjectionService : IContextInjectionService
 
         if (request.RecordUsage)
         {
-            await RecordRetrievalAsync(result, cancellationToken).ConfigureAwait(false);
+            var retrievalId = await RecordRetrievalAsync(request, result, cancellationToken).ConfigureAwait(false);
+            result = result with { RetrievalId = retrievalId };
         }
 
         return result;
@@ -206,15 +210,25 @@ public sealed class ContextInjectionService : IContextInjectionService
 
     /// <summary>
     /// Records that the injected rules were retrieved: one RuleApplied event per
-    /// rule and a LastUsedAt bump. This is the signal learning reports use to rank
-    /// which rules are actually helping and to detect rules that have gone stale.
+    /// rule, a LastUsedAt bump, and a retrieval record that ties this set of rules to
+    /// a stable id so outcomes can be attached to them later. Returns that id, or
+    /// null when nothing was injected.
     /// </summary>
-    private async Task RecordRetrievalAsync(ContextInjectionResult result, CancellationToken cancellationToken)
+    private async Task<string?> RecordRetrievalAsync(
+        ContextRequest request,
+        ContextInjectionResult result,
+        CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
         var retrieved = result.All
             .Select(injected => injected.Rule)
-            .DistinctBy(rule => rule.Id);
+            .DistinctBy(rule => rule.Id)
+            .ToList();
+
+        if (retrieved.Count == 0)
+        {
+            return null;
+        }
 
         foreach (var rule in retrieved)
         {
@@ -229,6 +243,16 @@ public sealed class ContextInjectionService : IContextInjectionService
             rule.LastUsedAt = now;
             await _rules.UpdateAsync(rule, cancellationToken).ConfigureAwait(false);
         }
+
+        var retrievalId = Guid.NewGuid().ToString("N")[..12];
+        await _retrievals.AddAsync(new RetrievalRecord
+        {
+            RetrievalId = retrievalId,
+            Task = request.Task,
+            RuleIds = string.Join(",", retrieved.Select(r => r.Id)),
+        }, cancellationToken).ConfigureAwait(false);
+
+        return retrievalId;
     }
 
     private Assessment Assess(
