@@ -16,7 +16,7 @@ public sealed class DevcontainerSelfHealTests
     private static readonly string? Bash =
         new[] { "/bin/bash", "/usr/bin/bash" }.FirstOrDefault(File.Exists);
 
-    private enum DotnetMode { Success, Fail, Absent }
+    private enum DotnetMode { Success, Fail, Crash }
 
     private sealed record RunResult(
         int ExitCode,
@@ -56,11 +56,17 @@ public sealed class DevcontainerSelfHealTests
             WriteExecutable(agentrecallPath, agentrecallShim);
         }
 
-        if (dotnet != DotnetMode.Absent)
+        // Always install a fake `dotnet` shim into bin (first on PATH) so the real
+        // dotnet SDK on the host/CI runner is never invoked — the reinstall outcome is
+        // controlled entirely by the shim. Success installs the agentrecall shim;
+        // Fail/Crash return non-zero (a clean failure vs. a hard crash) without one.
         {
-            var installBlock = dotnet == DotnetMode.Success
-                ? $"  mkdir -p \"{toolsDir}\"\n  cat > \"{agentrecallPath}\" <<'AR'\n{agentrecallShim}AR\n  chmod +x \"{agentrecallPath}\"\n  exit 0\n"
-                : "  exit 1\n";
+            var installBlock = dotnet switch
+            {
+                DotnetMode.Success => $"  mkdir -p \"{toolsDir}\"\n  cat > \"{agentrecallPath}\" <<'AR'\n{agentrecallShim}AR\n  chmod +x \"{agentrecallPath}\"\n  exit 0\n",
+                DotnetMode.Crash => "  echo \"dotnet: simulated crash\" >&2\n  exit 127\n",
+                _ => "  echo \"AgentRecall install failed (simulated)\" >&2\n  exit 1\n",
+            };
             WriteExecutable(Path.Combine(bin, "dotnet"),
                 "#!/usr/bin/env bash\n" +
                 $"echo \"$@\" >> \"{dotnetLog}\"\n" +
@@ -177,7 +183,7 @@ public sealed class DevcontainerSelfHealTests
     {
         if (Bash is null) { return; }
 
-        var r = await RunAsync(binaryPreinstalled: false, DotnetMode.Absent, seedStaleRegistration: true);
+        var r = await RunAsync(binaryPreinstalled: false, DotnetMode.Crash, seedStaleRegistration: true);
 
         Assert.Equal(0, r.ExitCode);                                // exception handled, not fatal
         Assert.Contains("attempting reinstall", r.Stderr, StringComparison.Ordinal);
