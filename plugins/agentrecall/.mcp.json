@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "agentrecall": {
+      "command": "agentrecall",
+      "args": ["mcp"]
+    }
+  }
+}

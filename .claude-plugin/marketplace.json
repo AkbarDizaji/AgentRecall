@@ -1,0 +1,12 @@
+{
+  "name": "agentrecall-marketplace",
+  "owner": { "name": "AkbarDizaji" },
+  "plugins": [
+    {
+      "name": "agentrecall",
+      "source": "./plugins/agentrecall",
+      "category": "mcp-servers",
+      "tags": ["mcp", "memory", "claude-code", "dotnet", "agent-memory"]
+    }
+  ]
+}

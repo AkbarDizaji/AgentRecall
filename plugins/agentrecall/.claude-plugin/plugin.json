@@ -1,0 +1,8 @@
+{
+  "name": "agentrecall",
+  "description": "Local-first memory for AI coding agents: captures feedback and failures, turns them into ranked, conflict-resolved technical rules, and injects the relevant ones into Claude Code via MCP. Stays on your machine — no cloud, no API keys.",
+  "version": "0.4.0",
+  "author": { "name": "AkbarDizaji" },
+  "homepage": "https://github.com/AkbarDizaji/AgentRecall",
+  "license": "MIT"
+}
