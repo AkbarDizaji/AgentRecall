@@ -79,6 +79,9 @@ public static class CommandRouter
             case "outcome":
                 return await OutcomeAsync(rest, services, output, cancellationToken).ConfigureAwait(false);
 
+            case "lessons":
+                return await LessonsAsync(rest, services, output, cancellationToken).ConfigureAwait(false);
+
             case "hook":
                 return await HookAsync(rest, services, output, cancellationToken).ConfigureAwait(false);
 
@@ -458,6 +461,178 @@ public static class CommandRouter
                 return 1;
         }
     }
+
+    private static async Task<int> LessonsAsync(
+        string[] args,
+        IServiceProvider services,
+        TextWriter output,
+        CancellationToken cancellationToken)
+    {
+        var sub = args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal) ? args[0] : string.Empty;
+        var options = ParseOptions(args);
+        var json = options.ContainsKey("json");
+
+        await using var scope = services.CreateAsyncScope();
+        await EnsureInitializedAsync(scope, cancellationToken).ConfigureAwait(false);
+        var mining = scope.ServiceProvider.GetRequiredService<Core.Mining.ILessonMiningService>();
+        var candidates = scope.ServiceProvider.GetRequiredService<ILessonCandidateRepository>();
+
+        switch (sub)
+        {
+            case "mine":
+            {
+                var result = await mining.MineAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+                if (json) { WriteJson(output, result.Suggested.Select(ToCandidateJson).ToList()); return 0; }
+
+                output.WriteLine("Suggested Lessons");
+                if (result.Suggested.Count == 0)
+                {
+                    output.WriteLine();
+                    output.WriteLine("  (no repeated patterns found above the threshold)");
+                }
+                else
+                {
+                    foreach (var c in result.Suggested)
+                    {
+                        WriteCandidateBlock(output, c);
+                    }
+                }
+
+                output.WriteLine();
+                output.WriteLine($"({result.Created} new, {result.Updated} updated, {result.SuppressedByRule} covered by existing rules, {result.SuppressedByRejection} previously rejected)");
+                return 0;
+            }
+
+            case "list":
+            {
+                var all = (await candidates.ListAsync(cancellationToken).ConfigureAwait(false))
+                    .OrderByDescending(c => c.Confidence).ThenBy(c => c.Id).ToList();
+                if (json) { WriteJson(output, all.Select(ToCandidateJson).ToList()); return 0; }
+
+                if (all.Count == 0)
+                {
+                    output.WriteLine("No lesson candidates yet. Run: agentrecall lessons mine");
+                    return 0;
+                }
+
+                output.WriteLine($"{"ID",-4} {"STATUS",-10} {"OCC",-4} {"CONF",-5} TITLE");
+                foreach (var c in all)
+                {
+                    output.WriteLine($"{c.Id,-4} {c.Status,-10} {c.OccurrenceCount,-4} {c.Confidence,-5:0.00} {Truncate(c.Title, 60)}");
+                }
+
+                return 0;
+            }
+
+            case "show":
+            {
+                if (args.Length < 2 || !int.TryParse(args[1], out var id))
+                {
+                    output.WriteLine("Usage: agentrecall lessons show <id> [--json]");
+                    return 1;
+                }
+
+                var candidate = await candidates.GetAsync(id, cancellationToken).ConfigureAwait(false);
+                if (candidate is null)
+                {
+                    output.WriteLine($"Lesson candidate #{id} not found.");
+                    return 1;
+                }
+
+                if (json) { WriteJson(output, ToCandidateJson(candidate)); return 0; }
+
+                WriteCandidateBlock(output, candidate);
+                output.WriteLine($"  Status:      {candidate.Status}");
+                if (!string.IsNullOrWhiteSpace(candidate.RejectedReason))
+                {
+                    output.WriteLine($"  Rejected:    {candidate.RejectedReason}");
+                }
+
+                output.WriteLine($"  First seen:  {candidate.FirstSeenAt:u}");
+                output.WriteLine($"  Last seen:   {candidate.LastSeenAt:u}");
+                return 0;
+            }
+
+            case "accept":
+            {
+                if (args.Length < 2 || !int.TryParse(args[1], out var id))
+                {
+                    output.WriteLine("Usage: agentrecall lessons accept <id>");
+                    return 1;
+                }
+
+                var candidate = await mining.AcceptAsync(id, cancellationToken).ConfigureAwait(false);
+                if (candidate is null)
+                {
+                    output.WriteLine($"Lesson candidate #{id} not found.");
+                    return 1;
+                }
+
+                output.WriteLine($"Accepted lesson candidate #{candidate.Id}; created an Active rule from it.");
+                output.WriteLine($"  {candidate.SuggestedRule}");
+                return 0;
+            }
+
+            case "reject":
+            {
+                if (args.Length < 2 || !int.TryParse(args[1], out var id))
+                {
+                    output.WriteLine("Usage: agentrecall lessons reject <id> --reason \"<reason>\"");
+                    return 1;
+                }
+
+                var reason = options.GetValueOrDefault("reason") ?? string.Empty;
+                var candidate = await mining.RejectAsync(id, reason, cancellationToken).ConfigureAwait(false);
+                if (candidate is null)
+                {
+                    output.WriteLine($"Lesson candidate #{id} not found.");
+                    return 1;
+                }
+
+                output.WriteLine($"Rejected lesson candidate #{candidate.Id}. Its pattern won't be proposed again.");
+                output.WriteLine($"  Reason: {candidate.RejectedReason}");
+                return 0;
+            }
+
+            default:
+                output.WriteLine("Usage:");
+                output.WriteLine("  agentrecall lessons mine [--json]");
+                output.WriteLine("  agentrecall lessons list [--json]");
+                output.WriteLine("  agentrecall lessons show <id> [--json]");
+                output.WriteLine("  agentrecall lessons accept <id>");
+                output.WriteLine("  agentrecall lessons reject <id> --reason \"<reason>\"");
+                return 1;
+        }
+    }
+
+    private static void WriteCandidateBlock(TextWriter output, Core.Domain.LessonCandidate c)
+    {
+        output.WriteLine();
+        output.WriteLine($"#{c.Id} {c.Title}");
+        output.WriteLine($"  Rule:        {c.SuggestedRule}");
+        output.WriteLine($"  Category:    {c.Category}");
+        output.WriteLine($"  Occurrences: {c.OccurrenceCount}");
+        output.WriteLine($"  Confidence:  {c.Confidence:0.00}");
+        output.WriteLine($"  Supporting events: {c.SupportingEventIds}");
+    }
+
+    private static object ToCandidateJson(Core.Domain.LessonCandidate c) => new
+    {
+        id = c.Id,
+        title = c.Title,
+        suggestedRule = c.SuggestedRule,
+        category = c.Category.ToString(),
+        status = c.Status.ToString(),
+        occurrenceCount = c.OccurrenceCount,
+        confidence = c.Confidence,
+        supportingEventIds = c.SupportingEventIds
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(int.Parse).ToArray(),
+        firstSeenAt = c.FirstSeenAt,
+        lastSeenAt = c.LastSeenAt,
+        normalizedKey = c.NormalizedKey,
+        rejectedReason = c.RejectedReason,
+    };
 
     private static async Task<int> OutcomeAsync(
         string[] args,
@@ -1365,6 +1540,19 @@ public static class CommandRouter
                 rank++;
             }
         }
+
+        output.WriteLine();
+        output.WriteLine("Mined Lesson Candidates");
+        output.WriteLine();
+        output.WriteLine($"  Suggested: {r.LessonCandidatesSuggested}  |  Accepted: {r.LessonCandidatesAccepted}  |  Rejected: {r.LessonCandidatesRejected}");
+        if (r.TopMinedCategories.Count > 0)
+        {
+            output.WriteLine("  Top mined categories:");
+            foreach (var category in r.TopMinedCategories)
+            {
+                output.WriteLine($"    {category.Category} ({category.Count})");
+            }
+        }
     }
 
     private static void WriteOutcomeRuleSection(TextWriter output, string title, IReadOnlyList<OutcomeRuleStat> rules)
@@ -1535,6 +1723,9 @@ public static class CommandRouter
         output.WriteLine("  rules conflicts      List detected rule conflicts and the chosen winner (--json)");
         output.WriteLine("  rules explain <id>   Explain a rule's confidence from its outcome history");
         output.WriteLine("  outcome record       Record an outcome (TestsPassed, UserAccepted, …) and adjust confidence");
+        output.WriteLine("  lessons mine         Mine repeated historical signals into suggested lesson candidates");
+        output.WriteLine("  lessons list|show|accept|reject");
+        output.WriteLine("                       Review mined candidates; accept turns one into a rule");
         output.WriteLine("  search \"<query>\"     Search rules by keyword, ranked");
         output.WriteLine("  inject-context \"<task>\"");
         output.WriteLine("                       Build agent-ready context (must-follow, warnings,");

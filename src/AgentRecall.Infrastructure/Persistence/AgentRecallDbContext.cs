@@ -18,6 +18,7 @@ public sealed class AgentRecallDbContext : DbContext
     public DbSet<RecallScope> Scopes => Set<RecallScope>();
     public DbSet<RetrievalRecord> Retrievals => Set<RetrievalRecord>();
     public DbSet<RuleOutcome> Outcomes => Set<RuleOutcome>();
+    public DbSet<LessonCandidate> LessonCandidates => Set<LessonCandidate>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -67,6 +68,16 @@ public sealed class AgentRecallDbContext : DbContext
             entity.HasIndex(e => e.RuleId);
             entity.HasIndex(e => e.RetrievalId);
             entity.HasIndex(e => e.CreatedAt);
+        });
+
+        modelBuilder.Entity<LessonCandidate>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Status).HasConversion<string>();
+            entity.Property(e => e.Category).HasConversion<string>().HasDefaultValue(RuleCategory.Unknown);
+            entity.Property(e => e.NormalizedKey).IsRequired();
+            entity.HasIndex(e => e.NormalizedKey);
+            entity.HasIndex(e => e.Status);
         });
     }
 }

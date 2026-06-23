@@ -110,3 +110,16 @@ public enum OutcomeType
     /// <summary>The rule was retrieved but went unused.</summary>
     RuleIgnored = 7,
 }
+
+/// <summary>Lifecycle of a mined <see cref="RecallRule"/> candidate awaiting review.</summary>
+public enum LessonCandidateStatus
+{
+    /// <summary>Proposed by mining; awaiting human review.</summary>
+    Suggested = 0,
+
+    /// <summary>Accepted into a real rule.</summary>
+    Accepted = 1,
+
+    /// <summary>Rejected; its pattern is suppressed from future proposals.</summary>
+    Rejected = 2,
+}

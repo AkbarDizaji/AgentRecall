@@ -26,3 +26,8 @@ public interface IRetrievalRecordRepository : IRepository<RetrievalRecord>
 public interface IRuleOutcomeRepository : IRepository<RuleOutcome>
 {
 }
+
+/// <summary>Persistence for <see cref="LessonCandidate"/>.</summary>
+public interface ILessonCandidateRepository : IRepository<LessonCandidate>
+{
+}

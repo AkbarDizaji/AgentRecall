@@ -5,6 +5,7 @@ using AgentRecall.Core.Configuration;
 using AgentRecall.Core.Context;
 using AgentRecall.Core.Extraction;
 using AgentRecall.Core.Memory;
+using AgentRecall.Core.Mining;
 using AgentRecall.Core.Outcomes;
 using AgentRecall.Core.Policy;
 using AgentRecall.Core.Reporting;
@@ -36,6 +37,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IRecallScopeRepository, RecallScopeRepository>();
         services.AddScoped<IRetrievalRecordRepository, RetrievalRecordRepository>();
         services.AddScoped<IRuleOutcomeRepository, RuleOutcomeRepository>();
+        services.AddScoped<ILessonCandidateRepository, LessonCandidateRepository>();
         services.AddScoped<IDatabaseInitializer, DatabaseInitializer>();
 
         // Feedback capture and rule extraction.
@@ -74,6 +76,9 @@ public static class ServiceCollectionExtensions
 
         // Outcome-based learning: move rule confidence on real evidence.
         services.AddScoped<IOutcomeTrackingService, OutcomeTrackingService>();
+
+        // Lesson mining: propose new lesson candidates from repeated historical signals.
+        services.AddScoped<ILessonMiningService, LessonMiningService>();
 
         // Learning reports: local-only analytics over rules and the event ledger.
         services.AddScoped<ILearningReportService, LearningReportService>();

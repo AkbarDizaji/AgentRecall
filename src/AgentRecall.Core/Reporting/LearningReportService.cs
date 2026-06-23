@@ -18,17 +18,20 @@ public sealed class LearningReportService : ILearningReportService
     private readonly IRecallRuleRepository _rules;
     private readonly IRecallEventRepository _events;
     private readonly IRuleOutcomeRepository _outcomes;
+    private readonly ILessonCandidateRepository _candidates;
     private readonly Conflicts.IRuleConflictDetector _conflictDetector;
 
     public LearningReportService(
         IRecallRuleRepository rules,
         IRecallEventRepository events,
         IRuleOutcomeRepository outcomes,
+        ILessonCandidateRepository candidates,
         Conflicts.IRuleConflictDetector conflictDetector)
     {
         _rules = rules ?? throw new ArgumentNullException(nameof(rules));
         _events = events ?? throw new ArgumentNullException(nameof(events));
         _outcomes = outcomes ?? throw new ArgumentNullException(nameof(outcomes));
+        _candidates = candidates ?? throw new ArgumentNullException(nameof(candidates));
         _conflictDetector = conflictDetector ?? throw new ArgumentNullException(nameof(conflictDetector));
     }
 
@@ -233,6 +236,17 @@ public sealed class LearningReportService : ILearningReportService
             .Select(x => new RetrievedRuleStat { RuleId = x.Rule.Id, RuleText = x.Rule.RuleText, RetrievalCount = x.Count })
             .ToList();
 
+        // Mined lesson candidates (current-state snapshot).
+        var candidates = await _candidates.ListAsync(cancellationToken).ConfigureAwait(false);
+        var topMinedCategories = candidates
+            .Where(c => c.Status == LessonCandidateStatus.Suggested)
+            .GroupBy(c => c.Category.ToString(), StringComparer.Ordinal)
+            .Select(g => new CategoryCount { Category = g.Key, Count = g.Count() })
+            .OrderByDescending(c => c.Count)
+            .ThenBy(c => c.Category, StringComparer.Ordinal)
+            .Take(options.Top)
+            .ToList();
+
         return new LearningUsageReport
         {
             TopRetrievedRules = topRetrieved,
@@ -244,6 +258,10 @@ public sealed class LearningReportService : ILearningReportService
             MostEffectiveRules = mostEffective,
             RulesWithRepeatedNegativeOutcomes = repeatedNegative,
             FrequentlyRetrievedButRarelyValidated = rarelyValidated,
+            LessonCandidatesSuggested = candidates.Count(c => c.Status == LessonCandidateStatus.Suggested),
+            LessonCandidatesAccepted = candidates.Count(c => c.Status == LessonCandidateStatus.Accepted),
+            LessonCandidatesRejected = candidates.Count(c => c.Status == LessonCandidateStatus.Rejected),
+            TopMinedCategories = topMinedCategories,
         };
     }
 

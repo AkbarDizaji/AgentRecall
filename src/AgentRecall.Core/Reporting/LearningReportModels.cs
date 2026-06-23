@@ -117,6 +117,18 @@ public sealed record LearningUsageReport
 
     /// <summary>Rules retrieved often but never validated by an outcome.</summary>
     public required IReadOnlyList<RetrievedRuleStat> FrequentlyRetrievedButRarelyValidated { get; init; }
+
+    /// <summary>Mined lesson candidates currently awaiting review.</summary>
+    public required int LessonCandidatesSuggested { get; init; }
+
+    /// <summary>Mined lesson candidates accepted into rules.</summary>
+    public required int LessonCandidatesAccepted { get; init; }
+
+    /// <summary>Mined lesson candidates rejected.</summary>
+    public required int LessonCandidatesRejected { get; init; }
+
+    /// <summary>Most common categories among suggested lesson candidates.</summary>
+    public required IReadOnlyList<CategoryCount> TopMinedCategories { get; init; }
 }
 
 /// <summary>An active rule and how many detected conflicts it participates in.</summary>
