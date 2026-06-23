@@ -21,6 +21,18 @@
 
     <!-- Only the CLI project opts back in (as a packed tool). -->
     <IsPackable>false</IsPackable>
+
+    <!--
+      Deterministic, reproducible builds. The compiler is deterministic by default,
+      but the published package is only flagged "deterministic" when source paths are
+      normalized via ContinuousIntegrationBuild. Enable that only in CI (GitHub Actions
+      sets CI=true) so local builds keep real paths for debugging, while the released
+      NuGet package is reproducible. Source Link maps embedded paths back to GitHub.
+    -->
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
   </PropertyGroup>
 
   <!--
