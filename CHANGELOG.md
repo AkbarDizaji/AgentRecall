@@ -4,6 +4,18 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-06-24
+
+### Added
+- Added automatic rule lifecycle recommendations.
+- Added `agentrecall lifecycle suggest|list|show|apply|reject`.
+- Added promote, archive, supersede, review, raise-confidence, and lower-confidence recommendations.
+- Added lifecycle recommendation reports.
+
+### Safety
+- Lifecycle suggestions are dry-run by default.
+- Rules are only changed when recommendations are explicitly applied.
+
 ## [0.2.9] - 2026-06-18
 
 ### Added
