@@ -123,3 +123,41 @@ public enum LessonCandidateStatus
     /// <summary>Rejected; its pattern is suppressed from future proposals.</summary>
     Rejected = 2,
 }
+
+/// <summary>A suggested lifecycle action for a <see cref="RecallRule"/>.</summary>
+public enum RecommendationType
+{
+    /// <summary>Promote a strong, well-evidenced rule.</summary>
+    Promote = 0,
+
+    /// <summary>Archive a stale, low-value, or superseded rule.</summary>
+    Archive = 1,
+
+    /// <summary>Replace a weaker/older rule with a stronger one.</summary>
+    Supersede = 2,
+
+    /// <summary>Flag a risky or low-quality rule for human review.</summary>
+    Review = 3,
+
+    /// <summary>Lower a rule's confidence on negative evidence.</summary>
+    LowerConfidence = 4,
+
+    /// <summary>Raise a rule's confidence on positive evidence.</summary>
+    RaiseConfidence = 5,
+}
+
+/// <summary>Review state of a <see cref="RuleLifecycleRecommendation"/>.</summary>
+public enum RecommendationStatus
+{
+    /// <summary>Proposed; awaiting a human decision.</summary>
+    Suggested = 0,
+
+    /// <summary>Accepted but not (yet) applied as a mutation (e.g. Review).</summary>
+    Accepted = 1,
+
+    /// <summary>Dismissed; suppressed from being proposed again.</summary>
+    Rejected = 2,
+
+    /// <summary>The recommended action was carried out.</summary>
+    Applied = 3,
+}

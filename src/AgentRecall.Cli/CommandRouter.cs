@@ -82,6 +82,9 @@ public static class CommandRouter
             case "lessons":
                 return await LessonsAsync(rest, services, output, cancellationToken).ConfigureAwait(false);
 
+            case "lifecycle":
+                return await LifecycleAsync(rest, services, output, cancellationToken).ConfigureAwait(false);
+
             case "hook":
                 return await HookAsync(rest, services, output, cancellationToken).ConfigureAwait(false);
 
@@ -461,6 +464,225 @@ public static class CommandRouter
                 return 1;
         }
     }
+
+    // Recommendation types safe to apply in bulk via `lifecycle suggest --apply`.
+    private static readonly HashSet<RecommendationType> SafeBulkApply =
+        [RecommendationType.Promote, RecommendationType.RaiseConfidence, RecommendationType.LowerConfidence];
+
+    private static async Task<int> LifecycleAsync(
+        string[] args,
+        IServiceProvider services,
+        TextWriter output,
+        CancellationToken cancellationToken)
+    {
+        var sub = args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal) ? args[0] : string.Empty;
+        var options = ParseOptions(args);
+        var json = options.ContainsKey("json");
+
+        RecommendationType? typeFilter = null;
+        if (options.TryGetValue("type", out var rawType))
+        {
+            if (!Enum.TryParse(rawType, ignoreCase: true, out RecommendationType parsed))
+            {
+                output.WriteLine($"Invalid --type '{rawType}'. Valid values: {string.Join(", ", Enum.GetNames<RecommendationType>())}");
+                return 1;
+            }
+
+            typeFilter = parsed;
+        }
+
+        var scopeLevel = (ScopeLevel?)null;
+        if (options.TryGetValue("scope-level", out var rawScope))
+        {
+            if (!Enum.TryParse(rawScope, ignoreCase: true, out ScopeLevel level))
+            {
+                output.WriteLine($"Invalid --scope-level '{rawScope}'. Valid values: {string.Join(", ", Enum.GetNames<ScopeLevel>())}");
+                return 1;
+            }
+
+            scopeLevel = level;
+        }
+
+        await using var scope = services.CreateAsyncScope();
+        await EnsureInitializedAsync(scope, cancellationToken).ConfigureAwait(false);
+        var service = scope.ServiceProvider.GetRequiredService<Core.Lifecycle.IRuleLifecycleRecommendationService>();
+        var repo = scope.ServiceProvider.GetRequiredService<IRuleLifecycleRecommendationRepository>();
+
+        switch (sub)
+        {
+            case "suggest":
+            {
+                var query = new Core.Lifecycle.RecommendationQuery
+                {
+                    AsOf = DateTimeOffset.UtcNow,
+                    Type = typeFilter,
+                    ScopeLevel = scopeLevel,
+                    ScopeValue = options.GetValueOrDefault("scope-value"),
+                };
+
+                var recs = await service.SuggestAsync(query, cancellationToken).ConfigureAwait(false);
+
+                var applied = 0;
+                if (options.ContainsKey("apply"))
+                {
+                    // Only low-risk types are auto-applied; archive/supersede/review need explicit apply.
+                    foreach (var rec in recs.Where(r => SafeBulkApply.Contains(r.RecommendationType)))
+                    {
+                        await service.ApplyAsync(rec.Id, cancellationToken).ConfigureAwait(false);
+                        applied++;
+                    }
+                }
+
+                if (json) { WriteJson(output, recs.Select(ToRecommendationJson).ToList()); return 0; }
+
+                output.WriteLine(options.ContainsKey("apply") ? "Lifecycle Recommendations (applying safe actions)" : "Lifecycle Recommendations (dry run — nothing changed)");
+                if (recs.Count == 0)
+                {
+                    output.WriteLine();
+                    output.WriteLine("  (no recommendations)");
+                }
+                else
+                {
+                    foreach (var rec in recs) WriteRecommendationBlock(output, rec);
+                }
+
+                if (options.ContainsKey("apply"))
+                {
+                    output.WriteLine();
+                    output.WriteLine($"Applied {applied} safe recommendation(s). Run 'lifecycle apply <id>' for archive/supersede/review.");
+                }
+
+                return 0;
+            }
+
+            case "list":
+            {
+                var all = (await repo.ListAsync(cancellationToken).ConfigureAwait(false))
+                    .Where(r => typeFilter is null || r.RecommendationType == typeFilter)
+                    .OrderByDescending(r => r.Confidence).ThenBy(r => r.Id).ToList();
+                if (json) { WriteJson(output, all.Select(ToRecommendationJson).ToList()); return 0; }
+
+                if (all.Count == 0)
+                {
+                    output.WriteLine("No recommendations yet. Run: agentrecall lifecycle suggest");
+                    return 0;
+                }
+
+                output.WriteLine($"{"ID",-4} {"TYPE",-16} {"STATUS",-10} {"RULE",-5} {"CONF",-5} REASON");
+                foreach (var r in all)
+                {
+                    output.WriteLine($"{r.Id,-4} {r.RecommendationType,-16} {r.Status,-10} #{r.RuleId,-4} {r.Confidence,-5:0.00} {Truncate(r.Reason, 50)}");
+                }
+
+                return 0;
+            }
+
+            case "show":
+            {
+                if (args.Length < 2 || !int.TryParse(args[1], out var id))
+                {
+                    output.WriteLine("Usage: agentrecall lifecycle show <id> [--json]");
+                    return 1;
+                }
+
+                var rec = await repo.GetAsync(id, cancellationToken).ConfigureAwait(false);
+                if (rec is null)
+                {
+                    output.WriteLine($"Recommendation #{id} not found.");
+                    return 1;
+                }
+
+                if (json) { WriteJson(output, ToRecommendationJson(rec)); return 0; }
+
+                WriteRecommendationBlock(output, rec);
+                output.WriteLine($"  Status:   {rec.Status}");
+                if (!string.IsNullOrWhiteSpace(rec.RejectedReason))
+                {
+                    output.WriteLine($"  Rejected: {rec.RejectedReason}");
+                }
+
+                return 0;
+            }
+
+            case "apply":
+            {
+                if (args.Length < 2 || !int.TryParse(args[1], out var id))
+                {
+                    output.WriteLine("Usage: agentrecall lifecycle apply <id>");
+                    return 1;
+                }
+
+                try
+                {
+                    var rec = await service.ApplyAsync(id, cancellationToken).ConfigureAwait(false);
+                    if (rec is null)
+                    {
+                        output.WriteLine($"Recommendation #{id} not found.");
+                        return 1;
+                    }
+
+                    output.WriteLine($"Recommendation #{rec.Id} ({rec.RecommendationType}) is now {rec.Status}.");
+                    return 0;
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or KeyNotFoundException)
+                {
+                    output.WriteLine($"Could not apply recommendation #{id}: {ex.Message}");
+                    return 1;
+                }
+            }
+
+            case "reject":
+            {
+                if (args.Length < 2 || !int.TryParse(args[1], out var id))
+                {
+                    output.WriteLine("Usage: agentrecall lifecycle reject <id> --reason \"<reason>\"");
+                    return 1;
+                }
+
+                var rec = await service.RejectAsync(id, options.GetValueOrDefault("reason") ?? string.Empty, cancellationToken).ConfigureAwait(false);
+                if (rec is null)
+                {
+                    output.WriteLine($"Recommendation #{id} not found.");
+                    return 1;
+                }
+
+                output.WriteLine($"Rejected recommendation #{rec.Id}. It won't be proposed again.");
+                return 0;
+            }
+
+            default:
+                output.WriteLine("Usage:");
+                output.WriteLine("  agentrecall lifecycle suggest [--type <t>] [--scope-level <l>] [--scope-value <v>] [--apply] [--json]");
+                output.WriteLine("  agentrecall lifecycle list [--type <t>] [--json]");
+                output.WriteLine("  agentrecall lifecycle show <id> [--json]");
+                output.WriteLine("  agentrecall lifecycle apply <id>");
+                output.WriteLine("  agentrecall lifecycle reject <id> --reason \"<reason>\"");
+                return 1;
+        }
+    }
+
+    private static void WriteRecommendationBlock(TextWriter output, RuleLifecycleRecommendation r)
+    {
+        output.WriteLine();
+        var target = r.TargetRuleId is { } t ? $" with #{t}" : string.Empty;
+        output.WriteLine($"#{r.Id} {r.RecommendationType} rule #{r.RuleId}{target}");
+        output.WriteLine($"  Reason:     {r.Reason}");
+        output.WriteLine($"  Evidence:   {r.Evidence}");
+        output.WriteLine($"  Confidence: {r.Confidence:0.00}");
+    }
+
+    private static object ToRecommendationJson(RuleLifecycleRecommendation r) => new
+    {
+        id = r.Id,
+        ruleId = r.RuleId,
+        targetRuleId = r.TargetRuleId,
+        type = r.RecommendationType.ToString(),
+        reason = r.Reason,
+        evidence = r.Evidence,
+        confidence = r.Confidence,
+        status = r.Status.ToString(),
+        rejectedReason = r.RejectedReason,
+    };
 
     private static async Task<int> LessonsAsync(
         string[] args,
@@ -1357,12 +1579,56 @@ public static class CommandRouter
                 return 0;
             }
 
+            case "lifecycle-recommendations":
+            {
+                var all = await scope.ServiceProvider
+                    .GetRequiredService<IRuleLifecycleRecommendationRepository>()
+                    .ListAsync(cancellationToken).ConfigureAwait(false);
+
+                // type -> per-status counts, deterministic order.
+                var byType = Enum.GetValues<RecommendationType>().ToDictionary(
+                    t => t,
+                    t => new
+                    {
+                        Suggested = all.Count(r => r.RecommendationType == t && r.Status == RecommendationStatus.Suggested),
+                        Applied = all.Count(r => r.RecommendationType == t && r.Status == RecommendationStatus.Applied),
+                        Accepted = all.Count(r => r.RecommendationType == t && r.Status == RecommendationStatus.Accepted),
+                        Rejected = all.Count(r => r.RecommendationType == t && r.Status == RecommendationStatus.Rejected),
+                    });
+
+                if (json)
+                {
+                    WriteJson(output, new
+                    {
+                        suggested = all.Count(r => r.Status == RecommendationStatus.Suggested),
+                        applied = all.Count(r => r.Status == RecommendationStatus.Applied),
+                        accepted = all.Count(r => r.Status == RecommendationStatus.Accepted),
+                        rejected = all.Count(r => r.Status == RecommendationStatus.Rejected),
+                        byType = byType.ToDictionary(kv => kv.Key.ToString(), kv => kv.Value),
+                    });
+                    return 0;
+                }
+
+                output.WriteLine("Lifecycle Recommendations");
+                output.WriteLine();
+                output.WriteLine($"  Suggested: {all.Count(r => r.Status == RecommendationStatus.Suggested)}  |  Applied: {all.Count(r => r.Status == RecommendationStatus.Applied)}  |  Accepted: {all.Count(r => r.Status == RecommendationStatus.Accepted)}  |  Rejected: {all.Count(r => r.Status == RecommendationStatus.Rejected)}");
+                output.WriteLine();
+                output.WriteLine("  By type (suggested):");
+                foreach (var (type, counts) in byType)
+                {
+                    output.WriteLine($"    {type,-16} {counts.Suggested}");
+                }
+
+                return 0;
+            }
+
             default:
                 output.WriteLine("Usage:");
                 output.WriteLine("  agentrecall report monthly [--month YYYY-MM] [--json]");
                 output.WriteLine("  agentrecall report lifecycle [--json]");
                 output.WriteLine("  agentrecall report usage [--top <n>] [--stale-days <n>] [--json]");
                 output.WriteLine("  agentrecall report dna [--top <n>] [--json]");
+                output.WriteLine("  agentrecall report lifecycle-recommendations [--json]");
                 return 1;
         }
     }
@@ -1726,6 +1992,9 @@ public static class CommandRouter
         output.WriteLine("  lessons mine         Mine repeated historical signals into suggested lesson candidates");
         output.WriteLine("  lessons list|show|accept|reject");
         output.WriteLine("                       Review mined candidates; accept turns one into a rule");
+        output.WriteLine("  lifecycle suggest    Recommend lifecycle actions (promote/archive/supersede/review)");
+        output.WriteLine("  lifecycle list|show|apply|reject");
+        output.WriteLine("                       Review recommendations; suggest is dry-run unless --apply");
         output.WriteLine("  search \"<query>\"     Search rules by keyword, ranked");
         output.WriteLine("  inject-context \"<task>\"");
         output.WriteLine("                       Build agent-ready context (must-follow, warnings,");

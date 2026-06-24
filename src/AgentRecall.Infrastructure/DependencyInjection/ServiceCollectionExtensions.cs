@@ -4,6 +4,7 @@ using AgentRecall.Core.Conflicts;
 using AgentRecall.Core.Configuration;
 using AgentRecall.Core.Context;
 using AgentRecall.Core.Extraction;
+using AgentRecall.Core.Lifecycle;
 using AgentRecall.Core.Memory;
 using AgentRecall.Core.Mining;
 using AgentRecall.Core.Outcomes;
@@ -38,6 +39,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IRetrievalRecordRepository, RetrievalRecordRepository>();
         services.AddScoped<IRuleOutcomeRepository, RuleOutcomeRepository>();
         services.AddScoped<ILessonCandidateRepository, LessonCandidateRepository>();
+        services.AddScoped<IRuleLifecycleRecommendationRepository, RuleLifecycleRecommendationRepository>();
         services.AddScoped<IDatabaseInitializer, DatabaseInitializer>();
 
         // Feedback capture and rule extraction.
@@ -79,6 +81,9 @@ public static class ServiceCollectionExtensions
 
         // Lesson mining: propose new lesson candidates from repeated historical signals.
         services.AddScoped<ILessonMiningService, LessonMiningService>();
+
+        // Automatic rule lifecycle management: advisory promote/archive/supersede/review.
+        services.AddScoped<IRuleLifecycleRecommendationService, RuleLifecycleRecommendationService>();
 
         // Learning reports: local-only analytics over rules and the event ledger.
         services.AddScoped<ILearningReportService, LearningReportService>();

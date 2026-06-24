@@ -31,3 +31,8 @@ public interface IRuleOutcomeRepository : IRepository<RuleOutcome>
 public interface ILessonCandidateRepository : IRepository<LessonCandidate>
 {
 }
+
+/// <summary>Persistence for <see cref="RuleLifecycleRecommendation"/>.</summary>
+public interface IRuleLifecycleRecommendationRepository : IRepository<RuleLifecycleRecommendation>
+{
+}
