@@ -11,6 +11,7 @@ using AgentRecall.Core.Services;
 using AgentRecall.Infrastructure.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Dna = AgentRecall.Core.Dna;
 
 namespace AgentRecall.Cli;
 
@@ -75,6 +76,9 @@ public static class CommandRouter
 
             case "report":
                 return await ReportAsync(rest, services, output, cancellationToken).ConfigureAwait(false);
+
+            case "dna":
+                return await DnaAsync(rest, services, output, cancellationToken).ConfigureAwait(false);
 
             case "outcome":
                 return await OutcomeAsync(rest, services, output, cancellationToken).ConfigureAwait(false);
@@ -1871,6 +1875,172 @@ public static class CommandRouter
         }
     }
 
+    // Project DNA emits snake_case JSON (generated_at, rule_ids, source_counts, …)
+    // with enums as names, so the structured output is stable and self-describing.
+    private static readonly System.Text.Json.JsonSerializerOptions DnaJsonOptions = new()
+    {
+        PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.SnakeCaseLower,
+        WriteIndented = true,
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() },
+    };
+
+    private static async Task<int> DnaAsync(
+        string[] args,
+        IServiceProvider services,
+        TextWriter output,
+        CancellationToken cancellationToken)
+    {
+        var options = ParseOptions(args);
+        var json = options.ContainsKey("json");
+        var markdown = options.ContainsKey("markdown");
+
+        if (json && markdown)
+        {
+            output.WriteLine("Choose one of --json or --markdown, not both.");
+            return 1;
+        }
+
+        var top = 5;
+        if (options.TryGetValue("top", out var rawTop))
+        {
+            if (!int.TryParse(rawTop, out top) || top <= 0)
+            {
+                output.WriteLine($"Invalid --top '{rawTop}'. Expected a positive integer.");
+                return 1;
+            }
+        }
+
+        ScopeLevel? scopeLevel = null;
+        if (options.TryGetValue("scope-level", out var rawLevel))
+        {
+            if (!Enum.TryParse<ScopeLevel>(rawLevel, ignoreCase: true, out var parsed))
+            {
+                output.WriteLine($"Invalid --scope-level '{rawLevel}'. Expected Global|Language|Repository|Directory|File.");
+                return 1;
+            }
+
+            scopeLevel = parsed;
+        }
+
+        options.TryGetValue("scope-value", out var scopeValue);
+        if (scopeValue is not null && scopeLevel is null)
+        {
+            output.WriteLine("--scope-value requires --scope-level.");
+            return 1;
+        }
+
+        var dnaOptions = new Dna.ProjectDnaOptions
+        {
+            AsOf = DateTimeOffset.UtcNow,
+            Top = top,
+            ScopeLevel = scopeLevel,
+            ScopeValue = scopeValue,
+        };
+
+        await using var scope = services.CreateAsyncScope();
+        await EnsureInitializedAsync(scope, cancellationToken).ConfigureAwait(false);
+        var dna = scope.ServiceProvider.GetRequiredService<Dna.IProjectDnaService>();
+        var report = await dna.GenerateAsync(dnaOptions, cancellationToken).ConfigureAwait(false);
+
+        // Render to a string first so the same content can go to stdout or a file.
+        var rendered = new StringWriter();
+        if (json)
+        {
+            rendered.WriteLine(System.Text.Json.JsonSerializer.Serialize(report, DnaJsonOptions));
+        }
+        else if (markdown)
+        {
+            WriteDnaMarkdown(rendered, report);
+        }
+        else
+        {
+            WriteProjectDna(rendered, report);
+        }
+
+        if (options.TryGetValue("output", out var path) && !string.IsNullOrWhiteSpace(path))
+        {
+            await File.WriteAllTextAsync(path, rendered.ToString(), cancellationToken).ConfigureAwait(false);
+            output.WriteLine($"Wrote Project DNA to {path}.");
+            return 0;
+        }
+
+        output.Write(rendered.ToString());
+        return 0;
+    }
+
+    private static void WriteProjectDna(TextWriter output, Dna.ProjectDnaReport report)
+    {
+        output.WriteLine("Project DNA");
+        output.WriteLine();
+        output.WriteLine($"Generated: {report.GeneratedAt:u}");
+        output.WriteLine($"Scope:     {DescribeScope(report.Scope)}");
+        var counts = report.SourceCounts;
+        output.WriteLine($"Sources:   {counts.ActiveRules} active, {counts.PromotedRules} promoted, {counts.PendingRules} pending; {counts.LessonCandidates} mined; {counts.Conflicts} conflict(s)");
+
+        if (counts.ActiveRules + counts.PromotedRules + counts.PendingRules + counts.LessonCandidates == 0)
+        {
+            output.WriteLine();
+            output.WriteLine("No rules captured yet. Record feedback with `agentrecall feedback add`");
+            output.WriteLine("to start building this project's DNA.");
+            return;
+        }
+
+        foreach (var section in report.Sections)
+        {
+            output.WriteLine();
+            output.WriteLine(section.Title);
+            output.WriteLine();
+            if (section.Items.Count == 0)
+            {
+                output.WriteLine("  (none yet)");
+                continue;
+            }
+
+            foreach (var item in section.Items)
+            {
+                output.WriteLine($"  - {Truncate(item.Text, 100)}");
+            }
+        }
+    }
+
+    private static void WriteDnaMarkdown(TextWriter output, Dna.ProjectDnaReport report)
+    {
+        output.WriteLine("# Project DNA");
+        output.WriteLine();
+        output.WriteLine($"_Generated {report.GeneratedAt:u} · scope: {DescribeScope(report.Scope)}_");
+
+        var counts = report.SourceCounts;
+        if (counts.ActiveRules + counts.PromotedRules + counts.PendingRules + counts.LessonCandidates == 0)
+        {
+            output.WriteLine();
+            output.WriteLine("_No rules captured yet. Record feedback with `agentrecall feedback add` to start building this project's DNA._");
+            return;
+        }
+
+        foreach (var section in report.Sections)
+        {
+            output.WriteLine();
+            output.WriteLine($"## {section.Title}");
+            output.WriteLine();
+            if (section.Items.Count == 0)
+            {
+                output.WriteLine("_No entries yet._");
+                continue;
+            }
+
+            foreach (var item in section.Items)
+            {
+                output.WriteLine($"- {item.Text}");
+            }
+        }
+    }
+
+    private static string DescribeScope(Dna.DnaScope scope) =>
+        scope.Level is null
+            ? "all"
+            : string.IsNullOrEmpty(scope.Value) ? scope.Level.ToString()! : $"{scope.Level}:{scope.Value}";
+
     /// <summary>Ensures the database exists before a command touches it.</summary>
     private static Task EnsureInitializedAsync(AsyncServiceScope scope, CancellationToken cancellationToken) =>
         scope.ServiceProvider.GetRequiredService<IDatabaseInitializer>().InitializeAsync(cancellationToken);
@@ -2011,6 +2181,10 @@ public static class CommandRouter
         output.WriteLine("  report usage         Top retrieved, most valuable, growth, and stale rules");
         output.WriteLine("  report dna           Distil the project's conventions for onboarding");
         output.WriteLine("                       (any report supports --json)");
+        output.WriteLine("  dna                  Summarise the repo's engineering personality for");
+        output.WriteLine("                       onboarding (--markdown, --json, --top <n>,");
+        output.WriteLine("                       --scope-level <level>, --scope-value <text>,");
+        output.WriteLine("                       --output <file>)");
         output.WriteLine("  hook user-prompt-submit");
         output.WriteLine("                       Gated context injection for a Claude Code UserPromptSubmit hook");
         output.WriteLine("  mcp                  Run the MCP server over stdio (for Claude Code)");

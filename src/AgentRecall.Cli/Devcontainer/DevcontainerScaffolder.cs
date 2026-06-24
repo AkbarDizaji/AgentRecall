@@ -28,19 +28,35 @@ public static class DevcontainerScaffolder
     public const string ClaudeSettingsRelativePath = ".claude/settings.json";
 
     /// <summary>
+    /// Prefix that puts the .NET global-tools directory on PATH for the hook's shell.
+    /// Claude Code may be launched from a GUI/IDE whose environment doesn't include
+    /// <c>~/.dotnet/tools</c>, and it runs hooks via a non-login <c>/bin/sh</c> — so a
+    /// bare <c>agentrecall</c> resolves to "command not found". Using <c>$HOME</c> (and
+    /// no quotes — there are no spaces in the value) keeps the command portable across
+    /// machines and identical on host and dev container, and JSON-safe in settings.json.
+    /// </summary>
+    public const string HookPathPrefix = "PATH=$HOME/.dotnet/tools:$PATH ";
+
+    /// <summary>The invariant tail that identifies the recall hook (ignoring any PATH prefix).</summary>
+    public const string RecallHookMarker = "agentrecall hook user-prompt-submit";
+
+    /// <summary>
     /// The command Claude Code runs on each prompt so AgentRecall rules are injected
     /// deterministically (rather than left to the model to call an MCP tool).
     /// </summary>
-    public const string HookCommand = "agentrecall hook user-prompt-submit";
+    public const string HookCommand = HookPathPrefix + RecallHookMarker;
 
     /// <summary>The Claude Code event the recall hook binds to.</summary>
     public const string RecallHookEvent = "UserPromptSubmit";
+
+    /// <summary>The invariant tail that identifies the capture hook (ignoring any PATH prefix).</summary>
+    public const string CaptureHookMarker = "agentrecall hook capture";
 
     /// <summary>
     /// The command Claude Code runs after a turn so reusable lessons are captured
     /// deterministically (rather than left to the model to call an MCP tool).
     /// </summary>
-    public const string CaptureHookCommand = "agentrecall hook capture";
+    public const string CaptureHookCommand = HookPathPrefix + CaptureHookMarker;
 
     /// <summary>
     /// The Claude Code event the capture hook binds to. <c>Stop</c> fires after the
@@ -378,7 +394,7 @@ public static class DevcontainerScaffolder
     /// other settings. Idempotent: a second run reports the hook is already present.
     /// </summary>
     public static HookSetupOutcome EnsureUserPromptSubmitHook(string projectRoot) =>
-        EnsureHook(projectRoot, RecallHookEvent, HookCommand);
+        EnsureHook(projectRoot, RecallHookEvent, HookCommand, RecallHookMarker);
 
     /// <summary>
     /// Ensures the project's <c>.claude/settings.json</c> registers the AgentRecall
@@ -387,14 +403,17 @@ public static class DevcontainerScaffolder
     /// idempotent like the recall hook.
     /// </summary>
     public static HookSetupOutcome EnsureCaptureHook(string projectRoot) =>
-        EnsureHook(projectRoot, CaptureHookEvent, CaptureHookCommand);
+        EnsureHook(projectRoot, CaptureHookEvent, CaptureHookCommand, CaptureHookMarker);
 
     /// <summary>
     /// Registers <paramref name="command"/> under the given Claude Code
     /// <paramref name="eventName"/> in <c>.claude/settings.json</c>, merge-safe and
-    /// idempotent: the command appears at most once per event.
+    /// idempotent: the command appears at most once per event. When a prior AgentRecall
+    /// registration for the same hook is found by <paramref name="marker"/> (e.g. an
+    /// older bare <c>agentrecall hook …</c> that the host shell can't resolve), its
+    /// command is upgraded in place rather than appended — so re-running init heals it.
     /// </summary>
-    private static HookSetupOutcome EnsureHook(string projectRoot, string eventName, string command)
+    private static HookSetupOutcome EnsureHook(string projectRoot, string eventName, string command, string marker)
     {
         var path = Path.Combine(projectRoot, ClaudeSettingsRelativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -452,9 +471,20 @@ public static class DevcontainerScaffolder
             hooks[eventName] = matchers;
         }
 
-        if (HookAlreadyRegistered(matchers, command))
+        // If AgentRecall already registered this hook in any form, upgrade it in place
+        // (e.g. an older PATH-less command) instead of appending a second, duplicate
+        // matcher — which would leave the broken command still firing alongside the fix.
+        var existingCommand = FindHookCommand(matchers, marker);
+        if (existingCommand is not null)
         {
-            return HookSetupOutcome.AlreadyPresent;
+            if (existingCommand["command"]?.GetValue<string>() == command)
+            {
+                return HookSetupOutcome.AlreadyPresent;
+            }
+
+            existingCommand["command"] = command;
+            File.WriteAllText(path, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+            return HookSetupOutcome.Merged;
         }
 
         matchers.Add(new JsonObject
@@ -473,8 +503,12 @@ public static class DevcontainerScaffolder
         return existed ? HookSetupOutcome.Merged : HookSetupOutcome.Created;
     }
 
-    /// <summary>True when any matcher already runs the given hook command.</summary>
-    private static bool HookAlreadyRegistered(JsonArray matchers, string command)
+    /// <summary>
+    /// Returns the inner <c>{ "type": "command", "command": … }</c> object for the first
+    /// hook whose command contains <paramref name="marker"/> (i.e. an AgentRecall hook,
+    /// with or without a PATH prefix), or null when none is registered.
+    /// </summary>
+    private static JsonObject? FindHookCommand(JsonArray matchers, string marker)
     {
         foreach (var matcher in matchers)
         {
@@ -485,14 +519,16 @@ public static class DevcontainerScaffolder
 
             foreach (var entry in inner)
             {
-                if (entry?["command"]?.GetValue<string>() == command)
+                if (entry is JsonObject obj
+                    && obj["command"]?.GetValue<string>() is { } cmd
+                    && cmd.Contains(marker, StringComparison.Ordinal))
                 {
-                    return true;
+                    return obj;
                 }
             }
         }
 
-        return false;
+        return null;
     }
 
     /// <summary>

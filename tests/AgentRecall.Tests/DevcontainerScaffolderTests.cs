@@ -167,6 +167,57 @@ public class DevcontainerScaffolderTests
     }
 
     [Fact]
+    public void HookCommand_PutsToolsDirectoryOnPath()
+    {
+        // Claude Code runs hooks via a non-login /bin/sh that may not have
+        // ~/.dotnet/tools on PATH, so a bare `agentrecall` fails with "command not
+        // found". The scaffolded command must prepend the global-tools directory.
+        Assert.StartsWith("PATH=$HOME/.dotnet/tools:$PATH ", DevcontainerScaffolder.HookCommand);
+        Assert.EndsWith(DevcontainerScaffolder.RecallHookMarker, DevcontainerScaffolder.HookCommand);
+        Assert.StartsWith("PATH=$HOME/.dotnet/tools:$PATH ", DevcontainerScaffolder.CaptureHookCommand);
+        Assert.EndsWith(DevcontainerScaffolder.CaptureHookMarker, DevcontainerScaffolder.CaptureHookCommand);
+
+        // No double quotes — they would be escaped in settings.json and break the
+        // shell-portable, machine-independent form.
+        Assert.DoesNotContain('"', DevcontainerScaffolder.HookCommand);
+        Assert.DoesNotContain('"', DevcontainerScaffolder.CaptureHookCommand);
+    }
+
+    [Fact]
+    public void EnsureHook_UpgradesOlderBareCommandInPlace()
+    {
+        var root = NewTempProject();
+        try
+        {
+            // Simulate a project scaffolded by an older AgentRecall: the bare command
+            // that the host shell can't resolve (the "command not found" bug).
+            var settingsPath = Path.Combine(root, DevcontainerScaffolder.ClaudeSettingsRelativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
+            File.WriteAllText(
+                settingsPath,
+                "{ \"hooks\": { \"Stop\": [ { \"hooks\": [ { \"type\": \"command\", \"command\": \"agentrecall hook capture\" } ] } ] } }");
+
+            var outcome = DevcontainerScaffolder.EnsureCaptureHook(root);
+            Assert.Equal(HookSetupOutcome.Merged, outcome);
+
+            var node = JsonNode.Parse(File.ReadAllText(settingsPath))!;
+            var matchers = node["hooks"]!["Stop"]!.AsArray();
+
+            // Upgraded in place — still a single matcher, now the PATH-robust command.
+            Assert.Single(matchers);
+            var command = matchers[0]!["hooks"]![0]!["command"]!.GetValue<string>();
+            Assert.Equal(DevcontainerScaffolder.CaptureHookCommand, command);
+
+            // And it's now idempotent against the upgraded form.
+            Assert.Equal(HookSetupOutcome.AlreadyPresent, DevcontainerScaffolder.EnsureCaptureHook(root));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void Init_WithNoClaudeMd_CreatesGuidance()
     {
         var root = NewTempProject();

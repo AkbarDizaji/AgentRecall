@@ -2,6 +2,7 @@ using AgentRecall.Core.Abstractions;
 using AgentRecall.Core.Compression;
 using AgentRecall.Core.Conflicts;
 using AgentRecall.Core.Configuration;
+using AgentRecall.Core.Dna;
 using AgentRecall.Core.Context;
 using AgentRecall.Core.Extraction;
 using AgentRecall.Core.Lifecycle;
@@ -87,6 +88,9 @@ public static class ServiceCollectionExtensions
 
         // Learning reports: local-only analytics over rules and the event ledger.
         services.AddScoped<ILearningReportService, LearningReportService>();
+
+        // Project DNA: distil the corpus into an onboarding-ready personality summary.
+        services.AddScoped<IProjectDnaService, ProjectDnaService>();
 
         return services;
     }

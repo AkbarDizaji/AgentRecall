@@ -261,6 +261,7 @@ on a retrieval regression. The same check also runs as a unit test.
 | `import lint-log <file>` | Ingest lint failures. |
 | `import pr-comments <file>` | Capture PR review comments as rules (`--task`, `--scope-level`, `--scope-value`, `--tags`; `--accepted` records them Active instead of pending). |
 | `inject-context "<task>"` | Build agent-ready context (must-follow, warnings, preferred/anti-patterns) for a task. |
+| `dna` | Summarise the repo's engineering personality for onboarding (`--markdown`, `--json`, `--top <n>`, `--scope-level`, `--scope-value`, `--output <file>`). |
 | `eval retrieval` | Evaluate retrieval quality against the bundled dataset (`--dataset <path>`); non-zero exit below baseline. |
 | `mcp` | Run the MCP server over stdio (for Claude Code). |
 | `status` | Show where data is stored. |
@@ -268,6 +269,64 @@ on a retrieval regression. The same check also runs as a unit test.
 | `version` / `--version` / `-v` | Show the installed version. |
 
 Run `agentrecall help` any time for the same list.
+
+---
+
+## Project DNA
+
+**Project DNA** distils everything AgentRecall has learned about a repository into a
+single, onboarding-ready summary of its *engineering personality* — the conventions,
+patterns, risks, and recurring lessons that explain how the project actually works.
+The goal is to get a new developer (or a new AI coding agent) productive in **under
+five minutes**.
+
+It reads the same local data the rest of AgentRecall uses — active and promoted
+rules, how often each rule is retrieved, mined lesson candidates, accepted lifecycle
+recommendations, outcomes, and detected conflicts — and organises it into fixed
+sections:
+
+- **Core Principles** — the highest-confidence, most broadly applicable lessons.
+- **Repository Conventions** — repo-specific "when X, do Y" rules.
+- **Testing Patterns** — testing rules and common testing mistakes.
+- **Architecture Patterns** — architecture and design preferences.
+- **Error Handling** — exceptions, `Result<T>`, validation, domain failures.
+- **Feature Gates / Authorization / Security** — gates, permissions, auth, access control.
+- **Common Mistakes** — frequently corrected or mined lessons.
+- **Agent Warnings** — high-impact anti-patterns to avoid.
+- **Stale or Risky Knowledge** — low-confidence or conflict-prone guidance to review.
+
+### How it differs from search and reports
+
+Search answers "which rules match *this* task?" and the `report` commands give you
+*metrics* (counts, growth, staleness). Project DNA is neither: it's a **curated,
+deterministic narrative** of the whole corpus, ranked so the most trustworthy and
+broadly useful guidance rises to the top — Promoted over Active over Pending, then by
+confidence, retrieval frequency, recency, outcome evidence, and lifecycle signals.
+There are **no LLM calls, no embeddings, and no external services** — the same inputs
+always produce the same output.
+
+### Generate it
+
+```bash
+agentrecall dna                                          # human-readable summary
+agentrecall dna --markdown                               # Markdown for onboarding docs
+agentrecall dna --json                                   # stable, structured JSON
+agentrecall dna --top 10                                 # more items per section
+agentrecall dna --scope-level Repository --scope-value my-repo   # one repo only
+agentrecall dna --markdown --output PROJECT_DNA.md       # write straight to a file
+```
+
+The Markdown output is designed to drop straight into a `PROJECT_DNA.md`,
+`CONTRIBUTING.md`, or a wiki page. The JSON output is stable (snake_case keys —
+`generated_at`, `scope`, `sections`, `items`, `rule_ids`, `confidence`, `evidence`,
+`category`, `source_counts`) so you can feed it to other tooling.
+
+### Use it for onboarding
+
+- **Humans:** run `agentrecall dna --markdown --output PROJECT_DNA.md`, commit it, and
+  point new contributors at it. Regenerate it whenever the rule corpus changes.
+- **Agents:** paste `agentrecall dna` (or the Markdown) into an agent's context at the
+  start of a session so it inherits the project's conventions before writing any code.
 
 ---
 
@@ -345,11 +404,27 @@ Add this to your project's `.claude/settings.json`:
 {
   "hooks": {
     "UserPromptSubmit": [
-      { "hooks": [ { "type": "command", "command": "agentrecall hook user-prompt-submit" } ] }
+      { "hooks": [ { "type": "command", "command": "PATH=$HOME/.dotnet/tools:$PATH agentrecall hook user-prompt-submit" } ] }
     ]
   }
 }
 ```
+
+> **PATH note.** Claude Code runs hooks through a non-login shell that may not have
+> `~/.dotnet/tools` on `PATH` — so a bare `agentrecall` can fail with
+> `command not found`. The command above prepends the .NET global-tools directory so
+> the hook resolves regardless of how Claude Code was launched. If you still hit
+> "command not found", make sure .NET global tools are on the PATH Claude Code sees:
+>
+> ```bash
+> export PATH="$HOME/.dotnet/tools:$PATH"
+> ```
+>
+> For hooks specifically, add that through a Claude Code `SessionStart` hook (which
+> Claude Code applies to every session and to the subprocesses it spawns), or launch
+> Claude Code from a shell where the path is already configured. `agentrecall
+> devcontainer init` writes the PATH-prefixed form for you, and re-running it upgrades
+> an older bare command in place.
 
 **How it works.** On each prompt, Claude Code pipes a small JSON payload (the
 prompt text and working directory) to `agentrecall hook user-prompt-submit`. The

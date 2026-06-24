@@ -4,6 +4,28 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Added Project DNA: a deterministic, onboarding-ready summary of a repository's
+  engineering personality (core principles, conventions, testing/architecture
+  patterns, error handling, security, common mistakes, agent warnings, and
+  stale/risky knowledge).
+- Added `agentrecall dna` with `--markdown`, `--json`, `--top <n>`,
+  `--scope-level`/`--scope-value`, and `--output <file>`.
+
+### Notes
+- Project DNA is local-only and makes no LLM, embedding, or network calls; the same
+  inputs always produce the same output. It adds no new tables — it computes over the
+  existing rules, events, outcomes, mined lessons, and lifecycle recommendations.
+
+### Fixed
+- Scaffolded Claude Code hooks now prepend the .NET global-tools directory to PATH
+  (`PATH=$HOME/.dotnet/tools:$PATH agentrecall hook …`). Claude Code runs hooks via a
+  non-login shell that may lack `~/.dotnet/tools`, which previously made a bare
+  `agentrecall` fail with "command not found". Re-running `agentrecall devcontainer init`
+  upgrades an older PATH-less hook command in place instead of appending a duplicate.
+
 ## [0.6.0] - 2026-06-24
 
 ### Added
