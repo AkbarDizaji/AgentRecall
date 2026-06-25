@@ -99,6 +99,39 @@ public sealed class AgentRecallOptions
     public double CaptureAutoConfidence { get; set; } = 0.5;
 
     /// <summary>
+    /// Whether the turn finalizer runs. When true (the default), AgentRecall finalizes
+    /// each completed turn — extracting reusable lessons and deciding to auto-capture,
+    /// suggest, or skip — so capture is deterministic and the agent never guesses
+    /// whether a lesson was kept. When false, finalization is a no-op.
+    /// </summary>
+    public bool TurnFinalizerEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Whether the raw turn transcript is persisted with the finalization record.
+    /// Defaults to false: only a content hash, the resulting rule ids, and skip reasons
+    /// are stored, so transcripts never leave the machine in the database.
+    /// </summary>
+    public bool StoreTurnTranscript { get; set; }
+
+    /// <summary>Maximum lesson candidates captured from a single turn. Defaults to 5.</summary>
+    public int MaxCandidatesPerTurn { get; set; } = 5;
+
+    /// <summary>Maximum characters kept per candidate, to bound a huge turn. Defaults to 1000.</summary>
+    public int MaxCandidateCharacters { get; set; } = 1000;
+
+    /// <summary>
+    /// Whether the finalizer surfaces a user-facing notice (as a Stop-hook
+    /// <c>systemMessage</c>) after a turn. Defaults to true.
+    /// </summary>
+    public bool FinalizerShowUserNotice { get; set; } = true;
+
+    /// <summary>
+    /// Whether a finalization that only reinforced an existing rule (a pure duplicate)
+    /// stays silent rather than emitting a notice. Defaults to true.
+    /// </summary>
+    public bool SuppressDuplicateNotices { get; set; } = true;
+
+    /// <summary>
     /// When true (the default), recorded outcomes adjust rule confidence on evidence
     /// and a retrieval record is written so outcomes can be attached later. When
     /// false, outcome recording is a no-op and no confidence is adjusted.

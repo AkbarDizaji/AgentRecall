@@ -203,10 +203,11 @@ public class DevcontainerScaffolderTests
             var node = JsonNode.Parse(File.ReadAllText(settingsPath))!;
             var matchers = node["hooks"]!["Stop"]!.AsArray();
 
-            // Upgraded in place — still a single matcher, now the PATH-robust command.
+            // Upgraded in place — still a single matcher, now the PATH-robust turn
+            // finalizer command (the legacy capture hook is superseded by it).
             Assert.Single(matchers);
             var command = matchers[0]!["hooks"]![0]!["command"]!.GetValue<string>();
-            Assert.Equal(DevcontainerScaffolder.CaptureHookCommand, command);
+            Assert.Equal(DevcontainerScaffolder.FinalizeTurnHookCommand, command);
 
             // And it's now idempotent against the upgraded form.
             Assert.Equal(HookSetupOutcome.AlreadyPresent, DevcontainerScaffolder.EnsureCaptureHook(root));

@@ -7,7 +7,7 @@ using AgentRecall.Cli.Setup;
 // changes anything. Skipped for the machine-facing commands: `mcp`/`hook` keep a
 // clean stdio contract, and `setup` reports the result itself.
 var firstArg = args.Length > 0 ? args[0] : string.Empty;
-if (firstArg is not ("mcp" or "hook" or "setup"))
+if (firstArg is not ("mcp" or "hook" or "setup" or "finalize-turn" or "capture-status"))
 {
     var pathResult = PathSetup.Ensure();
     if (pathResult.Outcome == PathSetupOutcome.Added)

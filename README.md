@@ -510,6 +510,112 @@ User prompt
 
 ---
 
+## Turn Finalizer
+
+Recall is deterministic through the UserPromptSubmit hook — and so is **capture**.
+After a turn finishes, AgentRecall finalizes it through a single command:
+
+```
+Stop hook
+  → agentrecall finalize-turn
+  → extract candidate lessons   (user corrections, lessons the agent flagged)
+  → classify worthiness         ("lessons, not facts")
+  → detect duplicates & conflicts
+  → decide AutoCapture / SuggestCapture / Skip   (the same decision policy every flow uses)
+  → store / suggest / skip, then report a structured summary
+```
+
+This makes AgentRecall — not the agent — the owner of the capture decision. The
+agent should **not** guess whether the Stop hook captured something, and should
+**not** ask "want me to save it?". When you want to know, ask AgentRecall:
+
+```bash
+agentrecall finalize-turn status      # the last finalization result
+```
+
+It reuses the existing pipeline end-to-end (the worthiness classifier, the rule
+extractor, duplicate detection, the conflict detector, and `FeedbackService`), so
+behaviour is identical to every other capture path — there is no parallel logic.
+
+**Use it.** `finalize-turn` reads a Claude Code Stop-hook payload on stdin
+(tolerant of missing fields — `cwd`, `prompt`, `assistant_response`,
+`transcript`/`transcript_path`, `source`):
+
+```bash
+agentrecall finalize-turn < payload.json          # human-readable summary
+agentrecall finalize-turn --json < payload.json   # structured result
+agentrecall finalize-turn status                  # show the last finalization
+agentrecall finalize-turn status --json
+agentrecall capture-status --last-turn            # alias for status
+```
+
+A captured turn reads:
+
+```
+AgentRecall finalized turn.
+
+Captured:
+- #14 Repository rule: When emitting validator messages, apply the same tenant scope…
+
+Skipped:
+- Duplicate of rule #12.
+- Looks like a bare method recommendation, which is recoverable from the repository with search.
+
+Suggested:
+- #15 Pending rule: Don't re-query what you already loaded.
+```
+
+When nothing reusable was said, it prints `No lessons found.`
+
+**It never blocks Claude Code.** The command always exits 0, logs errors to stderr,
+makes no network or LLM calls, and is deterministic. Malformed input mutates nothing.
+
+**Duplicates are avoided.** Capture is deduplicated against existing rules (same
+normalized guidance and scope), so:
+
+- if a lesson was already captured this turn (a manual `capture_feedback`, or an
+  earlier candidate), the finalizer records a **duplicate skip** instead of a second
+  rule;
+- re-running the finalizer on the same turn is **idempotent** — it returns the prior
+  result and creates nothing new.
+
+**Privacy.** The raw transcript is **not** stored by default — only a content hash,
+the resulting rule ids, and skip reasons. Set `StoreTurnTranscript: true` to keep
+the transcript for debugging.
+
+**Wiring.** `agentrecall devcontainer init` registers the finalizer as the Stop hook
+and upgrades an older `agentrecall hook capture` registration in place:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "PATH=$HOME/.dotnet/tools:$PATH agentrecall finalize-turn --hook" } ] }
+    ]
+  }
+}
+```
+
+> **Stop-hook limitation.** Finalization is only automatic when the Stop hook is
+> installed. The hook payload Claude Code provides may not include the full prompt
+> and assistant response inline; the finalizer falls back to the referenced
+> `transcript_path` when available, and to whatever fields are present otherwise.
+> The command always works when run manually, regardless of the hook.
+
+**Configure it** in `agentrecall.json`:
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `TurnFinalizerEnabled` | `true` | Master switch; `false` makes finalization a no-op. |
+| `StoreTurnTranscript` | `false` | Persist the raw transcript with each finalization. |
+| `MaxCandidatesPerTurn` | `5` | Maximum lessons captured from one turn. |
+| `MaxCandidateCharacters` | `1000` | Per-candidate length cap (bounds a huge turn). |
+| `CaptureAutoConfidence` | `0.5` | Minimum confidence to auto-capture without explicit acceptance. |
+| `FinalizerShowUserNotice` | `true` | Emit a Stop-hook `systemMessage` notice after a turn. |
+| `SuppressDuplicateNotices` | `true` | Stay silent when only a duplicate was reinforced. |
+
+---
+
 ## Configuration
 
 AgentRecall reads an optional `agentrecall.json` from the current directory, then

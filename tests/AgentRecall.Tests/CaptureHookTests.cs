@@ -278,7 +278,7 @@ public class CaptureHookTests
             var node = JsonNode.Parse(File.ReadAllText(settingsPath))!;
             var stop = node["hooks"]!["Stop"]!.AsArray();
             var command = stop[0]!["hooks"]![0]!["command"]!.GetValue<string>();
-            Assert.Equal(DevcontainerScaffolder.CaptureHookCommand, command);
+            Assert.Equal(DevcontainerScaffolder.FinalizeTurnHookCommand, command);
 
             // Idempotent: re-running does not add a second Stop matcher.
             DevcontainerScaffolder.Init(root);

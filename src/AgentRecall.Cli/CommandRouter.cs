@@ -5,6 +5,7 @@ using AgentRecall.Core.Context;
 using AgentRecall.Core.Domain;
 using AgentRecall.Core.Evaluation;
 using AgentRecall.Core.Feedback;
+using AgentRecall.Core.Finalization;
 using AgentRecall.Core.Reporting;
 using AgentRecall.Core.Search;
 using AgentRecall.Core.Services;
@@ -91,6 +92,10 @@ public static class CommandRouter
 
             case "hook":
                 return await HookAsync(rest, services, output, cancellationToken).ConfigureAwait(false);
+
+            case "finalize-turn":
+            case "capture-status":
+                return await FinalizeTurnAsync(command, rest, services, output, cancellationToken).ConfigureAwait(false);
 
             case "mcp":
                 var server = new Mcp.McpServer(services);
@@ -1385,6 +1390,252 @@ public static class CommandRouter
         }
     }
 
+    /// <summary>
+    /// The canonical capture path for a completed turn. With a payload on stdin it
+    /// finalizes the turn (extract, classify, dedup, decide, store) and prints a
+    /// structured summary; with <c>status</c> / <c>--last</c> it reports the last
+    /// finalization so the agent can give a definitive answer instead of guessing.
+    /// Always exits 0 so it never blocks Claude Code.
+    /// </summary>
+    private static async Task<int> FinalizeTurnAsync(
+        string command,
+        string[] args,
+        IServiceProvider services,
+        TextWriter output,
+        CancellationToken cancellationToken)
+    {
+        var options = ParseOptions(args);
+        var json = options.ContainsKey("json");
+        var hook = options.ContainsKey("hook");
+        var isStatus =
+            command == "capture-status" ||
+            options.ContainsKey("last") ||
+            options.ContainsKey("last-turn") ||
+            args.Any(a => string.Equals(a, "status", StringComparison.Ordinal));
+
+        try
+        {
+            await using var scope = services.CreateAsyncScope();
+            await EnsureInitializedAsync(scope, cancellationToken).ConfigureAwait(false);
+            var finalizer = scope.ServiceProvider.GetRequiredService<ITurnFinalizer>();
+
+            if (isStatus)
+            {
+                var last = await finalizer.GetLastAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+                if (json)
+                {
+                    WriteJson(output, FinalizationJson(last));
+                }
+                else if (last is null)
+                {
+                    output.WriteLine("No finalization recorded yet.");
+                }
+                else
+                {
+                    RenderFinalization(output, last);
+                }
+
+                return 0;
+            }
+
+            var payload = await Console.In.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+            var input = Hooks.TurnPayload.Parse(payload, Console.Error);
+
+            if (input is null)
+            {
+                // Malformed or empty payload: no DB mutation, structured empty result.
+                if (json)
+                {
+                    WriteJson(output, FinalizationJson(null));
+                }
+                else if (!hook)
+                {
+                    output.WriteLine("No lessons found.");
+                }
+
+                return 0;
+            }
+
+            var result = await finalizer.FinalizeAsync(input, cancellationToken).ConfigureAwait(false);
+
+            if (json)
+            {
+                WriteJson(output, FinalizationJson(result));
+            }
+            else if (hook)
+            {
+                EmitHookNotice(services, output, result);
+            }
+            else
+            {
+                RenderFinalization(output, result);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Never block Claude Code; surface the error on stderr only.
+            Console.Error.WriteLine($"[agentrecall] finalize-turn failed: {ex.Message}");
+            if (json)
+            {
+                WriteJson(output, new
+                {
+                    captured = Array.Empty<object>(),
+                    suggested = Array.Empty<object>(),
+                    skipped = Array.Empty<object>(),
+                    duplicates = Array.Empty<int>(),
+                    errors = new[] { ex.Message },
+                });
+            }
+        }
+
+        return 0;
+    }
+
+    /// <summary>
+    /// Emits the Stop-hook <c>systemMessage</c> for a finalization, honouring the
+    /// notice and duplicate-suppression options. Stays silent when there is nothing
+    /// worth telling the user (e.g. only a duplicate was reinforced).
+    /// </summary>
+    private static void EmitHookNotice(IServiceProvider services, TextWriter output, TurnFinalizationResult result)
+    {
+        var options = services.GetRequiredService<AgentRecallOptions>();
+        if (!options.FinalizerShowUserNotice)
+        {
+            return;
+        }
+
+        var hasNews = result.Captured.Count > 0 || result.Suggested.Count > 0;
+        var hasRealSkip = result.Skipped.Any(s => s.DuplicateOfRuleId is null);
+
+        // A run that only reinforced a duplicate changes nothing visible.
+        if (!hasNews && options.SuppressDuplicateNotices && !hasRealSkip)
+        {
+            return;
+        }
+
+        if (result.IsEmpty)
+        {
+            return;
+        }
+
+        var message = BuildNotice(result);
+        if (!string.IsNullOrEmpty(message))
+        {
+            output.WriteLine(new System.Text.Json.Nodes.JsonObject
+            {
+                ["systemMessage"] = message,
+            }.ToJsonString());
+        }
+    }
+
+    private static string BuildNotice(TurnFinalizationResult result)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append("AgentRecall finalized the turn.");
+
+        foreach (var lesson in result.Captured)
+        {
+            sb.Append($"\n✓ Captured rule #{lesson.RuleId} ({CategoryLabel(lesson.Category)}, {lesson.ScopeLabel}).");
+        }
+
+        foreach (var lesson in result.Suggested)
+        {
+            sb.Append($"\n• Suggested rule #{lesson.RuleId} pending review — approve with `agentrecall rules approve {lesson.RuleId}`.");
+        }
+
+        return sb.ToString();
+    }
+
+    private static void RenderFinalization(TextWriter output, TurnFinalizationResult result)
+    {
+        if (result.IsEmpty)
+        {
+            output.WriteLine("No lessons found.");
+            return;
+        }
+
+        output.WriteLine("AgentRecall finalized turn.");
+
+        if (result.Captured.Count > 0)
+        {
+            output.WriteLine();
+            output.WriteLine("Captured:");
+            foreach (var lesson in result.Captured)
+            {
+                output.WriteLine($"- #{lesson.RuleId} {CategoryLabel(lesson.Category)}: {lesson.Text}");
+            }
+        }
+
+        if (result.Skipped.Count > 0)
+        {
+            output.WriteLine();
+            output.WriteLine("Skipped:");
+            foreach (var skip in result.Skipped)
+            {
+                output.WriteLine($"- {skip.Reason}");
+            }
+        }
+
+        if (result.Suggested.Count > 0)
+        {
+            output.WriteLine();
+            output.WriteLine("Suggested:");
+            foreach (var lesson in result.Suggested)
+            {
+                var note = string.IsNullOrWhiteSpace(lesson.Note) ? string.Empty : $" ({lesson.Note})";
+                output.WriteLine($"- #{lesson.RuleId} Pending rule: {lesson.Text}{note}");
+            }
+        }
+
+        if (result.Errors.Count > 0)
+        {
+            output.WriteLine();
+            output.WriteLine("Errors:");
+            foreach (var error in result.Errors)
+            {
+                output.WriteLine($"- {error}");
+            }
+        }
+    }
+
+    private static object FinalizationJson(TurnFinalizationResult? result) =>
+        new
+        {
+            captured = (result?.Captured ?? []).Select(l => new
+            {
+                ruleId = l.RuleId,
+                category = l.Category.ToString(),
+                scope = l.ScopeLabel,
+                confidence = l.Confidence,
+                text = l.Text,
+                note = l.Note,
+            }).ToArray(),
+            suggested = (result?.Suggested ?? []).Select(l => new
+            {
+                ruleId = l.RuleId,
+                category = l.Category.ToString(),
+                scope = l.ScopeLabel,
+                confidence = l.Confidence,
+                text = l.Text,
+                note = l.Note,
+            }).ToArray(),
+            skipped = (result?.Skipped ?? []).Select(s => new
+            {
+                reason = s.Reason,
+                duplicateOfRuleId = s.DuplicateOfRuleId,
+            }).ToArray(),
+            duplicates = (result?.Duplicates ?? []).ToArray(),
+            errors = (result?.Errors ?? []).ToArray(),
+        };
+
+    private static string CategoryLabel(RuleCategory category) => category switch
+    {
+        RuleCategory.RepositoryConvention => "Repository rule",
+        RuleCategory.EngineeringLesson => "Engineering lesson",
+        RuleCategory.CodeFact => "Code fact",
+        _ => "Rule",
+    };
+
     private static async Task<int> EvalAsync(string[] args, TextWriter output, CancellationToken cancellationToken)
     {
         if (args.Length == 0 || args[0] != "retrieval")
@@ -2193,6 +2444,9 @@ public static class CommandRouter
         output.WriteLine("                       --output <file>)");
         output.WriteLine("  hook user-prompt-submit");
         output.WriteLine("                       Gated context injection for a Claude Code UserPromptSubmit hook");
+        output.WriteLine("  finalize-turn        Finalize a completed turn from a Stop-hook payload on stdin:");
+        output.WriteLine("                       extract lessons and auto-capture/suggest/skip (--json, --hook)");
+        output.WriteLine("  finalize-turn status Show the last finalization result (--json); also --last");
         output.WriteLine("  mcp                  Run the MCP server over stdio (for Claude Code)");
         output.WriteLine("  status               Show the memory subsystem status");
         output.WriteLine("  help                 Show this help text");

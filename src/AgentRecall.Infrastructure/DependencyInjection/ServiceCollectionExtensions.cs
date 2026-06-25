@@ -6,6 +6,7 @@ using AgentRecall.Core.Configuration;
 using AgentRecall.Core.Dna;
 using AgentRecall.Core.Context;
 using AgentRecall.Core.Extraction;
+using AgentRecall.Core.Finalization;
 using AgentRecall.Core.Lifecycle;
 using AgentRecall.Core.Memory;
 using AgentRecall.Core.Mining;
@@ -42,6 +43,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IRuleOutcomeRepository, RuleOutcomeRepository>();
         services.AddScoped<ILessonCandidateRepository, LessonCandidateRepository>();
         services.AddScoped<IRuleLifecycleRecommendationRepository, RuleLifecycleRecommendationRepository>();
+        services.AddScoped<ITurnFinalizationRepository, TurnFinalizationRepository>();
         services.AddScoped<IDatabaseInitializer, DatabaseInitializer>();
 
         // Feedback capture and rule extraction.
@@ -75,6 +77,11 @@ public static class ServiceCollectionExtensions
 
         // Proactive memory helpers.
         services.AddSingleton<IFeedbackCandidateAnalyzer, FeedbackCandidateAnalyzer>();
+
+        // Turn finalizer: the canonical capture path for a completed turn. It reuses the
+        // feedback pipeline (worthiness, dedup, decision policy) rather than duplicating it.
+        services.AddSingleton<ITurnCandidateExtractor, TurnCandidateExtractor>();
+        services.AddScoped<ITurnFinalizer, TurnFinalizer>();
 
         // Conflict detection and explainable, deterministic resolution.
         services.AddSingleton<IRuleConflictDetector, RuleConflictDetector>();

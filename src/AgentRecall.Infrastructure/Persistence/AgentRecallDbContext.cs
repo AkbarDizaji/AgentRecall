@@ -20,6 +20,7 @@ public sealed class AgentRecallDbContext : DbContext
     public DbSet<RuleOutcome> Outcomes => Set<RuleOutcome>();
     public DbSet<LessonCandidate> LessonCandidates => Set<LessonCandidate>();
     public DbSet<RuleLifecycleRecommendation> Recommendations => Set<RuleLifecycleRecommendation>();
+    public DbSet<TurnFinalization> TurnFinalizations => Set<TurnFinalization>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -90,6 +91,14 @@ public sealed class AgentRecallDbContext : DbContext
             entity.HasIndex(e => e.RuleId);
             entity.HasIndex(e => e.Signature);
             entity.HasIndex(e => e.Status);
+        });
+
+        modelBuilder.Entity<TurnFinalization>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.CreatedAt);
+            entity.HasIndex(e => e.RawHash);
+            entity.HasIndex(e => e.Cwd);
         });
     }
 }

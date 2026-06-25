@@ -49,18 +49,29 @@ public static class DevcontainerScaffolder
     /// <summary>The Claude Code event the recall hook binds to.</summary>
     public const string RecallHookEvent = "UserPromptSubmit";
 
-    /// <summary>The invariant tail that identifies the capture hook (ignoring any PATH prefix).</summary>
+    /// <summary>
+    /// The legacy capture-hook tail. Older projects registered this under <c>Stop</c>;
+    /// re-running init upgrades it in place to the turn finalizer below.
+    /// </summary>
     public const string CaptureHookMarker = "agentrecall hook capture";
 
-    /// <summary>
-    /// The command Claude Code runs after a turn so reusable lessons are captured
-    /// deterministically (rather than left to the model to call an MCP tool).
-    /// </summary>
+    /// <summary>The legacy capture-hook command (superseded by the turn finalizer).</summary>
     public const string CaptureHookCommand = HookPathPrefix + CaptureHookMarker;
 
+    /// <summary>The invariant tail that identifies the turn-finalizer hook (ignoring any PATH prefix).</summary>
+    public const string FinalizeTurnMarker = "agentrecall finalize-turn";
+
     /// <summary>
-    /// The Claude Code event the capture hook binds to. <c>Stop</c> fires after the
-    /// assistant finishes a turn — the post-response hook AgentRecall captures from.
+    /// The command Claude Code runs after a turn so AgentRecall finalizes it
+    /// deterministically — extracting reusable lessons and deciding to auto-capture,
+    /// suggest, or skip (rather than left to the model to call an MCP tool). The
+    /// <c>--hook</c> flag makes it emit a non-blocking <c>systemMessage</c> notice.
+    /// </summary>
+    public const string FinalizeTurnHookCommand = HookPathPrefix + FinalizeTurnMarker + " --hook";
+
+    /// <summary>
+    /// The Claude Code event the finalizer hook binds to. <c>Stop</c> fires after the
+    /// assistant finishes a turn — the post-response hook AgentRecall finalizes from.
     /// </summary>
     public const string CaptureHookEvent = "Stop";
 
@@ -81,8 +92,27 @@ public static class DevcontainerScaffolder
 
         The `agentrecall` MCP server holds rules learned from past feedback. Recall and
         capture are both wired as deterministic hooks: the UserPromptSubmit hook injects
-        the relevant rules automatically, and the Stop hook captures reusable lessons
-        from each turn automatically (no tool call required). On top of that:
+        the relevant rules automatically, and the Stop hook finalizes each turn through
+        `agentrecall finalize-turn`, which extracts reusable lessons and decides — on its
+        own — whether to auto-capture, suggest, or skip each one (no tool call required).
+
+        ### Don't guess whether memory was captured
+
+        AgentRecall owns the capture decision. Do not say "the Stop hook may have captured
+        this" and do not ask the user "want me to save it?" — AgentRecall has already
+        decided. When the user asks whether there is a lesson, run:
+
+            agentrecall finalize-turn status
+
+        and answer from the result:
+
+        - If a rule was captured: "AgentRecall captured rule #14 at turn finalization."
+        - If nothing was captured: "No reusable lesson was captured."
+
+        Do not manually call `capture_feedback` for a lesson the finalizer already
+        captured — it deduplicates, but the right answer is to report the existing rule.
+
+        On top of that:
 
         - **When the user accepts a review or PR comment** — i.e. asks you to apply or
           fix what a comment says — you may still call `import_pr_comments` with
@@ -398,12 +428,13 @@ public static class DevcontainerScaffolder
 
     /// <summary>
     /// Ensures the project's <c>.claude/settings.json</c> registers the AgentRecall
-    /// capture (<c>Stop</c>) hook so reusable lessons are stored deterministically
-    /// after each turn. Creating or merging without disturbing other settings, and
-    /// idempotent like the recall hook.
+    /// turn-finalizer (<c>Stop</c>) hook so reusable lessons are captured
+    /// deterministically after each turn. Creating or merging without disturbing other
+    /// settings, idempotent like the recall hook, and self-healing: an older
+    /// <c>agentrecall hook capture</c> registration is upgraded in place to the finalizer.
     /// </summary>
     public static HookSetupOutcome EnsureCaptureHook(string projectRoot) =>
-        EnsureHook(projectRoot, CaptureHookEvent, CaptureHookCommand, CaptureHookMarker);
+        EnsureHook(projectRoot, CaptureHookEvent, FinalizeTurnHookCommand, FinalizeTurnMarker, CaptureHookMarker);
 
     /// <summary>
     /// Registers <paramref name="command"/> under the given Claude Code
@@ -412,8 +443,15 @@ public static class DevcontainerScaffolder
     /// registration for the same hook is found by <paramref name="marker"/> (e.g. an
     /// older bare <c>agentrecall hook …</c> that the host shell can't resolve), its
     /// command is upgraded in place rather than appended — so re-running init heals it.
+    /// Any of <paramref name="legacyMarkers"/> also identifies a prior registration to
+    /// upgrade, so a hook whose command changed across versions is replaced, not duplicated.
     /// </summary>
-    private static HookSetupOutcome EnsureHook(string projectRoot, string eventName, string command, string marker)
+    private static HookSetupOutcome EnsureHook(
+        string projectRoot,
+        string eventName,
+        string command,
+        string marker,
+        params string[] legacyMarkers)
     {
         var path = Path.Combine(projectRoot, ClaudeSettingsRelativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -474,7 +512,8 @@ public static class DevcontainerScaffolder
         // If AgentRecall already registered this hook in any form, upgrade it in place
         // (e.g. an older PATH-less command) instead of appending a second, duplicate
         // matcher — which would leave the broken command still firing alongside the fix.
-        var existingCommand = FindHookCommand(matchers, marker);
+        var markers = new[] { marker }.Concat(legacyMarkers).ToArray();
+        var existingCommand = FindHookCommand(matchers, markers);
         if (existingCommand is not null)
         {
             if (existingCommand["command"]?.GetValue<string>() == command)
@@ -505,10 +544,11 @@ public static class DevcontainerScaffolder
 
     /// <summary>
     /// Returns the inner <c>{ "type": "command", "command": … }</c> object for the first
-    /// hook whose command contains <paramref name="marker"/> (i.e. an AgentRecall hook,
-    /// with or without a PATH prefix), or null when none is registered.
+    /// hook whose command contains any of <paramref name="markers"/> (i.e. an AgentRecall
+    /// hook, current or legacy, with or without a PATH prefix), or null when none is
+    /// registered.
     /// </summary>
-    private static JsonObject? FindHookCommand(JsonArray matchers, string marker)
+    private static JsonObject? FindHookCommand(JsonArray matchers, string[] markers)
     {
         foreach (var matcher in matchers)
         {
@@ -521,7 +561,7 @@ public static class DevcontainerScaffolder
             {
                 if (entry is JsonObject obj
                     && obj["command"]?.GetValue<string>() is { } cmd
-                    && cmd.Contains(marker, StringComparison.Ordinal))
+                    && markers.Any(m => cmd.Contains(m, StringComparison.Ordinal)))
                 {
                     return obj;
                 }

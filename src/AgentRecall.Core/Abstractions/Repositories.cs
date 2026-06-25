@@ -36,3 +36,8 @@ public interface ILessonCandidateRepository : IRepository<LessonCandidate>
 public interface IRuleLifecycleRecommendationRepository : IRepository<RuleLifecycleRecommendation>
 {
 }
+
+/// <summary>Persistence for <see cref="TurnFinalization"/>.</summary>
+public interface ITurnFinalizationRepository : IRepository<TurnFinalization>
+{
+}
