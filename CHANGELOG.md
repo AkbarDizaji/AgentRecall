@@ -4,6 +4,34 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-06-25
+
+### Added
+- Added the Turn Finalizer: a single deterministic owner of capture for a
+  completed turn. `agentrecall finalize-turn` reads a Stop-hook payload on stdin,
+  extracts candidate lessons (user corrections and lessons the agent flags),
+  classifies worthiness, detects duplicates and conflicts, and decides
+  AutoCapture / SuggestCapture / Skip — so the agent no longer guesses whether the
+  hook captured anything or asks the user to confirm.
+- Added `finalize-turn status` / `--last` (and a `capture-status --last-turn`
+  alias) to report the last finalization, `--json` for structured output, and a
+  `--hook` mode that emits a non-blocking `systemMessage`.
+- Added `TurnFinalizerEnabled`, `StoreTurnTranscript`, `MaxCandidatesPerTurn`,
+  `MaxCandidateCharacters`, `FinalizerShowUserNotice`, and `SuppressDuplicateNotices`.
+
+### Changed
+- The scaffolded Stop hook now runs `agentrecall finalize-turn --hook`, and
+  re-running `devcontainer init` upgrades an older `agentrecall hook capture`
+  registration in place. The scaffolded `CLAUDE.md` guidance now tells the agent
+  to report finalization status instead of guessing.
+
+### Notes
+- The finalizer reuses the existing worthiness classifier, rule extractor,
+  deduplicator, conflict detector, and `FeedbackService` — it adds no parallel
+  capture logic. It is deterministic, makes no LLM/embedding/network calls, never
+  blocks Claude Code, and is idempotent. The raw transcript is not persisted unless
+  `StoreTurnTranscript` is set.
+
 ## [0.8.0] - 2026-06-25
 
 ### Added
