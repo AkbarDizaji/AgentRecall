@@ -90,6 +90,15 @@ public sealed class AgentRecallOptions
     public bool AllowCodeFactsWhenAccepted { get; set; }
 
     /// <summary>
+    /// Minimum confidence (0.0–1.0) for AgentRecall to auto-capture a worthy lesson on
+    /// its own — that is, when the approve posture is on but there is no explicit
+    /// acceptance signal. A worthy candidate below this bar is parked as a Pending
+    /// suggestion for the user to confirm instead of being activated. Explicit
+    /// acceptance always auto-captures regardless of this value. Defaults to 0.5.
+    /// </summary>
+    public double CaptureAutoConfidence { get; set; } = 0.5;
+
+    /// <summary>
     /// When true (the default), recorded outcomes adjust rule confidence on evidence
     /// and a retrieval record is written so outcomes can be attached later. When
     /// false, outcome recording is a no-op and no confidence is adjusted.

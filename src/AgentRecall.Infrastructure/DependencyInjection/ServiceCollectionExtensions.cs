@@ -1,4 +1,5 @@
 using AgentRecall.Core.Abstractions;
+using AgentRecall.Core.Capture;
 using AgentRecall.Core.Compression;
 using AgentRecall.Core.Conflicts;
 using AgentRecall.Core.Configuration;
@@ -48,6 +49,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IRecallExtractor, RuleBasedRecallExtractor>();
         // "Lessons, not facts": screen candidates before storing them as rules.
         services.AddSingleton<IMemoryWorthinessClassifier, MemoryWorthinessClassifier>();
+        // The deterministic final step: auto-capture, suggest, or skip — inside AgentRecall.
+        services.AddSingleton<ICaptureDecisionPolicy, CaptureDecisionPolicy>();
         services.AddScoped<IFeedbackService, FeedbackService>();
 
         // Retrieval. NullEmbeddingProvider keeps search keyword-only.

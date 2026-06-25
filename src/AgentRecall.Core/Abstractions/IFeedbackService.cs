@@ -1,3 +1,4 @@
+using AgentRecall.Core.Capture;
 using AgentRecall.Core.Domain;
 using AgentRecall.Core.Feedback;
 using AgentRecall.Core.Memory;
@@ -22,6 +23,14 @@ public sealed record FeedbackResult(RecallEvent? Event, RecallRule? Rule)
     /// enabled; <c>null</c> when screening was disabled.
     /// </summary>
     public MemoryWorthinessResult? Worthiness { get; init; }
+
+    /// <summary>
+    /// The deterministic capture decision (AutoCapture / SuggestCapture / Skip) that
+    /// AgentRecall reached for this candidate, with the reason, confidence, scope and
+    /// notice used to inform the user. <c>null</c> only on the legacy path before a
+    /// decision was computed.
+    /// </summary>
+    public CaptureDecision? Decision { get; init; }
 
     /// <summary>True when a rule was actually stored (not rejected as a code fact).</summary>
     public bool RuleStored => Rule is not null;

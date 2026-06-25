@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AgentRecall.Core.Abstractions;
+using AgentRecall.Core.Capture;
 using AgentRecall.Core.Configuration;
 using AgentRecall.Core.Domain;
 using AgentRecall.Core.Feedback;
@@ -113,28 +114,56 @@ public static class CaptureHook
     }
 
     /// <summary>
-    /// Builds the user-facing message, or <c>null</c> when no decision worth surfacing
-    /// was made (a duplicate reuse changes nothing visible, so it stays silent).
+    /// Builds the user-facing message from the capture decision. AgentRecall has
+    /// already decided; this only reports it. AutoCapture and SuggestCapture each
+    /// notify (the latter naming the one narrow action left to the user); a Skip that
+    /// reinforced a duplicate changes nothing visible, so it stays silent.
     /// </summary>
     private static string? Describe(FeedbackResult result)
     {
-        if (result.Rule is null)
+        var decision = result.Decision;
+        if (decision is null)
         {
-            var reason = result.Worthiness?.Reason ?? "not a reusable lesson";
-            return $"AgentRecall skipped capture: {reason}";
+            // Defensive fallback for the legacy shape (no decision computed).
+            return result.Rule is null ? null : $"AgentRecall captured rule:\n{result.Rule.RuleText}";
         }
 
-        if (result.ReusedExistingRule)
+        switch (decision.Outcome)
         {
-            return null;
-        }
+            case CaptureOutcome.Skip:
+                // A duplicate reinforcement is silent; a not-worthy code fact is surfaced
+                // so the user knows why nothing was kept.
+                return result.ReusedExistingRule
+                    ? null
+                    : $"AgentRecall skipped capture: {decision.Reason}";
 
-        if (result.Worthiness?.Verdict == MemoryWorthiness.NeedsReview)
-        {
-            return $"AgentRecall captured generalized lesson:\n{result.Rule.RuleText}";
-        }
+            case CaptureOutcome.SuggestCapture:
+            {
+                var actions = result.Rule is { } pending
+                    ? $"Confirm with `agentrecall rules approve {pending.Id}` or drop it with `agentrecall rules archive {pending.Id}`."
+                    : "Confirm it with `agentrecall rules approve <id>`.";
+                var idLabel = result.Rule is { } r ? $" #{r.Id}" : string.Empty;
+                return
+                    $"AgentRecall found a possible {decision.ScopeLabel} rule but the evidence is ambiguous " +
+                    $"(confidence {decision.Confidence:0.00}); saved it as a pending suggestion{idLabel} for review.\n" +
+                    $"Reason: {decision.Reason}\n" +
+                    $"Notice: {decision.Notice}\n" +
+                    actions;
+            }
 
-        return $"AgentRecall captured rule:\n{result.Rule.RuleText}";
+            default: // AutoCapture
+            {
+                // Preserve the "captured rule" / "captured generalized lesson" wording
+                // callers and tests key on, then add the decision rationale.
+                var lead = result.Worthiness?.Verdict == MemoryWorthiness.NeedsReview
+                    ? "AgentRecall captured generalized lesson"
+                    : "AgentRecall captured rule";
+                return
+                    $"✓ {lead} ({decision.ScopeLabel}, confidence {decision.Confidence:0.00}).\n" +
+                    $"Reason: {decision.Reason}\n" +
+                    $"Notice: {decision.Notice}";
+            }
+        }
     }
 
     /// <summary>

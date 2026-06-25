@@ -298,9 +298,9 @@ public static class CommandRouter
 
             if (result.Rule is null)
             {
-                // Rejected by the memory-worthiness policy: a low-value code fact.
-                var reason = result.Worthiness?.Reason ?? "not memory-worthy";
-                output.WriteLine($"Not stored: {reason}");
+                // Skipped by the capture decision: a low-value code fact, or a duplicate.
+                var reason = result.Decision?.Reason ?? result.Worthiness?.Reason ?? "not memory-worthy";
+                output.WriteLine($"Not stored ({result.Decision?.Outcome.ToString() ?? "Skip"}): {reason}");
                 output.WriteLine("Store a reusable lesson instead, or pass --feedback with the broader rule.");
                 return 0;
             }
@@ -312,6 +312,12 @@ public static class CommandRouter
 
             var verb = result.ReusedExistingRule ? "Reused existing" : "Created";
             output.WriteLine($"{verb} {result.Rule.Status} rule #{result.Rule.Id}: {result.Rule.RuleText}");
+            if (result.Decision is { } decision)
+            {
+                output.WriteLine(
+                    $"Decision: {decision.Outcome} — {decision.Notice} " +
+                    $"(confidence {decision.Confidence:0.00}, scope {decision.ScopeLabel}).");
+            }
             if (result.Worthiness?.Verdict == Core.Memory.MemoryWorthiness.NeedsReview)
             {
                 output.WriteLine("Stored the generalized lesson instead of the raw code fact.");

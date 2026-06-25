@@ -39,6 +39,17 @@ internal static class McpToolHelpers
             ["reused_existing_rule"] = result.ReusedExistingRule,
         };
 
+        if (result.Decision is { } decision)
+        {
+            // The deterministic capture decision, so the agent reports it rather than
+            // asking the user whether to save.
+            node["capture_decision"] = decision.Outcome.ToString();
+            node["decision_reason"] = decision.Reason;
+            node["decision_notice"] = decision.Notice;
+            node["decision_confidence"] = decision.Confidence;
+            node["scope"] = decision.ScopeLabel;
+        }
+
         if (result.Worthiness is { } worthiness)
         {
             node["worthiness"] = worthiness.Verdict.ToString();
