@@ -4,6 +4,30 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-06-25
+
+### Added
+- Added a `capture_status` MCP tool and a shared finalization formatter so the CLI,
+  the Stop-hook notice, and MCP all answer "did AgentRecall capture anything?" from
+  the recorded decision, identically. `capture_status` returns the captured,
+  suggested, skipped, and duplicate rule ids plus the source and timestamp.
+- The last finalization result now carries its source and timestamp.
+
+### Changed
+- Strengthened the scaffolded `CLAUDE.md` guidance so the agent must check
+  finalization status (`agentrecall finalize-turn status` or `capture-status
+  --last-turn`) before answering capture questions, documents the captured /
+  suggested / skipped / nothing-recorded answer patterns, and explicitly forbids
+  speculating ("the Stop hook may have captured it") or asking "want me to save it?"
+  except when a pending suggestion genuinely needs approval.
+- Added a README troubleshooting section for the "the Stop hook may have captured
+  it" answer, and documented the `capture_status` tool.
+
+### Notes
+- Behaviour-only release for the Claude integration contract; no change to how
+  capture decisions are made. Added `BehaviorContractTests` locking the guidance,
+  Stop hook, status command/tool, and output wording.
+
 ## [0.9.0] - 2026-06-25
 
 ### Added
