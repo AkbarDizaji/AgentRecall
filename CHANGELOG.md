@@ -4,6 +4,23 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2] - 2026-06-25
+
+### Changed
+- The scaffolded `CLAUDE.md` guidance now names the `capture_status` MCP tool as the
+  thing to call (alongside the CLI commands) when answering whether AgentRecall
+  captured anything, and to answer "never from memory".
+- Added a README troubleshooting line: if Claude still says "the Stop hook may have
+  captured it", update AgentRecall and re-run `agentrecall devcontainer init`.
+
+### Notes
+- Hardened `BehaviorContractTests` so the integration contract cannot silently
+  regress after publishing: CLAUDE.md must mention `capture_status`, must tell the
+  agent not to answer from memory, and must forbid the "I didn't manually call
+  AgentRecall" non-answer; the published MCP tool list (over JSON-RPC) must include
+  `capture_status`; and a golden test asserts `capture_status` returns a seeded
+  captured rule verbatim.
+
 ## [0.9.1] - 2026-06-25
 
 ### Added
