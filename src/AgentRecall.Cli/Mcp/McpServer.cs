@@ -38,6 +38,7 @@ public sealed class McpServer
         new SuggestFeedbackCandidateTool(),
         new CaptureFeedbackTool(),
         new GetRemindersTool(),
+        new CaptureStatusTool(),
         new ResolveRulesTool(),
         new CompressMemoryTool(),
         new InjectContextTool(),

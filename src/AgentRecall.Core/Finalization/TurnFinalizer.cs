@@ -141,6 +141,7 @@ public sealed class TurnFinalizer : ITurnFinalizer
             Duplicates = duplicates,
             Errors = errors,
             Id = id,
+            Source = input.Source,
         };
     }
 
@@ -362,6 +363,8 @@ public sealed class TurnFinalizer : ITurnFinalizer
             Duplicates = ParseIds(finalization.DuplicateRuleIds).ToList(),
             Errors = errors,
             Id = finalization.Id,
+            CreatedAt = finalization.CreatedAt,
+            Source = finalization.Source,
         };
     }
 

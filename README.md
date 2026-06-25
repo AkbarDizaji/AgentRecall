@@ -349,6 +349,7 @@ That exposes these tools to the agent:
 | `get_relevant_context` | Given a task, return the rules to know before starting (keyword-based). |
 | `get_project_rules` | The rules that always apply here (project → promoted → active). |
 | `get_reminders` | A short checklist of high-signal reminders for a kind of work. |
+| `capture_status` | Report the last turn-finalization result (captured/suggested/skipped rule ids, source, timestamp). Call it to answer "did AgentRecall capture anything?" instead of guessing — equivalent to `agentrecall finalize-turn status`. |
 | `search_rules` | Find rules relevant to a query. |
 | `suggest_feedback_candidate` | Detect whether a message is a reusable correction. |
 | `capture_feedback` | Save a correction in one step (creates an Active rule by default; `pending=true` to require approval). |
@@ -613,6 +614,42 @@ and upgrades an older `agentrecall hook capture` registration in place:
 | `CaptureAutoConfidence` | `0.5` | Minimum confidence to auto-capture without explicit acceptance. |
 | `FinalizerShowUserNotice` | `true` | Emit a Stop-hook `systemMessage` notice after a turn. |
 | `SuppressDuplicateNotices` | `true` | Stay silent when only a duplicate was reinforced. |
+
+### Troubleshooting: "the Stop hook may have captured it"
+
+If the agent answers a capture question by guessing — *"the Stop hook may have
+captured it"*, *"I didn't manually call AgentRecall"*, or *"want me to save it?"* —
+it is not consulting the recorded decision. Fix it deterministically:
+
+1. **Ask AgentRecall, don't guess.** The answer is one command away:
+
+   ```bash
+   agentrecall finalize-turn status      # or: agentrecall capture-status --last-turn
+   ```
+
+   It reports the last finalization — captured rule ids, suggested/pending ids,
+   skipped reasons, and duplicates — or `No finalized AgentRecall capture is
+   recorded for the last turn.`
+
+2. **Verify the Stop hook is installed.** `.claude/settings.json` should contain a
+   `Stop` hook running `…agentrecall finalize-turn --hook`. Re-run `agentrecall
+   devcontainer init` to install or upgrade it (it replaces an older `agentrecall
+   hook capture` registration in place).
+
+3. **Verify the installed tool supports it.** `agentrecall finalize-turn status`
+   must be a known command; if it errors, update the global tool:
+
+   ```bash
+   dotnet tool update --global AgentRecall
+   agentrecall --version
+   ```
+
+4. **Reinforce the guidance.** The scaffolded `CLAUDE.md` block tells the agent to
+   check finalization status before answering and never to speculate. If your project
+   pre-dates it, re-run `agentrecall devcontainer init` to append the current block.
+
+The MCP `capture_status` tool returns the same result for agents that prefer a tool
+call over the CLI.
 
 ---
 

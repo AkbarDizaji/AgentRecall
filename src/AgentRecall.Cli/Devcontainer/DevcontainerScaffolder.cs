@@ -96,21 +96,40 @@ public static class DevcontainerScaffolder
         `agentrecall finalize-turn`, which extracts reusable lessons and decides — on its
         own — whether to auto-capture, suggest, or skip each one (no tool call required).
 
-        ### Don't guess whether memory was captured
+        ### Answering capture questions: check status, never guess
 
-        AgentRecall owns the capture decision. Do not say "the Stop hook may have captured
-        this" and do not ask the user "want me to save it?" — AgentRecall has already
-        decided. When the user asks whether there is a lesson, run:
+        AgentRecall owns the capture decision; the Stop hook finalizes every turn through
+        `agentrecall finalize-turn`. So when the user asks whether AgentRecall captured,
+        saved, added, or remembered anything, you MUST check the finalization status
+        before answering. Do not answer from memory, and do not reason from whether you
+        personally called a tool — a manual tool call is not the source of truth.
+
+        Run one of these and answer from the result:
 
             agentrecall finalize-turn status
+            agentrecall capture-status --last-turn
 
-        and answer from the result:
+        Answer using the recorded decision:
 
-        - If a rule was captured: "AgentRecall captured rule #14 at turn finalization."
-        - If nothing was captured: "No reusable lesson was captured."
+        - **Captured** — "AgentRecall captured rule #X: <summary>."
+        - **Suggested / Pending** — "AgentRecall suggested pending rule #Y: <summary>."
+          Only in this case may you ask the user to confirm it (`agentrecall rules
+          approve Y`).
+        - **Skipped** — "AgentRecall skipped capture: <reason>."
+        - **Nothing recorded** — "No finalized AgentRecall capture is recorded for the
+          last turn."
 
-        Do not manually call `capture_feedback` for a lesson the finalizer already
-        captured — it deduplicates, but the right answer is to report the existing rule.
+        Never answer a capture question by speculating. The following are **forbidden
+        answers — never say them**:
+
+        - "The Stop hook may have captured it."
+        - "I didn't manually call AgentRecall, so nothing was saved."
+        - "Want me to save it?" — unless the status says SuggestCapture/Pending and your
+          approval is genuinely required.
+
+        Only call `capture_feedback` yourself when the finalization status shows that no
+        capture happened AND the user explicitly asks you to save the lesson. Never create
+        a duplicate of a rule the finalizer already captured — report the existing rule.
 
         On top of that:
 

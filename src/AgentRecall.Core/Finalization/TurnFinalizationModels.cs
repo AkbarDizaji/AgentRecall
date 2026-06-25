@@ -73,6 +73,12 @@ public sealed record TurnFinalizationResult
     /// <summary>The persisted <see cref="TurnFinalization"/> id, when stored.</summary>
     public int? Id { get; init; }
 
+    /// <summary>When the finalization was recorded, when known.</summary>
+    public DateTimeOffset? CreatedAt { get; init; }
+
+    /// <summary>Where the finalization was triggered from (e.g. <c>stop_hook</c>), when known.</summary>
+    public string? Source { get; init; }
+
     /// <summary>True when this result was returned from a prior identical finalization.</summary>
     public bool FromCache { get; init; }
 

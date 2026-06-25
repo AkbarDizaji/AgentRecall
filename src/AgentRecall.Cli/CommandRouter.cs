@@ -1518,85 +1518,15 @@ public static class CommandRouter
             return;
         }
 
-        var message = BuildNotice(result);
-        if (!string.IsNullOrEmpty(message))
+        var message = "AgentRecall finalized the turn. " + TurnFinalizationFormatter.SummaryLine(result);
+        output.WriteLine(new System.Text.Json.Nodes.JsonObject
         {
-            output.WriteLine(new System.Text.Json.Nodes.JsonObject
-            {
-                ["systemMessage"] = message,
-            }.ToJsonString());
-        }
+            ["systemMessage"] = message,
+        }.ToJsonString());
     }
 
-    private static string BuildNotice(TurnFinalizationResult result)
-    {
-        var sb = new System.Text.StringBuilder();
-        sb.Append("AgentRecall finalized the turn.");
-
-        foreach (var lesson in result.Captured)
-        {
-            sb.Append($"\n✓ Captured rule #{lesson.RuleId} ({CategoryLabel(lesson.Category)}, {lesson.ScopeLabel}).");
-        }
-
-        foreach (var lesson in result.Suggested)
-        {
-            sb.Append($"\n• Suggested rule #{lesson.RuleId} pending review — approve with `agentrecall rules approve {lesson.RuleId}`.");
-        }
-
-        return sb.ToString();
-    }
-
-    private static void RenderFinalization(TextWriter output, TurnFinalizationResult result)
-    {
-        if (result.IsEmpty)
-        {
-            output.WriteLine("No lessons found.");
-            return;
-        }
-
-        output.WriteLine("AgentRecall finalized turn.");
-
-        if (result.Captured.Count > 0)
-        {
-            output.WriteLine();
-            output.WriteLine("Captured:");
-            foreach (var lesson in result.Captured)
-            {
-                output.WriteLine($"- #{lesson.RuleId} {CategoryLabel(lesson.Category)}: {lesson.Text}");
-            }
-        }
-
-        if (result.Skipped.Count > 0)
-        {
-            output.WriteLine();
-            output.WriteLine("Skipped:");
-            foreach (var skip in result.Skipped)
-            {
-                output.WriteLine($"- {skip.Reason}");
-            }
-        }
-
-        if (result.Suggested.Count > 0)
-        {
-            output.WriteLine();
-            output.WriteLine("Suggested:");
-            foreach (var lesson in result.Suggested)
-            {
-                var note = string.IsNullOrWhiteSpace(lesson.Note) ? string.Empty : $" ({lesson.Note})";
-                output.WriteLine($"- #{lesson.RuleId} Pending rule: {lesson.Text}{note}");
-            }
-        }
-
-        if (result.Errors.Count > 0)
-        {
-            output.WriteLine();
-            output.WriteLine("Errors:");
-            foreach (var error in result.Errors)
-            {
-                output.WriteLine($"- {error}");
-            }
-        }
-    }
+    private static void RenderFinalization(TextWriter output, TurnFinalizationResult result) =>
+        output.WriteLine(TurnFinalizationFormatter.RenderText(result));
 
     private static object FinalizationJson(TurnFinalizationResult? result) =>
         new
@@ -1627,14 +1557,6 @@ public static class CommandRouter
             duplicates = (result?.Duplicates ?? []).ToArray(),
             errors = (result?.Errors ?? []).ToArray(),
         };
-
-    private static string CategoryLabel(RuleCategory category) => category switch
-    {
-        RuleCategory.RepositoryConvention => "Repository rule",
-        RuleCategory.EngineeringLesson => "Engineering lesson",
-        RuleCategory.CodeFact => "Code fact",
-        _ => "Rule",
-    };
 
     private static async Task<int> EvalAsync(string[] args, TextWriter output, CancellationToken cancellationToken)
     {
