@@ -81,6 +81,33 @@ public class BehaviorContractTests
         Assert.Contains("The Stop hook may have captured it.", Guidance, StringComparison.Ordinal);
     }
 
+    // The guidance must name the capture_status MCP tool so a tool-using agent calls it.
+    [Fact]
+    public void Guidance_InstructsCallingTheCaptureStatusTool()
+    {
+        Assert.Contains("capture_status", Guidance, StringComparison.Ordinal);
+        // It must be presented as the thing to call, not buried.
+        Assert.Contains("Call the `capture_status` MCP tool", Guidance, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Guidance_TellsAgentNotToAnswerFromMemory()
+    {
+        Assert.Contains("never from memory", Guidance, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // The "I didn't manually call AgentRecall" non-answer is forbidden, and only inside
+    // the do-not-say block — never as recommended behaviour.
+    [Fact]
+    public void Guidance_ForbidsTheManualCallNonAnswer()
+    {
+        var markerIndex = Guidance.IndexOf("never say them", StringComparison.Ordinal);
+        Assert.True(markerIndex > 0);
+
+        Assert.Contains("didn't manually call AgentRecall", Guidance, StringComparison.Ordinal);
+        Assert.DoesNotContain("manually call AgentRecall", Guidance[..markerIndex], StringComparison.Ordinal);
+    }
+
     // ----- 4. Stop hook contract -----
 
     [Fact]
@@ -145,6 +172,45 @@ public class BehaviorContractTests
     {
         var names = McpServer.DefaultTools().Select(t => t.Name).ToHashSet(StringComparer.Ordinal);
         Assert.Contains("capture_status", names);
+    }
+
+    // The published tool list (over JSON-RPC, as Claude Code sees it) must include it.
+    [Fact]
+    public async Task Mcp_ToolsListOverJsonRpc_IncludesCaptureStatus()
+    {
+        await using var db = new TestDatabase();
+        var server = new McpServer(db.Services);
+
+        var response = await server.HandleMessageAsync(
+            """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""", CancellationToken.None);
+
+        var names = response!["result"]!["tools"]!.AsArray()
+            .Select(t => t!["name"]!.GetValue<string>())
+            .ToHashSet(StringComparer.Ordinal);
+        Assert.Contains("capture_status", names);
+    }
+
+    // Golden: a turn that captured exactly one rule is reported verbatim by capture_status.
+    [Fact]
+    public async Task CaptureStatusTool_Golden_ReturnsTheSeededCapturedRule()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        const string lesson = "When emitting validator messages, apply the same tenant scope.";
+        var finalized = await FinalizeTurnResult(db, lesson);
+        var expectedId = Assert.Single(finalized.Captured).RuleId;
+
+        await using var scope = db.CreateScope();
+        var result = await new CaptureStatusTool().InvokeAsync(null, scope.ServiceProvider, CancellationToken.None);
+
+        Assert.True(result["found"]!.GetValue<bool>());
+        var captured = result["captured"]!.AsArray();
+        var only = Assert.Single(captured);
+        Assert.Equal(expectedId, only!["rule_id"]!.GetValue<int>());
+        Assert.Equal(lesson, only["text"]!.GetValue<string>());
+        Assert.Equal(new[] { expectedId }, result["captured_rule_ids"]!.AsArray().Select(n => n!.GetValue<int>()).ToArray());
+        Assert.Contains($"AgentRecall captured rule #{expectedId}", result["summary"]!.GetValue<string>(), StringComparison.Ordinal);
     }
 
     [Fact]

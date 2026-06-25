@@ -104,7 +104,8 @@ public static class DevcontainerScaffolder
         before answering. Do not answer from memory, and do not reason from whether you
         personally called a tool — a manual tool call is not the source of truth.
 
-        Run one of these and answer from the result:
+        Call the `capture_status` MCP tool (or run one of the commands below) and answer
+        from its result — never from memory:
 
             agentrecall finalize-turn status
             agentrecall capture-status --last-turn

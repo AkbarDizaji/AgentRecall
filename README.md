@@ -651,6 +651,11 @@ it is not consulting the recorded decision. Fix it deterministically:
 The MCP `capture_status` tool returns the same result for agents that prefer a tool
 call over the CLI.
 
+> **In short:** if Claude still says *"the Stop hook may have captured it"*, update
+> AgentRecall (`dotnet tool update --global AgentRecall`) and re-run `agentrecall
+> devcontainer init` to install the current Stop hook and the guidance that points
+> the agent at `capture_status`.
+
 ---
 
 ## Configuration
