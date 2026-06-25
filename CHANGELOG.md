@@ -4,6 +4,28 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-06-25
+
+### Added
+- Added a deterministic capture decision inside AgentRecall: every captured
+  candidate now resolves to AutoCapture, SuggestCapture, or Skip, so the user is
+  almost never asked whether to save a rule.
+- Added `CaptureAutoConfidence` (default 0.5): the minimum confidence for
+  AgentRecall to auto-capture a worthy lesson on its own. Below the bar (and with
+  no explicit acceptance) the lesson is parked as a Pending suggestion to confirm.
+
+### Changed
+- The capture decision now weighs worthiness, confidence, the acceptance signal,
+  duplicate detection, and scope as one final step, and carries the reason,
+  confidence, scope, and notice. The capture hook, MCP tools, and CLI report the
+  decision instead of asking. Explicit acceptance auto-captures regardless of
+  confidence; a duplicate reinforces the existing rule rather than asking.
+
+### Notes
+- The decision reuses the existing worthiness classifier, rule extractor,
+  deduplicator, and confidence scoring — it does not replace them. It is
+  deterministic and makes no LLM, embedding, or network calls.
+
 ## [0.7.0] - 2026-06-24
 
 ### Added
