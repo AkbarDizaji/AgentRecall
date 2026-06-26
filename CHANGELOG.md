@@ -4,6 +4,35 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-06-26
+
+### Added
+- **Activity Notices** make AgentRecall visible by default. It now reports what it
+  fetched, captured, skipped, resolved, mined, and recommended through a recognizable
+  `🧠 **AgentRecall:**` badge. A new `AgentRecallActivity` ledger records each action
+  (deduplicated by operation hash), and `agentrecall activity last` / `agentrecall
+  activity list` (`--limit`, `--json`) read it back. JSON output keeps fields plain and
+  confines Markdown styling to a `renderedNotice` field.
+- Two settings control verbosity independently: `AgentRecall.ActivityNoticeLevel`
+  (`Verbose` | `Normal` | `Silent`, default `Verbose`) for human-facing CLI/status
+  output, and `AgentRecall.HookNoticeLevel` (`Normal` | `Silent`, default `Normal`) for
+  the hook-injected notice. An invalid value falls back to the default with a warning.
+
+### Changed
+- The generated `CLAUDE.md` now carries an explicit **AgentRecall behavior contract**:
+  a decision table routing "did you save anything?" / "what did AgentRecall do?" /
+  "did the Stop hook capture anything?" to `capture-status --last-turn`, `activity
+  last`, and `finalize-turn status`; the allowed check-then-report pattern; and the
+  forbidden speculative non-answers. `agentrecall devcontainer init` now refreshes an
+  older guidance block **in place** instead of appending a duplicate.
+
+### Token safety
+- The model-visible surfaces stay compact regardless of `ActivityNoticeLevel`: the
+  UserPromptSubmit hook adds at most a single summary line (never detail bullets or
+  rule text), `inject-context --no-notice` suppresses the human notice for machine use,
+  and MCP capture responses carry only a one-line `rendered_notice`. Tests assert the
+  hook output does not grow materially when notices are enabled.
+
 ## [0.9.2] - 2026-06-25
 
 ### Changed
