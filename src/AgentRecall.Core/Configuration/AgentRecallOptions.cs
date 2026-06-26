@@ -1,3 +1,5 @@
+using AgentRecall.Core.Activity;
+using AgentRecall.Core.Domain;
 using AgentRecall.Core.Hooks;
 
 namespace AgentRecall.Core.Configuration;
@@ -140,4 +142,29 @@ public sealed class AgentRecallOptions
 
     /// <summary>The confidence change applied per outcome type.</summary>
     public OutcomeConfidenceDeltas OutcomeConfidenceDeltas { get; set; } = new();
+
+    /// <summary>
+    /// How loud AgentRecall's human-facing activity notices are: <c>Silent</c>,
+    /// <c>Normal</c>, or <c>Verbose</c>. Stored as a string and parsed defensively, so
+    /// an unrecognised value falls back to the default rather than crashing startup.
+    /// Defaults to <c>Verbose</c> so AgentRecall is visibly useful out of the box.
+    /// This governs CLI/status output only — it never changes injected model context.
+    /// </summary>
+    public string ActivityNoticeLevel { get; set; } = nameof(NoticeLevel.Verbose);
+
+    /// <summary>
+    /// How loud the hook-injected notice is: <c>Silent</c> or <c>Normal</c>. Kept
+    /// separate from <see cref="ActivityNoticeLevel"/> so the model-visible notice
+    /// stays compact regardless of how verbose the human-facing notices are.
+    /// <c>Verbose</c> is treated as <c>Normal</c> here. Defaults to <c>Normal</c>.
+    /// </summary>
+    public string HookNoticeLevel { get; set; } = nameof(NoticeLevel.Normal);
+
+    /// <summary>The parsed activity notice level, falling back to Verbose when invalid.</summary>
+    public NoticeLevel ResolvedActivityNoticeLevel =>
+        NoticeLevels.Resolve(ActivityNoticeLevel, NoticeLevel.Verbose);
+
+    /// <summary>The parsed hook notice level (clamped so it is never Verbose), falling back to Normal.</summary>
+    public NoticeLevel ResolvedHookNoticeLevel =>
+        NoticeLevels.ClampForHook(NoticeLevels.Resolve(HookNoticeLevel, NoticeLevel.Normal));
 }

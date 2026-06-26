@@ -146,6 +146,56 @@ public enum RecommendationType
     RaiseConfidence = 5,
 }
 
+/// <summary>
+/// How loud AgentRecall's user-facing activity notices are. Drives how much detail
+/// a notice carries; it never changes what AgentRecall actually does.
+/// </summary>
+public enum NoticeLevel
+{
+    /// <summary>No user-visible notice is emitted (errors still go to stderr/logs).</summary>
+    Silent = 0,
+
+    /// <summary>A concise one-line summary only.</summary>
+    Normal = 1,
+
+    /// <summary>The summary plus useful per-item detail bullets.</summary>
+    Verbose = 2,
+}
+
+/// <summary>
+/// The kind of user-facing activity AgentRecall recorded. Stored on an
+/// <see cref="AgentRecallActivity"/> so the activity log can be filtered and rendered.
+/// </summary>
+public enum ActivityType
+{
+    /// <summary>Relevant rules were retrieved for a task (inject-context, hook).</summary>
+    ContextFetched = 0,
+
+    /// <summary>A new rule was captured.</summary>
+    RuleCaptured = 1,
+
+    /// <summary>A rule was suggested (Pending) for review.</summary>
+    RuleSuggested = 2,
+
+    /// <summary>A capture candidate was skipped (duplicate or not memory-worthy).</summary>
+    CandidateSkipped = 3,
+
+    /// <summary>A rule conflict was resolved and changed what was injected.</summary>
+    ConflictResolved = 4,
+
+    /// <summary>Lesson candidates were mined from repeated signals.</summary>
+    LessonMined = 5,
+
+    /// <summary>Lifecycle actions (promote/archive/supersede/review) were recommended.</summary>
+    LifecycleRecommended = 6,
+
+    /// <summary>A completed turn was finalized (captured/suggested/skipped).</summary>
+    TurnFinalized = 7,
+
+    /// <summary>The user explicitly checked capture/finalization status.</summary>
+    StatusChecked = 8,
+}
+
 /// <summary>Review state of a <see cref="RuleLifecycleRecommendation"/>.</summary>
 public enum RecommendationStatus
 {

@@ -28,6 +28,146 @@ public class BehaviorContractTests
         await scope.ServiceProvider.GetRequiredService<IDatabaseInitializer>().InitializeAsync();
     }
 
+    // ----- 1. AgentRecall behavior contract: explicit decision table -----
+
+    // A. The guidance carries a dedicated behavior-contract section.
+    [Fact]
+    public void Guidance_ContainsBehaviorContractSection() =>
+        Assert.Contains("### AgentRecall behavior contract", Guidance, StringComparison.Ordinal);
+
+    // B. It contains the decision table.
+    [Fact]
+    public void Guidance_ContainsDecisionTable()
+    {
+        Assert.Contains("| User asks | Agent must do |", Guidance, StringComparison.Ordinal);
+        Assert.Contains("| --- | --- |", Guidance, StringComparison.Ordinal);
+    }
+
+    // C. The table maps each question class to the right command.
+    [Theory]
+    [InlineData("Did you save anything?", "agentrecall capture-status --last-turn")]
+    [InlineData("Was anything captured?", "agentrecall capture-status --last-turn")]
+    [InlineData("Any lesson for AgentRecall?", "agentrecall capture-status --last-turn")]
+    [InlineData("Did AgentRecall run?", "agentrecall activity last")]
+    [InlineData("What did AgentRecall do?", "agentrecall activity last")]
+    [InlineData("What rules were fetched?", "agentrecall activity last")]
+    [InlineData("Did the Stop hook capture anything?", "agentrecall finalize-turn status")]
+    public void Guidance_DecisionTableMapsQuestionToCommand(string question, string command)
+    {
+        // The question and its command must sit on the same table row.
+        var row = Guidance.Split('\n').FirstOrDefault(l => l.Contains(question, StringComparison.Ordinal));
+        Assert.NotNull(row);
+        Assert.Contains(command, row!, StringComparison.Ordinal);
+    }
+
+    // D. All four forbidden answers are listed — and only as forbidden, never as
+    // recommended behaviour (i.e. they appear after the "never say them" marker).
+    [Theory]
+    [InlineData("I didn't manually call AgentRecall")]
+    [InlineData("The Stop hook may have captured it.")]
+    [InlineData("I don't control whether it fired")]
+    [InlineData("Want me to save it?")]
+    public void Guidance_ForbidsEachNonAnswer(string phrase)
+    {
+        Assert.Contains(phrase, Guidance, StringComparison.Ordinal);
+
+        var markerIndex = Guidance.IndexOf("never say them", StringComparison.Ordinal);
+        Assert.True(markerIndex > 0, "Guidance must contain a 'never say them' block.");
+        Assert.DoesNotContain(phrase, Guidance[..markerIndex], StringComparison.OrdinalIgnoreCase);
+    }
+
+    // E. It instructs the agent to check status, report actual state, and not speculate
+    // or answer purely from its own tool calls.
+    [Fact]
+    public void Guidance_InstructsCheckReportDoNotSpeculate()
+    {
+        Assert.Contains("do not guess", Guidance, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("do not answer based only on", Guidance, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Check AgentRecall status", Guidance, StringComparison.Ordinal);
+        Assert.Contains("Report the actual recorded result", Guidance, StringComparison.Ordinal);
+        // Manual capture is the last resort, gated on status + an explicit ask.
+        Assert.Contains("Only offer manual capture", Guidance, StringComparison.Ordinal);
+    }
+
+    // The contract still points tool-using agents at the capture_status MCP tool.
+    [Fact]
+    public void Guidance_BehaviorContractReferencesCaptureStatusTool() =>
+        Assert.Contains("capture_status", Guidance, StringComparison.Ordinal);
+
+    // F. README documents the same status commands.
+    [Fact]
+    public void Readme_DocumentsStatusCommands()
+    {
+        var readme = File.ReadAllText(FindRepoFile("README.md"));
+        Assert.Contains("agentrecall capture-status --last-turn", readme, StringComparison.Ordinal);
+        Assert.Contains("agentrecall activity last", readme, StringComparison.Ordinal);
+        Assert.Contains("agentrecall finalize-turn status", readme, StringComparison.Ordinal);
+    }
+
+    // G. devcontainer init refreshes an OLDER guidance block in place (no duplicate),
+    // and is idempotent against the current block. H. isolated temp dirs.
+    [Fact]
+    public void EnsureGuidance_UpdatesOlderBlockInPlace_NoDuplicate()
+    {
+        var root = NewTempProject();
+        try
+        {
+            var path = Path.Combine(root, DevcontainerScaffolder.ClaudeMdRelativePath);
+            const string before = "# My Project\n\nProject notes that must survive.\n\n";
+            const string after = "\n## My Own Section\n\nKeep this verbatim.\n";
+            // A stale AgentRecall block from an older version, between the user's content.
+            var stale = before + DevcontainerScaffolder.ClaudeMdHeading +
+                "\n\nOutdated guidance with no behavior contract.\n" + after;
+            File.WriteAllText(path, stale);
+
+            var outcome = DevcontainerScaffolder.EnsureClaudeMdGuidance(root);
+            Assert.Equal(GuidanceOutcome.Updated, outcome);
+
+            var refreshed = File.ReadAllText(path);
+            // Heading appears exactly once — the block was replaced, not duplicated.
+            Assert.Equal(1, Occurrences(refreshed, DevcontainerScaffolder.ClaudeMdHeading));
+            // The new behavior contract is now present; the stale text is gone.
+            Assert.Contains("### AgentRecall behavior contract", refreshed, StringComparison.Ordinal);
+            Assert.DoesNotContain("Outdated guidance with no behavior contract.", refreshed, StringComparison.Ordinal);
+            // Surrounding user content is preserved on both sides.
+            Assert.StartsWith(before, refreshed, StringComparison.Ordinal);
+            Assert.Contains("## My Own Section", refreshed, StringComparison.Ordinal);
+            Assert.Contains("Keep this verbatim.", refreshed, StringComparison.Ordinal);
+
+            // Re-running is now a no-op (idempotent against the current block).
+            Assert.Equal(GuidanceOutcome.AlreadyPresent, DevcontainerScaffolder.EnsureClaudeMdGuidance(root));
+            Assert.Equal(refreshed, File.ReadAllText(path));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private static string NewTempProject()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "agentrecall-bc-contract", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        return root;
+    }
+
+    private static int Occurrences(string haystack, string needle) =>
+        haystack.Split(needle).Length - 1;
+
+    private static string FindRepoFile(string fileName)
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            var candidate = Path.Combine(dir.FullName, fileName);
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        throw new FileNotFoundException($"Could not locate {fileName} above {AppContext.BaseDirectory}.");
+    }
+
     // ----- 2 & 8. CLAUDE.md guidance contract: check status, don't guess -----
 
     [Fact]

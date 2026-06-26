@@ -21,6 +21,7 @@ public sealed class AgentRecallDbContext : DbContext
     public DbSet<LessonCandidate> LessonCandidates => Set<LessonCandidate>();
     public DbSet<RuleLifecycleRecommendation> Recommendations => Set<RuleLifecycleRecommendation>();
     public DbSet<TurnFinalization> TurnFinalizations => Set<TurnFinalization>();
+    public DbSet<AgentRecallActivity> Activities => Set<AgentRecallActivity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -99,6 +100,16 @@ public sealed class AgentRecallDbContext : DbContext
             entity.HasIndex(e => e.CreatedAt);
             entity.HasIndex(e => e.RawHash);
             entity.HasIndex(e => e.Cwd);
+        });
+
+        modelBuilder.Entity<AgentRecallActivity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ActivityType).HasConversion<string>();
+            entity.Property(e => e.NoticeLevel).HasConversion<string>();
+            entity.HasIndex(e => e.CreatedAt);
+            entity.HasIndex(e => e.ActivityType);
+            entity.HasIndex(e => e.OperationHash);
         });
     }
 }

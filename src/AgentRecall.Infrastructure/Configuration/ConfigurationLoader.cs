@@ -1,3 +1,4 @@
+using AgentRecall.Core.Activity;
 using AgentRecall.Core.Configuration;
 using Microsoft.Extensions.Configuration;
 
@@ -46,6 +47,22 @@ public static class ConfigurationLoader
 
         var options = new AgentRecallOptions();
         configuration.GetSection(AgentRecallOptions.SectionName).Bind(options);
+
+        // The notice levels are bound as raw strings and parsed defensively. Surface a
+        // clear warning when a value is unrecognised; the option still falls back safely.
+        WarnIfInvalidNoticeLevel(nameof(AgentRecallOptions.ActivityNoticeLevel), options.ActivityNoticeLevel);
+        WarnIfInvalidNoticeLevel(nameof(AgentRecallOptions.HookNoticeLevel), options.HookNoticeLevel);
+
         return options;
+    }
+
+    private static void WarnIfInvalidNoticeLevel(string key, string? value)
+    {
+        if (!NoticeLevels.IsValid(value))
+        {
+            Console.Error.WriteLine(
+                $"[agentrecall] warning: invalid {AgentRecallOptions.SectionName}.{key} '{value}'. " +
+                $"Falling back to the default. Valid values: Silent, Normal, Verbose.");
+        }
     }
 }

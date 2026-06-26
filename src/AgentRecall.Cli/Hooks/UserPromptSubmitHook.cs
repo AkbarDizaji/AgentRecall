@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AgentRecall.Core.Abstractions;
+using AgentRecall.Core.Activity;
 using AgentRecall.Core.Configuration;
 using AgentRecall.Core.Context;
 using AgentRecall.Core.Domain;
@@ -60,7 +61,35 @@ public static class UserPromptSubmitHook
             var context = scope.ServiceProvider.GetRequiredService<IContextInjectionService>();
             var result = await context.BuildContextAsync(request, cancellationToken).ConfigureAwait(false);
 
-            return HookContextFormatter.Format(result);
+            var formatted = HookContextFormatter.Format(result);
+            if (string.IsNullOrEmpty(formatted))
+            {
+                // Nothing was injected: no notice, no activity (never spam on a no-op).
+                return string.Empty;
+            }
+
+            // Persist the activity for the human-visible log. Verbose detail is stored
+            // but never injected — the hook output only carries a compact summary line.
+            var recorder = scope.ServiceProvider.GetRequiredService<IActivityRecorder>();
+            var notice = ActivityNoticeFactory.ForContextFetched(result, "hook");
+            if (notice is not null)
+            {
+                await recorder.RecordAsync(notice, cancellationToken).ConfigureAwait(false);
+            }
+
+            var conflictNotice = ActivityNoticeFactory.ForConflictResolved(result.Conflicts, "hook");
+            if (conflictNotice is not null)
+            {
+                await recorder.RecordAsync(conflictNotice, cancellationToken).ConfigureAwait(false);
+            }
+
+            // The model-visible notice is a single compact line (never the detail
+            // bullets), so it cannot bloat the injected context.
+            var compact = notice is null
+                ? null
+                : ActivityNoticeRenderer.RenderCompact(notice, options.ResolvedHookNoticeLevel);
+
+            return string.IsNullOrEmpty(compact) ? formatted : compact + "\n\n" + formatted;
         }
         catch (Exception ex)
         {

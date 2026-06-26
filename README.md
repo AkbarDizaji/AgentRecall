@@ -263,6 +263,8 @@ on a retrieval regression. The same check also runs as a unit test.
 | `inject-context "<task>"` | Build agent-ready context (must-follow, warnings, preferred/anti-patterns) for a task. |
 | `dna` | Summarise the repo's engineering personality for onboarding (`--markdown`, `--json`, `--top <n>`, `--scope-level`, `--scope-value`, `--output <file>`). |
 | `eval retrieval` | Evaluate retrieval quality against the bundled dataset (`--dataset <path>`); non-zero exit below baseline. |
+| `activity last` | Show the latest AgentRecall activity notice (`--json`). |
+| `activity list` | Show recent activity notices, newest first (`--limit <n>`, `--json`). |
 | `mcp` | Run the MCP server over stdio (for Claude Code). |
 | `status` | Show where data is stored. |
 | `help` / `--help` / `-h` | Show usage. |
@@ -615,11 +617,30 @@ and upgrades an older `agentrecall hook capture` registration in place:
 | `FinalizerShowUserNotice` | `true` | Emit a Stop-hook `systemMessage` notice after a turn. |
 | `SuppressDuplicateNotices` | `true` | Stay silent when only a duplicate was reinforced. |
 
+### Asking AgentRecall what it did (don't guess)
+
+AgentRecall records every run and every capture decision, so its state is always
+**queryable** — an agent should never answer a question about it by speculating or by
+reasoning from whether it personally called a tool. Use the command that matches the
+question:
+
+| User asks | Command to run |
+| --- | --- |
+| Did you save anything? / Was anything captured? / Any lesson for AgentRecall? | `agentrecall capture-status --last-turn` |
+| Did AgentRecall run? / What did AgentRecall do? / What rules were fetched? | `agentrecall activity last` |
+| Did the Stop hook capture anything? | `agentrecall finalize-turn status` |
+
+The generated `CLAUDE.md` encodes this as a behavior contract (`agentrecall
+devcontainer init` writes it, and refreshes an older block in place). The agent must
+check status first, report the actual recorded result, and only offer manual capture
+when status shows nothing was captured **and** the user explicitly asks to save.
+
 ### Troubleshooting: "the Stop hook may have captured it"
 
 If the agent answers a capture question by guessing — *"the Stop hook may have
-captured it"*, *"I didn't manually call AgentRecall"*, or *"want me to save it?"* —
-it is not consulting the recorded decision. Fix it deterministically:
+captured it"*, *"I didn't manually call AgentRecall"*, *"I don't control whether it
+fired"*, or *"want me to save it?"* — it is not consulting the recorded decision. Fix
+it deterministically:
 
 1. **Ask AgentRecall, don't guess.** The answer is one command away:
 
@@ -645,8 +666,9 @@ it is not consulting the recorded decision. Fix it deterministically:
    ```
 
 4. **Reinforce the guidance.** The scaffolded `CLAUDE.md` block tells the agent to
-   check finalization status before answering and never to speculate. If your project
-   pre-dates it, re-run `agentrecall devcontainer init` to append the current block.
+   check status before answering and never to speculate. If your project pre-dates the
+   current block, re-run `agentrecall devcontainer init` — it refreshes an older
+   AgentRecall block in place (no duplicate) rather than appending a second copy.
 
 The MCP `capture_status` tool returns the same result for agents that prefer a tool
 call over the CLI.
@@ -655,6 +677,74 @@ call over the CLI.
 > AgentRecall (`dotnet tool update --global AgentRecall`) and re-run `agentrecall
 > devcontainer init` to install the current Stop hook and the guidance that points
 > the agent at `capture_status`.
+
+---
+
+## Activity Notices
+
+AgentRecall is **visible by default**. As you work, it tells you what it just did —
+what it fetched, captured, skipped, resolved, mined, and recommended — with a
+recognizable badge:
+
+```
+🧠 **AgentRecall:** captured 1 new rule.
+- #24 Validator auth/scope safety
+```
+
+Crucially, the human-facing notices are kept **separate from the model-visible
+context**. Verbose detail goes to your terminal and the activity log; the hook that
+injects rules into Claude stays compact, so notices never bloat the token budget.
+
+**Verbosity is configurable** with two independent settings:
+
+```json
+{
+  "AgentRecall": {
+    "ActivityNoticeLevel": "Verbose",
+    "HookNoticeLevel": "Normal"
+  }
+}
+```
+
+- **`AgentRecall.ActivityNoticeLevel`** = `Verbose` | `Normal` | `Silent` — controls
+  the human-facing CLI/status notices. Defaults to `Verbose`.
+  - `Verbose` — summary plus useful detail bullets:
+
+    ```
+    🧠 **AgentRecall:** captured 1 new rule.
+    - #24 Validator auth/scope safety
+    ```
+  - `Normal` — a concise summary only:
+
+    ```
+    🧠 **AgentRecall:** fetched 3 rules · captured 1 · skipped 1
+    ```
+  - `Silent` — no user-visible notices (activity is still recorded, and errors still
+    go to stderr/logs).
+- **`AgentRecall.HookNoticeLevel`** = `Normal` | `Silent` — controls the notice the
+  UserPromptSubmit hook injects alongside the rules. Defaults to `Normal`. It is
+  always a single compact line and never carries verbose detail or repeats rule
+  text, so it cannot inflate the injected context:
+
+  ```
+  🧠 **AgentRecall:** fetched 3 rules.
+  ```
+
+  An invalid value for either setting falls back to its default and prints a clear
+  warning rather than failing.
+
+**Review what AgentRecall has done** with the activity log:
+
+```bash
+agentrecall activity last            # the latest notice (verbose)
+agentrecall activity list            # recent notices, newest first
+agentrecall activity list --json     # structured output for tooling
+agentrecall activity list --limit 20 # show more entries
+```
+
+`--json` emits plain fields (no Markdown); the styled badge string lives only in a
+separate `renderedNotice` field. When feeding `inject-context` output to a model,
+pass `--no-notice` to suppress the human notice entirely.
 
 ---
 
@@ -668,7 +758,9 @@ applies environment-variable overrides prefixed with `AGENTRECALL_`.
   "AgentRecall": {
     "DataDirectory": "~/.agentrecall",
     "LogLevel": "Information",
-    "AutoApproveFeedback": true
+    "AutoApproveFeedback": true,
+    "ActivityNoticeLevel": "Verbose",
+    "HookNoticeLevel": "Normal"
   }
 }
 ```

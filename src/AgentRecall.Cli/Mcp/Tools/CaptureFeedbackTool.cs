@@ -60,6 +60,7 @@ public sealed class CaptureFeedbackTool : IMcpTool
         var feedback = services.GetRequiredService<IFeedbackService>();
         var result = await feedback.AddAsync(input, cancellationToken).ConfigureAwait(false);
 
+        await McpToolHelpers.RecordFeedbackActivityAsync(result, services, cancellationToken).ConfigureAwait(false);
         return McpToolHelpers.ToFeedbackResultNode(result);
     }
 

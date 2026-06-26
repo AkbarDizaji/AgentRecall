@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AgentRecall.Core.Abstractions;
+using AgentRecall.Core.Activity;
 using AgentRecall.Core.Capture;
 using AgentRecall.Core.Configuration;
 using AgentRecall.Core.Domain;
@@ -102,6 +103,14 @@ public static class CaptureHook
 
             var feedback = scope.ServiceProvider.GetRequiredService<IFeedbackService>();
             var result = await feedback.AddAsync(input, cancellationToken).ConfigureAwait(false);
+
+            // Record the capture decision for the human-visible activity log.
+            var notice = ActivityNoticeFactory.ForFeedback(result, "stop_hook");
+            if (notice is not null)
+            {
+                await scope.ServiceProvider.GetRequiredService<IActivityRecorder>()
+                    .RecordAsync(notice, cancellationToken).ConfigureAwait(false);
+            }
 
             return Describe(result);
         }

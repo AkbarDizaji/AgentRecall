@@ -65,3 +65,4 @@ public static class McpJson
 
     public static readonly JsonSerializerOptions Indented = new(Options) { WriteIndented = true };
 }
+

@@ -96,6 +96,43 @@ public static class DevcontainerScaffolder
         `agentrecall finalize-turn`, which extracts reusable lessons and decides — on its
         own — whether to auto-capture, suggest, or skip each one (no tool call required).
 
+        ### AgentRecall behavior contract
+
+        When the user asks anything about AgentRecall's state — whether it captured,
+        saved, ran, or what it did — do not guess, and do not answer based only on
+        whether you personally called a tool. AgentRecall records every run and every
+        capture decision, so the answer is always queryable. Check the matching command
+        and report its actual output:
+
+        | User asks | Agent must do |
+        | --- | --- |
+        | Did you save anything? | Run `agentrecall capture-status --last-turn` |
+        | Was anything captured? | Run `agentrecall capture-status --last-turn` |
+        | Any lesson for AgentRecall? | Run `agentrecall capture-status --last-turn` |
+        | Did AgentRecall run? | Run `agentrecall activity last` |
+        | What did AgentRecall do? | Run `agentrecall activity last` |
+        | What rules were fetched? | Run `agentrecall activity last` |
+        | Did the Stop hook capture anything? | Run `agentrecall finalize-turn status` |
+
+        Equivalently, call the `capture_status` MCP tool for capture questions. Always
+        follow this pattern:
+
+        1. Check AgentRecall status with the command (or MCP tool) above.
+        2. Report the actual recorded result — what AgentRecall did, not what you did.
+        3. Only offer manual capture if the status shows nothing was captured AND the
+           user explicitly asks you to save it.
+
+        Forbidden answers — never say them:
+
+        - "I didn't manually call AgentRecall"
+        - "The Stop hook may have captured it."
+        - "I don't control whether it fired"
+        - "Want me to save it?" — unless the status says SuggestCapture/Pending and your
+          approval is genuinely required.
+
+        These are wrong because they speculate instead of reading recorded state. Run the
+        status command and answer from it.
+
         ### Answering capture questions: check status, never guess
 
         AgentRecall owns the capture decision; the Stop hook finalizes every turn through
@@ -412,9 +449,11 @@ public static class DevcontainerScaffolder
     }
 
     /// <summary>
-    /// Ensures <c>CLAUDE.md</c> contains the AgentRecall guidance block, appending it
-    /// when absent. Idempotent: detected by <see cref="ClaudeMdHeading"/>, so an
-    /// existing block (and the rest of the file) is never duplicated or rewritten.
+    /// Ensures <c>CLAUDE.md</c> contains the current AgentRecall guidance block. Appends
+    /// it when absent, and — crucially — refreshes an older block <em>in place</em> when
+    /// its content has drifted from the current guidance, so re-running init upgrades the
+    /// behaviour contract without ever duplicating the block. Idempotent: an up-to-date
+    /// block (and the rest of the file) is left untouched.
     /// </summary>
     public static GuidanceOutcome EnsureClaudeMdGuidance(string projectRoot)
     {
@@ -423,9 +462,29 @@ public static class DevcontainerScaffolder
         if (File.Exists(path))
         {
             var existing = File.ReadAllText(path);
-            if (existing.Contains(ClaudeMdHeading, StringComparison.Ordinal))
+            var start = existing.IndexOf(ClaudeMdHeading, StringComparison.Ordinal);
+            if (start >= 0)
             {
-                return GuidanceOutcome.AlreadyPresent;
+                // The block runs from its heading to the next top-level (## ) heading or
+                // end of file. The guidance itself uses only ### subheadings, so the next
+                // "## " marks where the user's own content resumes.
+                var end = NextTopLevelHeadingIndex(existing, start + ClaudeMdHeading.Length);
+
+                var before = existing[..start];
+                var after = existing[end..];
+                var currentBlock = existing[start..end];
+
+                // Already up to date: leave the whole file byte-for-byte unchanged.
+                if (currentBlock.TrimEnd() == ClaudeMdGuidance.TrimEnd())
+                {
+                    return GuidanceOutcome.AlreadyPresent;
+                }
+
+                // Refresh the block in place, preserving everything around it. The
+                // guidance ends with a newline, so the following content stays separated.
+                var rebuilt = before + ClaudeMdGuidance.TrimEnd() + "\n" + after;
+                File.WriteAllText(path, rebuilt);
+                return GuidanceOutcome.Updated;
             }
 
             // Separate from prior content with a blank line, without rewriting it.
@@ -436,6 +495,18 @@ public static class DevcontainerScaffolder
 
         File.WriteAllText(path, ClaudeMdGuidance);
         return GuidanceOutcome.Created;
+    }
+
+    /// <summary>
+    /// Index of the next top-level Markdown heading (a line beginning with <c>## </c>)
+    /// at or after <paramref name="from"/>, or the string length when there is none.
+    /// </summary>
+    private static int NextTopLevelHeadingIndex(string text, int from)
+    {
+        // IndexOf("\n## ") matches a level-2 heading only: "\n### " differs at the third
+        // character, so deeper subheadings inside the guidance are correctly skipped.
+        var idx = text.IndexOf("\n## ", from, StringComparison.Ordinal);
+        return idx < 0 ? text.Length : idx + 1; // start of the "## …" line
     }
 
     /// <summary>
@@ -658,7 +729,10 @@ public enum GuidanceOutcome
     /// <summary>Guidance appended to an existing CLAUDE.md.</summary>
     Appended,
 
-    /// <summary>The guidance block was already present; nothing changed.</summary>
+    /// <summary>An older guidance block was refreshed in place (no duplication).</summary>
+    Updated,
+
+    /// <summary>The guidance block was already present and current; nothing changed.</summary>
     AlreadyPresent,
 }
 

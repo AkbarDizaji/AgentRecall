@@ -44,6 +44,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ILessonCandidateRepository, LessonCandidateRepository>();
         services.AddScoped<IRuleLifecycleRecommendationRepository, RuleLifecycleRecommendationRepository>();
         services.AddScoped<ITurnFinalizationRepository, TurnFinalizationRepository>();
+        services.AddScoped<IAgentRecallActivityRepository, AgentRecallActivityRepository>();
         services.AddScoped<IDatabaseInitializer, DatabaseInitializer>();
 
         // Feedback capture and rule extraction.
@@ -98,6 +99,9 @@ public static class ServiceCollectionExtensions
 
         // Learning reports: local-only analytics over rules and the event ledger.
         services.AddScoped<ILearningReportService, LearningReportService>();
+
+        // Activity notices: the human-visible ledger of what AgentRecall did.
+        services.AddScoped<Core.Activity.IActivityRecorder, Core.Activity.ActivityRecorder>();
 
         // Project DNA: distil the corpus into an onboarding-ready personality summary.
         services.AddScoped<IProjectDnaService, ProjectDnaService>();

@@ -1,5 +1,6 @@
 using AgentRecall.Core;
 using AgentRecall.Core.Abstractions;
+using AgentRecall.Core.Activity;
 using AgentRecall.Core.Configuration;
 using AgentRecall.Core.Context;
 using AgentRecall.Core.Domain;
@@ -96,6 +97,9 @@ public static class CommandRouter
             case "finalize-turn":
             case "capture-status":
                 return await FinalizeTurnAsync(command, rest, services, output, cancellationToken).ConfigureAwait(false);
+
+            case "activity":
+                return await ActivityAsync(rest, services, output, cancellationToken).ConfigureAwait(false);
 
             case "mcp":
                 var server = new Mcp.McpServer(services);
@@ -195,8 +199,11 @@ public static class CommandRouter
                 case Devcontainer.GuidanceOutcome.Appended:
                     output.WriteLine($"Appended AgentRecall guidance to {result.ClaudeMdPath} (recall + capture accepted PR comments as Active).");
                     break;
+                case Devcontainer.GuidanceOutcome.Updated:
+                    output.WriteLine($"Updated the AgentRecall guidance block in {result.ClaudeMdPath} in place (refreshed the behavior contract; no duplicate added).");
+                    break;
                 case Devcontainer.GuidanceOutcome.AlreadyPresent:
-                    output.WriteLine($"AgentRecall guidance already in {result.ClaudeMdPath}; left it as is.");
+                    output.WriteLine($"AgentRecall guidance already current in {result.ClaudeMdPath}; left it as is.");
                     break;
             }
 
@@ -301,12 +308,21 @@ public static class CommandRouter
         {
             var result = await feedbackService.AddAsync(input, cancellationToken).ConfigureAwait(false);
 
+            var noticeLevel = services.GetRequiredService<AgentRecallOptions>().ResolvedActivityNoticeLevel;
+            var notice = ActivityNoticeFactory.ForFeedback(result, "cli");
+            if (notice is not null)
+            {
+                await scope.ServiceProvider.GetRequiredService<IActivityRecorder>()
+                    .RecordAsync(notice, cancellationToken).ConfigureAwait(false);
+            }
+
             if (result.Rule is null)
             {
                 // Skipped by the capture decision: a low-value code fact, or a duplicate.
                 var reason = result.Decision?.Reason ?? result.Worthiness?.Reason ?? "not memory-worthy";
                 output.WriteLine($"Not stored ({result.Decision?.Outcome.ToString() ?? "Skip"}): {reason}");
                 output.WriteLine("Store a reusable lesson instead, or pass --feedback with the broader rule.");
+                PrintNotice(output, notice, noticeLevel);
                 return 0;
             }
 
@@ -328,6 +344,7 @@ public static class CommandRouter
                 output.WriteLine("Stored the generalized lesson instead of the raw code fact.");
             }
 
+            PrintNotice(output, notice, noticeLevel);
             return 0;
         }
         catch (Exception ex)
@@ -537,6 +554,13 @@ public static class CommandRouter
 
                 var recs = await service.SuggestAsync(query, cancellationToken).ConfigureAwait(false);
 
+                var lifecycleNotice = ActivityNoticeFactory.ForLifecycle(recs, "cli");
+                if (lifecycleNotice is not null)
+                {
+                    await scope.ServiceProvider.GetRequiredService<IActivityRecorder>()
+                        .RecordAsync(lifecycleNotice, cancellationToken).ConfigureAwait(false);
+                }
+
                 var applied = 0;
                 if (options.ContainsKey("apply"))
                 {
@@ -567,6 +591,7 @@ public static class CommandRouter
                     output.WriteLine($"Applied {applied} safe recommendation(s). Run 'lifecycle apply <id>' for archive/supersede/review.");
                 }
 
+                PrintNotice(output, lifecycleNotice, services.GetRequiredService<AgentRecallOptions>().ResolvedActivityNoticeLevel);
                 return 0;
             }
 
@@ -719,6 +744,14 @@ public static class CommandRouter
             case "mine":
             {
                 var result = await mining.MineAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+
+                var mineNotice = ActivityNoticeFactory.ForLessonsMined(result, "cli");
+                if (mineNotice is not null)
+                {
+                    await scope.ServiceProvider.GetRequiredService<IActivityRecorder>()
+                        .RecordAsync(mineNotice, cancellationToken).ConfigureAwait(false);
+                }
+
                 if (json) { WriteJson(output, result.Suggested.Select(ToCandidateJson).ToList()); return 0; }
 
                 output.WriteLine("Suggested Lessons");
@@ -737,6 +770,7 @@ public static class CommandRouter
 
                 output.WriteLine();
                 output.WriteLine($"({result.Created} new, {result.Updated} updated, {result.SuppressedByRule} covered by existing rules, {result.SuppressedByRejection} previously rejected)");
+                PrintNotice(output, mineNotice, services.GetRequiredService<AgentRecallOptions>().ResolvedActivityNoticeLevel);
                 return 0;
             }
 
@@ -1159,7 +1193,7 @@ public static class CommandRouter
         var task = args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal) ? args[0] : null;
         if (string.IsNullOrWhiteSpace(task))
         {
-            output.WriteLine("Usage: agentrecall inject-context \"<task>\" [--scope-level <level>] [--scope-value <text>] [--file-path <path>] [--limit <n>] [--include-pending]");
+            output.WriteLine("Usage: agentrecall inject-context \"<task>\" [--scope-level <level>] [--scope-value <text>] [--file-path <path>] [--limit <n>] [--include-pending] [--no-notice]");
             return 1;
         }
 
@@ -1230,7 +1264,42 @@ public static class CommandRouter
             output.WriteLine(Core.Conflicts.ConflictRenderer.Section(result.Conflicts));
         }
 
+        // Record the activity for the human-visible log. The notice is suppressed for
+        // machine/context use (--no-notice) so inject-context output can be fed to a
+        // model without the verbose human notice inflating its tokens.
+        var recorder = scope.ServiceProvider.GetRequiredService<IActivityRecorder>();
+        var fetched = ActivityNoticeFactory.ForContextFetched(result, "cli");
+        var conflictNotice = ActivityNoticeFactory.ForConflictResolved(result.Conflicts, "cli");
+        if (fetched is not null) await recorder.RecordAsync(fetched, cancellationToken).ConfigureAwait(false);
+        if (conflictNotice is not null) await recorder.RecordAsync(conflictNotice, cancellationToken).ConfigureAwait(false);
+
+        if (!options.ContainsKey("no-notice"))
+        {
+            var level = services.GetRequiredService<AgentRecallOptions>().ResolvedActivityNoticeLevel;
+            PrintNotice(output, fetched, level);
+            PrintNotice(output, conflictNotice, level);
+        }
+
         return 0;
+    }
+
+    /// <summary>
+    /// Writes a rendered human notice, with a blank line before it, when the notice is
+    /// present and the level is not Silent. A no-op otherwise.
+    /// </summary>
+    private static void PrintNotice(TextWriter output, ActivityNotice? notice, NoticeLevel level)
+    {
+        if (notice is null)
+        {
+            return;
+        }
+
+        var rendered = ActivityNoticeRenderer.Render(notice, level);
+        if (!string.IsNullOrEmpty(rendered))
+        {
+            output.WriteLine();
+            output.WriteLine(rendered);
+        }
     }
 
     private static void WriteBucket(TextWriter output, string title, IReadOnlyList<Core.Context.InjectedRule> rules)
@@ -1458,17 +1527,28 @@ public static class CommandRouter
 
             var result = await finalizer.FinalizeAsync(input, cancellationToken).ConfigureAwait(false);
 
+            // Record the finalization for the human-visible log (deduped by turn id, so
+            // a cached re-finalization never double-logs).
+            var notice = ActivityNoticeFactory.ForTurnFinalized(result, input.Source ?? "cli");
+            if (notice is not null)
+            {
+                await scope.ServiceProvider.GetRequiredService<IActivityRecorder>()
+                    .RecordAsync(notice, cancellationToken).ConfigureAwait(false);
+            }
+
             if (json)
             {
                 WriteJson(output, FinalizationJson(result));
             }
             else if (hook)
             {
+                // The Stop-hook surface stays compact: a one-line systemMessage only.
                 EmitHookNotice(services, output, result);
             }
             else
             {
                 RenderFinalization(output, result);
+                PrintNotice(output, notice, services.GetRequiredService<AgentRecallOptions>().ResolvedActivityNoticeLevel);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -1557,6 +1637,117 @@ public static class CommandRouter
             duplicates = (result?.Duplicates ?? []).ToArray(),
             errors = (result?.Errors ?? []).ToArray(),
         };
+
+    /// <summary>
+    /// Shows the human-visible activity log: what AgentRecall recently fetched,
+    /// captured, skipped, resolved, mined, or recommended. Reads only — it never
+    /// records its own activity, so querying the log can never spam it.
+    /// </summary>
+    private static async Task<int> ActivityAsync(
+        string[] args,
+        IServiceProvider services,
+        TextWriter output,
+        CancellationToken cancellationToken)
+    {
+        var sub = args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal) ? args[0] : "last";
+        var options = ParseOptions(args);
+        var json = options.ContainsKey("json");
+
+        if (sub is not ("last" or "list"))
+        {
+            output.WriteLine("Usage:");
+            output.WriteLine("  agentrecall activity last [--json]");
+            output.WriteLine("  agentrecall activity list [--limit <n>] [--json]");
+            return 1;
+        }
+
+        await using var scope = services.CreateAsyncScope();
+        await EnsureInitializedAsync(scope, cancellationToken).ConfigureAwait(false);
+        var recorder = scope.ServiceProvider.GetRequiredService<IActivityRecorder>();
+
+        if (sub == "last")
+        {
+            var last = await recorder.GetLastAsync(cancellationToken).ConfigureAwait(false);
+            if (json)
+            {
+                WriteJson(output, last is null ? null : ActivityJson(last));
+                return 0;
+            }
+
+            if (last is null)
+            {
+                output.WriteLine($"{ActivityNoticeRenderer.Badge} no activity recorded yet.");
+                return 0;
+            }
+
+            // The explicit `activity` query always shows full detail, independent of the
+            // configured notice level (that level governs automatic notices, not lookups).
+            output.WriteLine(ActivityNoticeRenderer.Render(ActivityNotice.FromEntity(last), NoticeLevel.Verbose));
+            return 0;
+        }
+
+        var limit = 10;
+        if (options.TryGetValue("limit", out var rawLimit))
+        {
+            if (!int.TryParse(rawLimit, out limit) || limit <= 0)
+            {
+                output.WriteLine($"Invalid --limit '{rawLimit}'. Expected a positive integer.");
+                return 1;
+            }
+        }
+
+        var recent = await recorder.ListAsync(limit, cancellationToken).ConfigureAwait(false);
+        if (json)
+        {
+            WriteJson(output, recent.Select(ActivityJson).ToList());
+            return 0;
+        }
+
+        if (recent.Count == 0)
+        {
+            output.WriteLine($"{ActivityNoticeRenderer.Badge} no activity recorded yet.");
+            return 0;
+        }
+
+        // Newest first, one compact line each.
+        foreach (var activity in recent)
+        {
+            output.WriteLine(ActivityNoticeRenderer.Render(ActivityNotice.FromEntity(activity), NoticeLevel.Normal));
+        }
+
+        return 0;
+    }
+
+    /// <summary>
+    /// Projects an activity to its JSON shape. Fields are plain (no Markdown); the only
+    /// styled value is <c>rendered_notice</c>, a compact one-line render.
+    /// </summary>
+    private static object ActivityJson(AgentRecall.Core.Domain.AgentRecallActivity activity) => new
+    {
+        id = activity.Id,
+        timestamp = activity.CreatedAt.ToString("O"),
+        type = activity.ActivityType.ToString(),
+        summary = activity.Summary,
+        details = string.IsNullOrEmpty(activity.Details)
+            ? Array.Empty<string>()
+            : activity.Details.Split('\n', StringSplitOptions.RemoveEmptyEntries),
+        ruleIds = ParseIdList(activity.RuleIds),
+        candidateIds = ParseIdList(activity.CandidateIds),
+        recommendationIds = ParseIdList(activity.RecommendationIds),
+        source = activity.Source,
+        noticeLevel = activity.NoticeLevel.ToString(),
+        operationHash = activity.OperationHash,
+        renderedNotice = ActivityNoticeRenderer.RenderCompact(ActivityNotice.FromEntity(activity), NoticeLevel.Normal),
+    };
+
+    private static int[] ParseIdList(string? value) =>
+        string.IsNullOrEmpty(value)
+            ? []
+            : value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(s => int.TryParse(s, out var n) ? n : (int?)null)
+                .Where(n => n is not null)
+                .Select(n => n!.Value)
+                .ToArray();
 
     private static async Task<int> EvalAsync(string[] args, TextWriter output, CancellationToken cancellationToken)
     {
@@ -2369,6 +2560,8 @@ public static class CommandRouter
         output.WriteLine("  finalize-turn        Finalize a completed turn from a Stop-hook payload on stdin:");
         output.WriteLine("                       extract lessons and auto-capture/suggest/skip (--json, --hook)");
         output.WriteLine("  finalize-turn status Show the last finalization result (--json); also --last");
+        output.WriteLine("  activity last        Show the latest AgentRecall activity notice (--json)");
+        output.WriteLine("  activity list        Show recent activity notices (--limit <n>, --json)");
         output.WriteLine("  mcp                  Run the MCP server over stdio (for Claude Code)");
         output.WriteLine("  status               Show the memory subsystem status");
         output.WriteLine("  help                 Show this help text");

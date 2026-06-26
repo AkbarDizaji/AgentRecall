@@ -1,7 +1,9 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AgentRecall.Core.Abstractions;
+using AgentRecall.Core.Activity;
 using AgentRecall.Core.Domain;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace AgentRecall.Cli.Mcp.Tools;
 
@@ -68,6 +70,29 @@ internal static class McpToolHelpers
             node["event_id"] = recallEvent.Id;
         }
 
+        // A compact, model-safe notice. Markdown styling lives only in this field, and
+        // it never carries verbose detail bullets, so it cannot bloat the response.
+        var notice = ActivityNoticeFactory.ForFeedback(result, "mcp");
+        if (notice is not null &&
+            ActivityNoticeRenderer.RenderCompact(notice, NoticeLevel.Normal) is { } rendered)
+        {
+            node["rendered_notice"] = rendered;
+        }
+
         return node;
+    }
+
+    /// <summary>Persists the capture outcome to the human-visible activity log.</summary>
+    public static async Task RecordFeedbackActivityAsync(
+        FeedbackResult result,
+        IServiceProvider services,
+        CancellationToken cancellationToken)
+    {
+        var notice = ActivityNoticeFactory.ForFeedback(result, "mcp");
+        if (notice is not null)
+        {
+            await services.GetRequiredService<IActivityRecorder>()
+                .RecordAsync(notice, cancellationToken).ConfigureAwait(false);
+        }
     }
 }

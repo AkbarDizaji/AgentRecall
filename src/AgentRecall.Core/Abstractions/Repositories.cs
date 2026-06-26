@@ -41,3 +41,16 @@ public interface IRuleLifecycleRecommendationRepository : IRepository<RuleLifecy
 public interface ITurnFinalizationRepository : IRepository<TurnFinalization>
 {
 }
+
+/// <summary>Persistence for <see cref="AgentRecallActivity"/>.</summary>
+public interface IAgentRecallActivityRepository : IRepository<AgentRecallActivity>
+{
+    /// <summary>The most recently recorded activity, or null when none exist.</summary>
+    Task<AgentRecallActivity?> GetLatestAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>The most recent activities, newest first, capped at <paramref name="limit"/>.</summary>
+    Task<IReadOnlyList<AgentRecallActivity>> ListRecentAsync(int limit, CancellationToken cancellationToken = default);
+
+    /// <summary>The activity with the given operation hash, or null when none matches.</summary>
+    Task<AgentRecallActivity?> FindByOperationHashAsync(string operationHash, CancellationToken cancellationToken = default);
+}
