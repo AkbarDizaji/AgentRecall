@@ -4,6 +4,37 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-06-27
+
+### Added
+- **Outcome-aware capture** weighs not only a candidate's text but the evidence that
+  produced it. A new `AdaptiveWorthinessPolicy` layers on top of the existing
+  `MemoryWorthinessClassifier` and `CaptureDecisionPolicy` (it never replaces them):
+  given a `CaptureContext`, it raises or lowers the capture decision so a generic lesson
+  backed by a real observed agent failure is kept, while the same words with no evidence
+  are skipped. Bare code facts are still never auto-captured, project conventions are
+  still captured, duplicates reinforce, conflicts hold for review, and repeated
+  corrections raise confidence. Deterministic — no LLM, no embeddings.
+- `CaptureReason` (`ObservedAgentFailure`, `UserCorrection`, `AcceptedReviewComment`,
+  `TestFailedThenFixed`, `RepeatedCorrection`, `LessonMined`, `ManualFeedback`,
+  `ImportedFeedback`) and an evidence summary are persisted on the rule (additive
+  columns, backfilled by the schema reconciler) and shown by `agentrecall rules explain`
+  under `Captured because:` / `Evidence:`.
+- When an observed failure elevates a generic observation, it is rewritten into a
+  conditional, branch-preserving lesson (e.g. "When flattening nested template
+  conditionals, preserve `{{else}}` semantics …") rather than a context-free imperative.
+- The Turn Finalizer and Stop-hook capture path detect outcome signals in a turn ("that
+  broke behavior", "no, preserve the else branch", "you changed semantics", "the review
+  comment was applied", "tests failed because…", "this is the same mistake again") and
+  feed them into the adaptive policy. Lesson mining marks candidates `LessonMined` or
+  `RepeatedCorrection`, and the capture notice reads "captured 1 rule from an observed
+  mistake."
+
+### Changed
+- Capture remains safe by default: with no outcome context supplied, every existing flow
+  behaves exactly as before — the adaptive layer only adjusts decisions when evidence is
+  present.
+
 ## [0.10.0] - 2026-06-26
 
 ### Added
