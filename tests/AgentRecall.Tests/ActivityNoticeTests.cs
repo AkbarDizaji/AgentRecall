@@ -17,6 +17,7 @@ namespace AgentRecall.Tests;
 /// must never bloat the model-visible context. These tests prove both halves — rich
 /// CLI/status output, and compact hook/model output that never repeats rule text.
 /// </summary>
+[Collection("ConsoleStdin")]
 public class ActivityNoticeTests
 {
     private const string Badge = "🧠 **AgentRecall:**";

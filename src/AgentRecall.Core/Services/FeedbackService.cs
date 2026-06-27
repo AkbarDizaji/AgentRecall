@@ -36,6 +36,7 @@ public sealed class FeedbackService : IFeedbackService
     private readonly IRecallExtractor _extractor;
     private readonly IMemoryWorthinessClassifier _classifier;
     private readonly ICaptureDecisionPolicy _decisionPolicy;
+    private readonly IAdaptiveWorthinessPolicy _adaptivePolicy;
     private readonly AgentRecallOptions _options;
 
     public FeedbackService(
@@ -44,6 +45,7 @@ public sealed class FeedbackService : IFeedbackService
         IRecallExtractor extractor,
         IMemoryWorthinessClassifier classifier,
         ICaptureDecisionPolicy decisionPolicy,
+        IAdaptiveWorthinessPolicy adaptivePolicy,
         AgentRecallOptions options)
     {
         _events = events ?? throw new ArgumentNullException(nameof(events));
@@ -51,6 +53,7 @@ public sealed class FeedbackService : IFeedbackService
         _extractor = extractor ?? throw new ArgumentNullException(nameof(extractor));
         _classifier = classifier ?? throw new ArgumentNullException(nameof(classifier));
         _decisionPolicy = decisionPolicy ?? throw new ArgumentNullException(nameof(decisionPolicy));
+        _adaptivePolicy = adaptivePolicy ?? throw new ArgumentNullException(nameof(adaptivePolicy));
         _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
@@ -75,6 +78,18 @@ public sealed class FeedbackService : IFeedbackService
         if (worthiness is { Verdict: MemoryWorthiness.NeedsReview, SuggestedGeneralizedLesson: { Length: > 0 } lesson })
         {
             rule.RuleText = lesson;
+        }
+
+        // When an observed failure (or correction) elevated a generic observation, rewrite
+        // it into conditional, branch-preserving form so it generalizes without overreaching
+        // ("Always merge nested ifs" → "When flattening nested template conditionals, preserve
+        // `{{else}}` semantics …"). Done before dedup so the conditional form is what compares.
+        if (input.Context is { HasOutcomeEvidence: true } &&
+            ConditionalLessonRewriter.Rewrite(input.Feedback) is { } conditional)
+        {
+            rule.Trigger = conditional.Trigger;
+            rule.RuleText = conditional.RuleText;
+            rule.Mistake = conditional.Mistake;
         }
 
         // Record the classified category and let it set the default trust: an
@@ -105,18 +120,52 @@ public sealed class FeedbackService : IFeedbackService
             WorthinessReason = worthiness?.Reason ?? "Memory-worthiness screening disabled.",
         });
 
+        // Outcome-aware adjustment. Only applied when the caller supplied a context, so
+        // every existing path (manual CLI/MCP feedback with no context) is unchanged. The
+        // adaptive policy never re-derives signals; it only raises or lowers the decision.
+        var captureReason = CaptureReason.None;
+        string? evidenceSummary = null;
+        if (input.Context is { } context)
+        {
+            var adaptive = _adaptivePolicy.Adjust(
+                worthiness, context, decision, isDuplicate: existing is not null, conflictExists: context.ConflictExists);
+
+            decision = decision with
+            {
+                Outcome = adaptive.Outcome,
+                Confidence = adaptive.Confidence,
+                // For a skip, the explanation is the user-facing reason ("Generic best
+                // practice with no observed failure"); for a capture, keep the worthiness
+                // rationale as the reason and surface the explanation as the notice.
+                Reason = adaptive.Outcome == CaptureOutcome.Skip ? adaptive.Explanation : decision.Reason,
+                Notice = adaptive.Explanation,
+            };
+            captureReason = adaptive.Reason;
+            evidenceSummary = string.IsNullOrWhiteSpace(context.EvidenceSummary)
+                ? null
+                : context.EvidenceSummary!.Trim();
+        }
+
         if (decision.Outcome == CaptureOutcome.Skip)
         {
             // A duplicate is reinforced (event recorded against the existing rule); a
             // non-duplicate skip (a code fact) stores nothing actionable.
             return existing is not null
-                ? await ReinforceAsync(input, existing, worthiness, decision, cancellationToken).ConfigureAwait(false)
-                : await RejectAsync(input, worthiness, decision, cancellationToken).ConfigureAwait(false);
+                ? await ReinforceAsync(input, existing, worthiness, decision, captureReason, evidenceSummary, cancellationToken).ConfigureAwait(false)
+                : await RejectAsync(input, worthiness, decision, captureReason, evidenceSummary, cancellationToken).ConfigureAwait(false);
         }
 
         // AutoCapture writes the rule live (Active); SuggestCapture parks it (Pending)
         // for the user to confirm. Either way it is stored inside AgentRecall.
         rule.Status = decision.Outcome == CaptureOutcome.AutoCapture ? RuleStatus.Active : RuleStatus.Pending;
+        rule.CaptureReason = captureReason;
+        rule.EvidenceSummary = evidenceSummary ?? string.Empty;
+        // The adjusted confidence (raised by repeats/evidence) is the rule's confidence.
+        if (input.Context is not null && !string.IsNullOrWhiteSpace(rule.RuleText) && !string.IsNullOrWhiteSpace(rule.Trigger))
+        {
+            rule.Confidence = decision.Confidence;
+        }
+
         rule = await _rules.AddAsync(rule, cancellationToken).ConfigureAwait(false);
 
         var recallEvent = await _events.AddAsync(new RecallEvent
@@ -124,7 +173,7 @@ public sealed class FeedbackService : IFeedbackService
             Type = RecallEventType.MistakeObserved,
             RuleId = rule.Id,
             Trigger = input.Task,
-            Details = BuildDetails(input),
+            Details = BuildDetails(input, captureReason, evidenceSummary),
         }, cancellationToken).ConfigureAwait(false);
 
         return new FeedbackResult(recallEvent, rule)
@@ -132,6 +181,8 @@ public sealed class FeedbackService : IFeedbackService
             ReusedExistingRule = false,
             Worthiness = worthiness,
             Decision = decision,
+            CaptureReason = captureReason,
+            EvidenceSummary = evidenceSummary,
         };
     }
 
@@ -145,6 +196,8 @@ public sealed class FeedbackService : IFeedbackService
         RecallRule existing,
         MemoryWorthinessResult? worthiness,
         CaptureDecision decision,
+        CaptureReason captureReason,
+        string? evidenceSummary,
         CancellationToken cancellationToken)
     {
         var recallEvent = await _events.AddAsync(new RecallEvent
@@ -152,14 +205,29 @@ public sealed class FeedbackService : IFeedbackService
             Type = RecallEventType.MistakeObserved,
             RuleId = existing.Id,
             Trigger = input.Task,
-            Details = BuildDetails(input),
+            Details = BuildDetails(input, captureReason, evidenceSummary),
         }, cancellationToken).ConfigureAwait(false);
+
+        // A repeat reinforces the existing rule; record the reason on it if it had none,
+        // so a rule first stored on weak text gains the evidence the repeat provided.
+        if (captureReason != CaptureReason.None && existing.CaptureReason == CaptureReason.None)
+        {
+            existing.CaptureReason = captureReason;
+            if (string.IsNullOrWhiteSpace(existing.EvidenceSummary) && !string.IsNullOrWhiteSpace(evidenceSummary))
+            {
+                existing.EvidenceSummary = evidenceSummary!.Trim();
+            }
+
+            existing = await _rules.UpdateAsync(existing, cancellationToken).ConfigureAwait(false);
+        }
 
         return new FeedbackResult(recallEvent, existing)
         {
             ReusedExistingRule = true,
             Worthiness = worthiness,
             Decision = decision,
+            CaptureReason = captureReason,
+            EvidenceSummary = evidenceSummary,
         };
     }
 
@@ -172,6 +240,8 @@ public sealed class FeedbackService : IFeedbackService
         FeedbackInput input,
         MemoryWorthinessResult? worthiness,
         CaptureDecision decision,
+        CaptureReason captureReason,
+        string? evidenceSummary,
         CancellationToken cancellationToken)
     {
         RecallEvent? recallEvent = null;
@@ -182,11 +252,17 @@ public sealed class FeedbackService : IFeedbackService
                 Type = RecallEventType.RuleRejected,
                 RuleId = null,
                 Trigger = input.Task,
-                Details = $"Rejected as not memory-worthy: {decision.Reason}{Environment.NewLine}{BuildDetails(input)}",
+                Details = $"Rejected as not memory-worthy: {decision.Reason}{Environment.NewLine}{BuildDetails(input, captureReason, evidenceSummary)}",
             }, cancellationToken).ConfigureAwait(false);
         }
 
-        return new FeedbackResult(recallEvent, null) { Worthiness = worthiness, Decision = decision };
+        return new FeedbackResult(recallEvent, null)
+        {
+            Worthiness = worthiness,
+            Decision = decision,
+            CaptureReason = captureReason,
+            EvidenceSummary = evidenceSummary,
+        };
     }
 
     /// <summary>
@@ -242,7 +318,7 @@ public sealed class FeedbackService : IFeedbackService
         return string.Join(' ', words).ToLowerInvariant().TrimEnd('.', '!', '?', ' ');
     }
 
-    private static string BuildDetails(FeedbackInput input)
+    private static string BuildDetails(FeedbackInput input, CaptureReason captureReason, string? evidenceSummary)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"Feedback: {input.Feedback}");
@@ -260,6 +336,16 @@ public sealed class FeedbackService : IFeedbackService
         if (!string.IsNullOrWhiteSpace(input.Tags))
         {
             sb.AppendLine($"Tags: {input.Tags}");
+        }
+
+        if (captureReason != CaptureReason.None)
+        {
+            sb.AppendLine($"Capture reason: {captureReason}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(evidenceSummary))
+        {
+            sb.AppendLine($"Evidence: {evidenceSummary}");
         }
 
         return sb.ToString().TrimEnd();

@@ -32,6 +32,16 @@ public sealed record FeedbackResult(RecallEvent? Event, RecallRule? Rule)
     /// </summary>
     public CaptureDecision? Decision { get; init; }
 
+    /// <summary>
+    /// The outcome-aware reason the candidate was captured (or reinforced), when an
+    /// adaptive <see cref="Feedback.FeedbackInput.Context"/> was supplied. Defaults to
+    /// <see cref="CaptureReason.None"/>.
+    /// </summary>
+    public CaptureReason CaptureReason { get; init; } = CaptureReason.None;
+
+    /// <summary>A short, human-readable account of the evidence behind the capture, if any.</summary>
+    public string? EvidenceSummary { get; init; }
+
     /// <summary>True when a rule was actually stored (not rejected as a code fact).</summary>
     public bool RuleStored => Rule is not null;
 }

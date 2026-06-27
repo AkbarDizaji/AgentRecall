@@ -158,6 +158,11 @@ public sealed class TurnFinalizer : ITurnFinalizer
 
         var acceptance = _extractor.HasAcceptanceSignal(userText) || input.Accepted == true;
 
+        // Outcome-aware evidence for the turn: an observed failure, a user correction, an
+        // accepted review, a test that failed then passed, or a repeat. These let the
+        // adaptive policy elevate a generic lesson that names a real mistake.
+        var outcome = _extractor.DetectOutcomeSignals(userText, assistantText);
+
         // A "do not save" turn is honoured unless the user also explicitly accepted a
         // correction this turn (a stronger, contradicting signal).
         if (_extractor.HasDoNotSaveSignal(userText, assistantText) && !acceptance)
@@ -180,7 +185,7 @@ public sealed class TurnFinalizer : ITurnFinalizer
         foreach (var candidate in candidates)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await RouteAsync(candidate, input, acceptance, captured, suggested, skipped, duplicates, cancellationToken)
+            await RouteAsync(candidate, input, acceptance, outcome, captured, suggested, skipped, duplicates, cancellationToken)
                 .ConfigureAwait(false);
         }
     }
@@ -189,6 +194,7 @@ public sealed class TurnFinalizer : ITurnFinalizer
         TurnLessonCandidate candidate,
         TurnFinalizationInput input,
         bool acceptance,
+        TurnOutcomeSignals outcome,
         List<FinalizedLesson> captured,
         List<FinalizedLesson> suggested,
         List<SkippedLesson> skipped,
@@ -218,6 +224,26 @@ public sealed class TurnFinalizer : ITurnFinalizer
             : generic ? false
             : null;
 
+        // When the turn carries outcome-aware evidence, hand it to the adaptive policy so
+        // an observed mistake can elevate a generic lesson and a code fact is still never
+        // auto-captured. With no such evidence, the context is null and capture behaves
+        // exactly as before (text worthiness alone), preserving the existing decisions.
+        var context = outcome.HasAny
+            ? new CaptureContext
+            {
+                Source = SourceTag,
+                AcceptanceSignal = acceptance,
+                ExplicitSaveRequest = acceptance,
+                ObservedFailure = outcome.ObservedFailure,
+                UserCorrection = outcome.UserCorrection,
+                ReviewAccepted = outcome.ReviewAccepted,
+                TestFailedThenFixed = outcome.TestFailedThenFixed,
+                RepeatedCorrectionCount = outcome.RepeatedCorrectionCount,
+                ConflictExists = conflict is not null,
+                EvidenceSummary = BuildEvidenceSummary(outcome, candidate.Text),
+            }
+            : null;
+
         var input2 = new FeedbackInput
         {
             Task = BuildTask(input),
@@ -226,6 +252,7 @@ public sealed class TurnFinalizer : ITurnFinalizer
             ScopeValue = input.ScopeValue,
             Tags = SourceTag,
             AutoApprove = autoApprove,
+            Context = context,
         };
 
         var result = await _feedback.AddAsync(input2, cancellationToken).ConfigureAwait(false);
@@ -398,6 +425,25 @@ public sealed class TurnFinalizer : ITurnFinalizer
         level == ScopeLevel.Global
             ? "Global"
             : string.IsNullOrWhiteSpace(value) ? level.ToString() : $"{level}:{value}";
+
+    private static string BuildEvidenceSummary(TurnOutcomeSignals outcome, string candidateText)
+    {
+        var parts = new List<string>();
+        if (outcome.ObservedFailure) parts.Add("the agent's output broke or changed behaviour");
+        if (outcome.UserCorrection) parts.Add("the user corrected it");
+        if (outcome.ReviewAccepted) parts.Add("a review comment was applied");
+        if (outcome.TestFailedThenFixed) parts.Add("a test failed then passed");
+        if (outcome.RepeatedCorrectionCount >= 2) parts.Add("the same correction recurred");
+
+        var evidence = parts.Count > 0 ? string.Join("; ", parts) : "an observed outcome";
+        var snippet = candidateText.Trim();
+        if (snippet.Length > 120)
+        {
+            snippet = snippet[..119] + "…";
+        }
+
+        return $"Observed in turn: {evidence}. Lesson: {snippet}";
+    }
 
     private static string BuildTask(TurnFinalizationInput input)
     {

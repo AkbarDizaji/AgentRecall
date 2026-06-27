@@ -2474,6 +2474,22 @@ public static class CommandRouter
         output.WriteLine("Rule:");
         output.WriteLine(rule.RuleText);
         output.WriteLine();
+
+        // Outcome-aware provenance: why the rule was captured, and the evidence behind it.
+        if (rule.CaptureReason != Core.Capture.CaptureReason.None)
+        {
+            output.WriteLine("Captured because:");
+            output.WriteLine(rule.CaptureReason.ToString());
+            output.WriteLine();
+
+            if (!string.IsNullOrWhiteSpace(rule.EvidenceSummary))
+            {
+                output.WriteLine("Evidence:");
+                output.WriteLine(rule.EvidenceSummary);
+                output.WriteLine();
+            }
+        }
+
         output.WriteLine("Confidence:");
         output.WriteLine($"{rule.Confidence:0.00}");
         output.WriteLine();

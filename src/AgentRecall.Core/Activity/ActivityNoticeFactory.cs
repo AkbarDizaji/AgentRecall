@@ -118,7 +118,9 @@ public static class ActivityNoticeFactory
                 return new ActivityNotice
                 {
                     Type = ActivityType.RuleCaptured,
-                    Summary = "captured 1 new rule.",
+                    Summary = IsObservedMistake(result.CaptureReason)
+                        ? "captured 1 rule from an observed mistake."
+                        : "captured 1 new rule.",
                     Details = [$"#{captured.Id} {Truncate(captured.RuleText, LabelLength)}"],
                     RuleIds = ruleIds,
                     Source = source,
@@ -242,4 +244,11 @@ public static class ActivityNoticeFactory
     }
 
     private static string Plural(int count, string singular) => count == 1 ? singular : singular + "s";
+
+    /// <summary>True when the capture reason evidences a real, observed agent mistake.</summary>
+    private static bool IsObservedMistake(CaptureReason reason) => reason is
+        CaptureReason.ObservedAgentFailure or
+        CaptureReason.UserCorrection or
+        CaptureReason.TestFailedThenFixed or
+        CaptureReason.RepeatedCorrection;
 }

@@ -54,6 +54,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IMemoryWorthinessClassifier, MemoryWorthinessClassifier>();
         // The deterministic final step: auto-capture, suggest, or skip — inside AgentRecall.
         services.AddSingleton<ICaptureDecisionPolicy, CaptureDecisionPolicy>();
+        // Outcome-aware adjustment: raises or lowers the decision on observed-failure
+        // evidence, so worthiness depends on what produced the candidate, not just its text.
+        services.AddSingleton<IAdaptiveWorthinessPolicy, AdaptiveWorthinessPolicy>();
         services.AddScoped<IFeedbackService, FeedbackService>();
 
         // Retrieval. NullEmbeddingProvider keeps search keyword-only.

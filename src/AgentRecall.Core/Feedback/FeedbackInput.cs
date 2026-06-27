@@ -1,3 +1,4 @@
+using AgentRecall.Core.Capture;
 using AgentRecall.Core.Domain;
 
 namespace AgentRecall.Core.Feedback;
@@ -36,4 +37,13 @@ public sealed record FeedbackInput
     /// <see cref="Configuration.AgentRecallOptions.AutoApproveFeedback"/>.
     /// </summary>
     public bool? AutoApprove { get; init; }
+
+    /// <summary>
+    /// Optional outcome/context the candidate came out of. When supplied, the
+    /// <see cref="Capture.IAdaptiveWorthinessPolicy"/> weighs its evidence on top of the
+    /// text-only decision (so an observed agent failure can elevate a generic lesson, and
+    /// a bare code fact is never auto-captured). When <c>null</c>, capture behaves exactly
+    /// as before — text worthiness alone.
+    /// </summary>
+    public CaptureContext? Context { get; init; }
 }

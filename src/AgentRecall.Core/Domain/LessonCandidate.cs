@@ -1,3 +1,5 @@
+using AgentRecall.Core.Capture;
+
 namespace AgentRecall.Core.Domain;
 
 /// <summary>
@@ -18,6 +20,13 @@ public sealed class LessonCandidate
 
     /// <summary>The classified category of the suggested lesson.</summary>
     public RuleCategory Category { get; set; } = RuleCategory.Unknown;
+
+    /// <summary>
+    /// Why mining surfaced this candidate: <see cref="CaptureReason.LessonMined"/> for a
+    /// repeated signal, or <see cref="CaptureReason.RepeatedCorrection"/> once it recurs
+    /// often enough. Defaults to <see cref="CaptureReason.None"/>.
+    /// </summary>
+    public CaptureReason CaptureReason { get; set; } = CaptureReason.None;
 
     public LessonCandidateStatus Status { get; set; } = LessonCandidateStatus.Suggested;
 

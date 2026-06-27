@@ -680,6 +680,76 @@ call over the CLI.
 
 ---
 
+## Outcome-aware capture
+
+AgentRecall captures lessons not only from text, but from **evidence that the agent
+actually made a mistake or the user corrected behaviour**. The same words can be worth
+keeping or worth skipping depending on what produced them.
+
+A generic refactoring rule is normally skipped as textbook advice:
+
+> "Preserve else semantics when flattening nested conditionals."
+
+But if the agent really *did* flatten nested template conditionals and changed the
+`{{else}}` behaviour — and the user corrected it — that is no longer generic advice. It
+is an observed agent failure, and AgentRecall captures it as a reusable, conditional
+lesson:
+
+> When flattening nested template conditionals, preserve `{{else}}` semantics. If the
+> inner `if` has an `else`, use an equivalent branch-preserving form such as
+> `{{else if (not …)}}` instead of a plain `(and …)` merge.
+
+This is deterministic and layered on top of the existing decision policy — it never
+replaces it. The text-only worthiness verdict and the capture decision are computed
+first; an **adaptive worthiness policy** then raises or lowers that decision using the
+outcome context (no LLM, no embeddings, same inputs → same output).
+
+The rules are deterministic:
+
+- Generic advice with **no observed mistake** → skipped.
+- Generic advice backed by an **observed agent failure** or **user correction** →
+  captured or suggested (and rewritten into conditional form).
+- A bare **code fact is still rejected**, even when something broke — it is recoverable
+  from the repository with search and is never auto-captured.
+- **Project-specific conventions** are still captured.
+- **Repeated** corrections raise confidence and strongly favour capture.
+- A **duplicate** reinforces the existing rule; a **conflict** is held for review.
+- An explicit **"do not save"** skips; an explicit **"save this"** can capture a worthy
+  low-confidence lesson.
+
+### Capture reasons
+
+Every adaptive capture records *why* it was kept, persisted on the rule and surfaced by
+`agentrecall rules explain <id>`:
+
+| Reason | What it means |
+| --- | --- |
+| `ObservedAgentFailure` | The agent's output broke or changed behaviour this turn. |
+| `UserCorrection` | The user corrected the agent ("no, preserve the else branch"). |
+| `AcceptedReviewComment` | An accepted/applied code-review comment. |
+| `RepeatedCorrection` | The same correction was observed two or more times. |
+| `LessonMined` | Surfaced by lesson mining over repeated historical signals. |
+
+```
+$ agentrecall rules explain 24
+
+Rule:
+When flattening nested template conditionals, preserve `{{else}}` semantics …
+
+Captured because:
+ObservedAgentFailure
+
+Evidence:
+Agent changed `{{else}}` behavior while flattening nested conditionals; user corrected the implementation.
+```
+
+The turn finalizer detects these signals from the turn ("that broke behavior", "no,
+preserve the else branch", "you changed semantics", "the review comment was applied",
+"tests failed because…", "this is the same mistake again") and passes them into the
+adaptive policy, so capture stays deterministic and the agent never has to guess.
+
+---
+
 ## Activity Notices
 
 AgentRecall is **visible by default**. As you work, it tells you what it just did —

@@ -1,0 +1,37 @@
+namespace AgentRecall.Core.Capture;
+
+/// <summary>
+/// Why a candidate was captured — the outcome-aware evidence that justified keeping a
+/// lesson that text alone might not have warranted. Persisted on the rule (and surfaced
+/// by <c>rules explain</c>) so a stored lesson carries the reason it exists, not just
+/// its guidance. Deterministic: the same signals always map to the same reason.
+/// </summary>
+public enum CaptureReason
+{
+    /// <summary>No outcome-aware evidence; captured (or skipped) on text worthiness alone.</summary>
+    None = 0,
+
+    /// <summary>The agent actually made this mistake in the turn (its output broke or changed behaviour).</summary>
+    ObservedAgentFailure,
+
+    /// <summary>The user corrected the agent's behaviour ("no, preserve the else branch").</summary>
+    UserCorrection,
+
+    /// <summary>An accepted/applied code-review comment.</summary>
+    AcceptedReviewComment,
+
+    /// <summary>A test failed and was then fixed, evidencing a real, reproducible mistake.</summary>
+    TestFailedThenFixed,
+
+    /// <summary>The same correction was observed two or more times.</summary>
+    RepeatedCorrection,
+
+    /// <summary>Surfaced by lesson mining over repeated historical signals.</summary>
+    LessonMined,
+
+    /// <summary>Captured from feedback the user supplied directly (the default manual path).</summary>
+    ManualFeedback,
+
+    /// <summary>Captured from an external import (a pull request, a failure log).</summary>
+    ImportedFeedback,
+}

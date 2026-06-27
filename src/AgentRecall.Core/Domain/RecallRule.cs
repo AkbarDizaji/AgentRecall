@@ -1,3 +1,5 @@
+using AgentRecall.Core.Capture;
+
 namespace AgentRecall.Core.Domain;
 
 /// <summary>
@@ -63,6 +65,20 @@ public sealed class RecallRule
     /// rule and its target match a task, the policy engine ignores the target.
     /// </summary>
     public int? SupersedesRuleId { get; set; }
+
+    /// <summary>
+    /// The outcome-aware evidence that justified capturing this rule (an observed agent
+    /// failure, a user correction, an accepted review, …). Defaults to
+    /// <see cref="CaptureReason.None"/> so rules from earlier versions keep working.
+    /// </summary>
+    public CaptureReason CaptureReason { get; set; } = CaptureReason.None;
+
+    /// <summary>
+    /// A short, human-readable account of the evidence behind the capture (e.g. "Agent
+    /// flattened nested template conditionals and changed else-branch semantics; user
+    /// corrected it."). Empty when there was no outcome evidence.
+    /// </summary>
+    public string EvidenceSummary { get; set; } = string.Empty;
 
     public DateTimeOffset CreatedAt { get; set; }
 

@@ -7,6 +7,7 @@ using AgentRecall.Core.Capture;
 using AgentRecall.Core.Configuration;
 using AgentRecall.Core.Domain;
 using AgentRecall.Core.Feedback;
+using AgentRecall.Core.Finalization;
 using AgentRecall.Core.Memory;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -85,6 +86,26 @@ public static class CaptureHook
             var accepted = (root["accepted"]?.GetValue<bool>() ?? false) || HasAcceptanceIntent(userText);
             var repository = RepositoryName(root["cwd"]?.GetValue<string>());
 
+            // Outcome-aware evidence from the turn (an observed failure, a user correction,
+            // an accepted review, a test that failed then passed, a repeat). When present,
+            // the adaptive worthiness policy weighs it; when absent, capture is unchanged.
+            var outcome = services.GetRequiredService<ITurnCandidateExtractor>()
+                .DetectOutcomeSignals(userText, assistantText);
+            var context = outcome.HasAny
+                ? new CaptureContext
+                {
+                    Source = SourceTag,
+                    AcceptanceSignal = accepted,
+                    ExplicitSaveRequest = accepted,
+                    ObservedFailure = outcome.ObservedFailure,
+                    UserCorrection = outcome.UserCorrection,
+                    ReviewAccepted = outcome.ReviewAccepted,
+                    TestFailedThenFixed = outcome.TestFailedThenFixed,
+                    RepeatedCorrectionCount = outcome.RepeatedCorrectionCount,
+                    EvidenceSummary = BuildEvidenceSummary(outcome, userText),
+                }
+                : null;
+
             var input = new FeedbackInput
             {
                 Task = BuildTask(assistantText, repository),
@@ -95,6 +116,7 @@ public static class CaptureHook
                 // Accepted review guidance is forced Active; a plain correction follows
                 // the configured default. The worthiness classifier still gates both.
                 AutoApprove = accepted ? true : null,
+                Context = context,
             };
 
             await using var scope = services.CreateAsyncScope();
@@ -300,6 +322,25 @@ public static class CaptureHook
         }
 
         return sb.Length == 0 ? null : sb.ToString();
+    }
+
+    private static string BuildEvidenceSummary(TurnOutcomeSignals outcome, string userText)
+    {
+        var parts = new List<string>();
+        if (outcome.ObservedFailure) parts.Add("the agent's output broke or changed behaviour");
+        if (outcome.UserCorrection) parts.Add("the user corrected it");
+        if (outcome.ReviewAccepted) parts.Add("a review comment was applied");
+        if (outcome.TestFailedThenFixed) parts.Add("a test failed then passed");
+        if (outcome.RepeatedCorrectionCount >= 2) parts.Add("the same correction recurred");
+
+        var evidence = parts.Count > 0 ? string.Join("; ", parts) : "an observed outcome";
+        var snippet = userText.Trim();
+        if (snippet.Length > 120)
+        {
+            snippet = snippet[..119] + "…";
+        }
+
+        return $"Observed in turn: {evidence}. Correction: {snippet}";
     }
 
     private static bool HasAcceptanceIntent(string text) =>

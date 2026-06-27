@@ -1,4 +1,5 @@
 using AgentRecall.Core.Abstractions;
+using AgentRecall.Core.Capture;
 using AgentRecall.Core.Domain;
 using AgentRecall.Core.Feedback;
 using AgentRecall.Core.Memory;
@@ -129,6 +130,7 @@ public sealed class LessonMiningService : ILessonMiningService
                 current.Title = BuildTitle(occurrence, suggestedRule);
                 current.SuggestedRule = suggestedRule;
                 current.Category = _classifier.Classify(representative).Category;
+                current.CaptureReason = ReasonFor(occurrence);
                 current.OccurrenceCount = occurrence;
                 current.Confidence = ConfidenceFor(occurrence);
                 current.FirstSeenAt = signals.Min(s => s.At);
@@ -145,6 +147,7 @@ public sealed class LessonMiningService : ILessonMiningService
                     Title = BuildTitle(occurrence, suggestedRule),
                     SuggestedRule = suggestedRule,
                     Category = _classifier.Classify(representative).Category,
+                    CaptureReason = ReasonFor(occurrence),
                     Status = LessonCandidateStatus.Suggested,
                     OccurrenceCount = occurrence,
                     Confidence = ConfidenceFor(occurrence),
@@ -215,6 +218,13 @@ public sealed class LessonMiningService : ILessonMiningService
         await _candidates.UpdateAsync(candidate, cancellationToken).ConfigureAwait(false);
         return candidate;
     }
+
+    /// <summary>
+    /// The capture reason for a mined candidate: a repeated correction once it recurs
+    /// three or more times, otherwise a plain mined lesson.
+    /// </summary>
+    public static CaptureReason ReasonFor(int occurrences) =>
+        occurrences >= 3 ? CaptureReason.RepeatedCorrection : CaptureReason.LessonMined;
 
     /// <summary>Confidence from occurrence count: 3→0.60, 5→0.80, 10+→1.00.</summary>
     public static double ConfidenceFor(int occurrences)

@@ -16,6 +16,7 @@ namespace AgentRecall.Tests;
 /// completed turn. They drive <see cref="ITurnFinalizer"/> directly with a resolved
 /// turn, and the CLI command via stdin, exactly as the Stop hook does.
 /// </summary>
+[Collection("ConsoleStdin")]
 public class TurnFinalizerTests
 {
     private static async Task Init(TestDatabase db)

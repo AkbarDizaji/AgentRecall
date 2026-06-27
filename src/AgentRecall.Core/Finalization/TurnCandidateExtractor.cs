@@ -13,6 +13,32 @@ public enum TurnCandidateSource
     AgentSelfIdentified,
 }
 
+/// <summary>
+/// The outcome-aware signals detected in a turn: evidence that the agent actually made a
+/// mistake or the user corrected behaviour, used by the adaptive worthiness policy.
+/// </summary>
+public sealed record TurnOutcomeSignals
+{
+    /// <summary>The agent's output broke or changed behaviour ("that broke behavior", "you changed semantics").</summary>
+    public bool ObservedFailure { get; init; }
+
+    /// <summary>The user corrected the agent ("no, preserve the else branch").</summary>
+    public bool UserCorrection { get; init; }
+
+    /// <summary>A review comment was applied ("the review comment was applied", "fix this based on the review").</summary>
+    public bool ReviewAccepted { get; init; }
+
+    /// <summary>A test failed and was then fixed ("tests failed because …").</summary>
+    public bool TestFailedThenFixed { get; init; }
+
+    /// <summary>How many times the same correction recurred ("this is the same mistake again" → 2).</summary>
+    public int RepeatedCorrectionCount { get; init; }
+
+    /// <summary>True when any outcome-aware evidence was detected.</summary>
+    public bool HasAny =>
+        ObservedFailure || UserCorrection || ReviewAccepted || TestFailedThenFixed || RepeatedCorrectionCount >= 2;
+}
+
 /// <summary>A lesson candidate extracted from a turn, with the signals used to rank it.</summary>
 public sealed record TurnLessonCandidate
 {
@@ -101,9 +127,67 @@ public sealed class TurnCandidateExtractor : ITurnCandidateExtractor
         "save it", "yes, save",
     ];
 
+    // Phrases evidencing the agent's output broke or changed behaviour.
+    private static readonly string[] ObservedFailureSignals =
+    [
+        "that broke behavior", "that broke behaviour", "broke behavior", "broke behaviour",
+        "you changed semantics", "changed semantics", "you changed the behavior",
+        "you changed the behaviour", "that broke", "this broke", "you broke", "broke the build",
+        "introduced a regression", "caused a regression",
+    ];
+
+    // Phrases by which the user corrects the agent.
+    private static readonly string[] UserCorrectionSignals =
+    [
+        "no, preserve", "preserve the else", "no preserve", "that's not what i asked",
+        "not what i asked", "that's wrong", "revert that", "undo that", "you should have",
+        "should have preserved", "put it back",
+    ];
+
+    // Phrases by which a review comment is applied/accepted.
+    private static readonly string[] ReviewAcceptedSignals =
+    [
+        "the review comment was applied", "review comment was applied", "applied the review comment",
+        "fix this based on the review", "based on the review", "apply the review", "per the review",
+        "as the reviewer", "address the review", "the reviewer was right",
+    ];
+
+    // Phrases evidencing a test that failed then was fixed.
+    private static readonly string[] TestFailedSignals =
+    [
+        "tests failed because", "test failed because", "tests failed", "test failed",
+        "the test broke", "failing test", "test was red", "tests were red",
+    ];
+
+    // Phrases marking a recurrence of the same correction.
+    private static readonly string[] RepeatedCorrectionSignals =
+    [
+        "this is the same mistake again", "same mistake again", "this is the same mistake",
+        "the same mistake", "we've been over this", "we have been over this", "as i said before",
+        "i told you before", "you keep making", "keep making this mistake", "again you",
+    ];
+
     public TurnCandidateExtractor(IFeedbackCandidateAnalyzer analyzer)
     {
         _analyzer = analyzer ?? throw new ArgumentNullException(nameof(analyzer));
+    }
+
+    public TurnOutcomeSignals DetectOutcomeSignals(string? userText, string? assistantText)
+    {
+        // Outcome evidence comes from what the user said this turn; the assistant text is
+        // also scanned so a self-reported regression ("this broke the build") still counts.
+        var repeated = ContainsAny(userText, RepeatedCorrectionSignals) ||
+                       ContainsAny(assistantText, RepeatedCorrectionSignals);
+
+        return new TurnOutcomeSignals
+        {
+            ObservedFailure = ContainsAny(userText, ObservedFailureSignals) || ContainsAny(assistantText, ObservedFailureSignals),
+            UserCorrection = ContainsAny(userText, UserCorrectionSignals),
+            ReviewAccepted = ContainsAny(userText, ReviewAcceptedSignals) || ContainsAny(assistantText, ReviewAcceptedSignals),
+            TestFailedThenFixed = ContainsAny(userText, TestFailedSignals) || ContainsAny(assistantText, TestFailedSignals),
+            // A recurrence implies at least two observations of the same correction.
+            RepeatedCorrectionCount = repeated ? 2 : 0,
+        };
     }
 
     /// <summary>True when the turn carries an explicit "do not save" instruction.</summary>

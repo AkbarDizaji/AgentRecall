@@ -15,6 +15,7 @@ namespace AgentRecall.Tests;
 /// They drive <see cref="CaptureHook"/> directly with a hook payload, exactly as the
 /// `agentrecall hook capture` command does.
 /// </summary>
+[Collection("ConsoleStdin")]
 public class CaptureHookTests
 {
     private static async Task Init(TestDatabase db)

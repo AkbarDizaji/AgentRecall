@@ -17,4 +17,11 @@ public interface ITurnCandidateExtractor
 
     /// <summary>True when the user explicitly accepted or asked to keep the guidance.</summary>
     bool HasAcceptanceSignal(string? userText);
+
+    /// <summary>
+    /// Detects the outcome-aware signals in a turn (an observed failure, a user
+    /// correction, an accepted review, a test that failed then passed, a repeat) so the
+    /// adaptive worthiness policy can weigh what produced a candidate, not just its text.
+    /// </summary>
+    TurnOutcomeSignals DetectOutcomeSignals(string? userText, string? assistantText);
 }

@@ -20,6 +20,7 @@ namespace AgentRecall.Tests;
 /// The hook cases live in one class so they never run in parallel with each other
 /// — they redirect the process-global <see cref="Console.In"/>.
 /// </summary>
+[Collection("ConsoleStdin")]
 public class HookInjectionE2ETests
 {
     private static async Task Init(TestDatabase db)
