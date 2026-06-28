@@ -206,11 +206,12 @@ public sealed class KeywordRecallSearchService : IRecallSearchService
     /// </summary>
     private static List<string> Tokenize(string text)
     {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
         var all = new List<string>();
         var content = new List<string>();
         foreach (var token in EnumerateTokens(text))
         {
-            if (!all.Contains(token))
+            if (seen.Add(token))
             {
                 all.Add(token);
                 if (!StopWords.Contains(token))

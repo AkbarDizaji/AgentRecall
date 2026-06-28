@@ -74,9 +74,9 @@ public sealed class TurnCandidateExtractor : ITurnCandidateExtractor
     // A member access (Foo.Bar), a call (Method()), or a bare PascalCase identifier
     // marks a concrete code symbol — so the candidate is repository-specific.
     private static readonly Regex MemberOrCall =
-        new(@"[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_]|\b[A-Za-z_][A-Za-z0-9_]*\(", RegexOptions.Compiled);
+        new(@"[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_]|\b[A-Za-z_][A-Za-z0-9_]*\(", RegexOptions.Compiled, TimeSpan.FromSeconds(1));
     private static readonly Regex PascalIdentifier =
-        new(@"\b[A-Za-z_]*[a-z][A-Za-z0-9_]*[A-Z][A-Za-z0-9_]*\b", RegexOptions.Compiled);
+        new(@"\b[A-Za-z_]*[a-z][A-Za-z0-9_]*[A-Z][A-Za-z0-9_]*\b", RegexOptions.Compiled, TimeSpan.FromSeconds(1));
 
     // A security/correctness concern stays a candidate even without an imperative verb,
     // and is ranked above ordinary guidance.

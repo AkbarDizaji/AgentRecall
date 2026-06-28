@@ -33,15 +33,19 @@ public sealed class MemoryWorthinessClassifier : IMemoryWorthinessClassifier
     ];
 
     // A token matching a member access (Foo.Bar) or a call (Method()).
-    private static readonly Regex MemberOrCall = new(@"[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_]|\(", RegexOptions.Compiled);
+    // A defensive match timeout on every compiled pattern, so a pathological input can
+    // never cause runaway backtracking on these hot, deterministic paths.
+    private static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(1);
+
+    private static readonly Regex MemberOrCall = new(@"[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_]|\(", RegexOptions.Compiled, RegexTimeout);
 
     // A bare PascalCase/interface identifier: at least two uppercase letters and at
     // least one lowercase, so all-caps acronyms ("SQL", "LGTM") are not symbols.
-    private static readonly Regex PascalIdentifier = new(@"^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.Compiled);
+    private static readonly Regex PascalIdentifier = new(@"^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.Compiled, RegexTimeout);
 
     // A filename with a recognised source/config extension.
     private static readonly Regex FileName =
-        new(@"\b[\w-]+\.(json|cs|xml|yaml|yml|config|csproj|ts|js|py|txt|ini|toml|md)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        new(@"\b[\w-]+\.(json|cs|xml|yaml|yml|config|csproj|ts|js|py|txt|ini|toml|md)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase, RegexTimeout);
 
     public MemoryWorthinessResult Classify(string candidate)
     {

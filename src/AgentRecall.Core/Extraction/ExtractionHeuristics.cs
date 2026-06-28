@@ -50,7 +50,7 @@ internal static class ExtractionHeuristics
     // Split only at real sentence boundaries: terminal punctuation followed by
     // whitespace, or a line break. This leaves code like It.IsAny<T>(), 0.5, and
     // .ConfigureAwait(false) intact instead of shredding it.
-    private static readonly Regex SentenceBoundary = new(@"(?<=[.!?])\s+|\r?\n+", RegexOptions.Compiled);
+    private static readonly Regex SentenceBoundary = new(@"(?<=[.!?])\s+|\r?\n+", RegexOptions.Compiled, TimeSpan.FromSeconds(1));
 
     public static List<string> SplitSentences(string? text)
     {

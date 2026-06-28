@@ -11,7 +11,7 @@ namespace AgentRecall.Core.Mining;
 /// </summary>
 public static class LessonTextNormalizer
 {
-    private static readonly Regex Whitespace = new(@"\s+", RegexOptions.Compiled);
+    private static readonly Regex Whitespace = new(@"\s+", RegexOptions.Compiled, TimeSpan.FromSeconds(1));
 
     // Negative directives → "avoid"; longer phrases first so they win.
     private static readonly string[] NegativeVerbs =
