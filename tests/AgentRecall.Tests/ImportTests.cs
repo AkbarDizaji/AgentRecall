@@ -52,6 +52,41 @@ public class ImportTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task Import_RejectsFileOverByteCap()
+    {
+        await using var db = new TestDatabase(o => o.LogImportMaxBytes = 16);
+        await Init(db);
+
+        var log = WriteLog(
+            "Program.cs(10,5): error CS0246: type not found",
+            "Program.cs(20,9): error CS0103: name does not exist");
+
+        await using var scope = db.CreateScope();
+        var importer = scope.ServiceProvider.GetRequiredService<ILogImportService>();
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => importer.ImportAsync(LogKind.Build, log));
+        Assert.Contains("exceeds the maximum", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Import_TruncatesOverlongLines()
+    {
+        await using var db = new TestDatabase(o => o.LogImportMaxLineLength = 20);
+        await Init(db);
+
+        var log = WriteLog("error " + new string('x', 5000));
+
+        await using var scope = db.CreateScope();
+        var importer = scope.ServiceProvider.GetRequiredService<ILogImportService>();
+        var result = await importer.ImportAsync(LogKind.Build, log);
+
+        Assert.Equal(1, result.EventsCreated);
+        var events = await scope.ServiceProvider.GetRequiredService<IRecallEventRepository>().ListAsync();
+        var stored = Assert.Single(events);
+        Assert.True(stored.Details.Length <= 20, $"Expected the line truncated to <=20 chars, got {stored.Details.Length}.");
+    }
+
+    [Fact]
     public async Task Import_RepeatedFailures_IncreaseConfidence()
     {
         await using var db = new TestDatabase();

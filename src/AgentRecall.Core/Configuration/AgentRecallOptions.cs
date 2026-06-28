@@ -116,6 +116,19 @@ public sealed class AgentRecallOptions
     /// </summary>
     public bool StoreTurnTranscript { get; set; }
 
+    /// <summary>
+    /// Maximum size (bytes) of a log file accepted by <c>import build-log</c> /
+    /// <c>import test-log</c>. A larger file is rejected rather than read into memory.
+    /// Defaults to 50 MB.
+    /// </summary>
+    public long LogImportMaxBytes { get; set; } = 50L * 1024 * 1024;
+
+    /// <summary>
+    /// Maximum characters kept per log line during import; a longer line is truncated so a
+    /// single pathological line cannot blow up memory. Defaults to 8192.
+    /// </summary>
+    public int LogImportMaxLineLength { get; set; } = 8 * 1024;
+
     /// <summary>Maximum lesson candidates captured from a single turn. Defaults to 5.</summary>
     public int MaxCandidatesPerTurn { get; set; } = 5;
 

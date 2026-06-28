@@ -1,4 +1,5 @@
 using AgentRecall.Core.Abstractions;
+using AgentRecall.Core.Configuration;
 using AgentRecall.Core.Domain;
 
 namespace AgentRecall.Core.Services;
@@ -13,15 +14,18 @@ public sealed class LogImportService : ILogImportService
     private readonly IRecallEventRepository _events;
     private readonly IRecallRuleRepository _rules;
     private readonly IRuleLifecycleService _lifecycle;
+    private readonly AgentRecallOptions _options;
 
     public LogImportService(
         IRecallEventRepository events,
         IRecallRuleRepository rules,
-        IRuleLifecycleService lifecycle)
+        IRuleLifecycleService lifecycle,
+        AgentRecallOptions options)
     {
         _events = events ?? throw new ArgumentNullException(nameof(events));
         _rules = rules ?? throw new ArgumentNullException(nameof(rules));
         _lifecycle = lifecycle ?? throw new ArgumentNullException(nameof(lifecycle));
+        _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
     public async Task<ImportResult> ImportAsync(LogKind kind, string filePath, CancellationToken cancellationToken = default)
@@ -36,8 +40,19 @@ public sealed class LogImportService : ILogImportService
             throw new FileNotFoundException($"Log file not found: {filePath}", filePath);
         }
 
-        var lines = await File.ReadAllLinesAsync(filePath, cancellationToken).ConfigureAwait(false);
-        var failures = FailureLogParser.Parse(kind, lines);
+        var size = new FileInfo(filePath).Length;
+        if (size > _options.LogImportMaxBytes)
+        {
+            throw new InvalidOperationException(
+                $"Log file is {size} bytes, which exceeds the maximum of {_options.LogImportMaxBytes} bytes. " +
+                "Trim the log or raise AgentRecall.LogImportMaxBytes.");
+        }
+
+        // Stream the file line-by-line rather than loading it all into memory; the parser
+        // keeps only matching failure lines, and each line is capped in length so one
+        // pathological line cannot blow up memory.
+        var failures = FailureLogParser.Parse(
+            kind, ReadLinesCapped(filePath, _options.LogImportMaxLineLength, cancellationToken));
 
         // Snapshot of live rules used only for matching (trigger/tags don't change).
         // Superseded and archived rules are never reinforced.
@@ -78,6 +93,22 @@ public sealed class LogImportService : ILogImportService
         }
 
         return new ImportResult(kind, failures.Count, eventsCreated, reinforced.Count, newlyPromoted.Count);
+    }
+
+    /// <summary>
+    /// Streams a file line-by-line, truncating any line longer than
+    /// <paramref name="maxLineLength"/>, so a huge file (or a single huge line) is never
+    /// fully materialized in memory.
+    /// </summary>
+    private static IEnumerable<string> ReadLinesCapped(string path, int maxLineLength, CancellationToken cancellationToken)
+    {
+        using var reader = new StreamReader(path);
+        string? line;
+        while ((line = reader.ReadLine()) is not null)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            yield return line.Length > maxLineLength ? line[..maxLineLength] : line;
+        }
     }
 
     /// <summary>A rule matches a failure when its trigger or a tag appears in the line.</summary>
