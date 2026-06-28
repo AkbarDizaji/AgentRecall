@@ -170,6 +170,42 @@ public static class ActivityNoticeFactory
         }
     }
 
+    /// <summary>A notice for a suggestion remembered (approved) via Interactive Memory.</summary>
+    public static ActivityNotice ForSuggestionRemembered(RecallRule rule, string source)
+    {
+        ArgumentNullException.ThrowIfNull(rule);
+        return new ActivityNotice
+        {
+            Type = ActivityType.SuggestionRemembered,
+            Summary = $"remembered rule #{rule.Id}.",
+            Details =
+            [
+                "Remembered by user from Interactive Memory prompt.",
+                $"#{rule.Id} {Truncate(rule.RuleText, LabelLength)}",
+            ],
+            RuleIds = [rule.Id],
+            Source = source,
+        };
+    }
+
+    /// <summary>A notice for a suggestion ignored (archived) via Interactive Memory.</summary>
+    public static ActivityNotice ForSuggestionIgnored(RecallRule rule, string source)
+    {
+        ArgumentNullException.ThrowIfNull(rule);
+        return new ActivityNotice
+        {
+            Type = ActivityType.SuggestionIgnored,
+            Summary = $"ignored suggestion #{rule.Id}.",
+            Details =
+            [
+                "Ignored by user from Interactive Memory prompt.",
+                $"#{rule.Id} {Truncate(rule.RuleText, LabelLength)}",
+            ],
+            RuleIds = [rule.Id],
+            Source = source,
+        };
+    }
+
     /// <summary>A notice for a mining run, or null when nothing new was found.</summary>
     public static ActivityNotice? ForLessonsMined(MiningResult result, string source)
     {

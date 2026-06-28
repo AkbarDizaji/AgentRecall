@@ -65,6 +65,17 @@ internal static class McpToolHelpers
             node["rule"] = ToGuidanceNode(rule);
         }
 
+        // Interactive Memory over MCP never blocks: an ambiguous SuggestCapture is parked as
+        // a Pending rule and the structured response names the follow-up actions, so the
+        // client can offer them without AgentRecall waiting on terminal input.
+        if (result.Decision?.Outcome == Core.Capture.CaptureOutcome.SuggestCapture && result.Rule is { } pending)
+        {
+            node["pending_rule_id"] = pending.Id;
+            node["suggested_actions"] = new JsonArray("approve", "reject", "view_details");
+            node["approve_command"] = $"agentrecall rules approve {pending.Id}";
+            node["reject_command"] = $"agentrecall rules archive {pending.Id}";
+        }
+
         if (result.Event is { } recallEvent)
         {
             node["event_id"] = recallEvent.Id;

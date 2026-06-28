@@ -250,7 +250,7 @@ on a retrieval regression. The same check also runs as a unit test.
 | `devcontainer init` | Scaffold dev container wiring so AgentRecall reinstalls on every rebuild (optional `[path]`). |
 | `feedback add` | Record feedback and extract a rule from it. |
 | `search "<query>"` | Search rules by keyword (`--scope-level`, `--scope-value`, `--limit`). |
-| `rules list` | List all rules. |
+| `rules list` | List all rules (`--status <status>`, e.g. `Pending`). |
 | `rules show <id>` | Show a single rule in detail. |
 | `rules approve <id>` | Move a Pending rule to Active. |
 | `rules promote <id>` | Promote a rule. |
@@ -747,6 +747,81 @@ The turn finalizer detects these signals from the turn ("that broke behavior", "
 preserve the else branch", "you changed semantics", "the review comment was applied",
 "tests failed because…", "this is the same mistake again") and passes them into the
 adaptive policy, so capture stays deterministic and the agent never has to guess.
+
+---
+
+## Interactive Memory
+
+AgentRecall usually captures high-confidence lessons automatically. When it is unsure,
+it can **ask** you whether to remember the lesson — turning an ambiguous capture into a
+quick, visible choice instead of a silent pending rule you forget about. It reuses the
+existing capture decision (`AutoCapture` / `SuggestCapture` / `Skip`); Interactive Memory
+only changes how a `SuggestCapture` is surfaced. It never re-classifies worthiness.
+
+- **AutoCapture** → stored automatically, with a notice. No question.
+- **SuggestCapture** → AgentRecall asks (when a terminal is attached).
+- **Skip** → never asks.
+
+When a terminal is attached, an ambiguous lesson is shown as a prompt:
+
+```
+🧠 **AgentRecall:** possible lesson detected.
+
+Candidate:
+When flattening nested template conditionals, preserve `{{else}}` semantics.
+
+Why:
+This came from an observed agent mistake, but the rule may be broad.
+
+Actions:
+[y] Remember
+[n] Ignore
+[v] View details
+```
+
+- `y` approves the pending rule (it becomes Active): `🧠 **AgentRecall:** remembered rule #31.`
+- `n` archives it: `🧠 **AgentRecall:** ignored suggestion #31.`
+- `v` shows the full rule, reason, confidence, evidence, and scope, then asks again.
+
+### Modes
+
+`AgentRecall.InteractiveMemoryMode` controls whether AgentRecall asks. It is **distinct
+from `ActivityNoticeLevel`** — that controls how loud the notices are; this controls
+whether AgentRecall prompts.
+
+| Mode | Behaviour |
+| --- | --- |
+| `Auto` (default) | Capture high-confidence lessons automatically; ask only for ambiguous `SuggestCapture`. |
+| `Ask` | More conservative; a borderline auto-capture is downgraded to a question. |
+| `Silent` | Never prompts; suggestions become Pending rules to approve later. |
+
+```jsonc
+// agentrecall.json
+{ "AgentRecall": { "InteractiveMemoryMode": "Auto" } }
+```
+
+### Non-interactive surfaces never block
+
+Hooks (`finalize-turn --hook`), pipes, and MCP never wait for input. An ambiguous lesson
+becomes a Pending rule and the output names the follow-up command:
+
+```
+🧠 **AgentRecall:** suggested 1 pending rule.
+Run `agentrecall rules approve 31` to remember it.
+```
+
+Over MCP, the structured `capture_feedback` / `add_feedback` response carries
+`capture_decision: "SuggestCapture"`, `pending_rule_id`, and
+`suggested_actions: ["approve", "reject", "view_details"]` — no terminal prompt text.
+
+Approve or ignore a pending suggestion later with the existing rule commands:
+
+```bash
+agentrecall rules list --status Pending   # see what is waiting
+agentrecall rules approve <id>            # remember it (becomes Active)
+agentrecall rules archive <id>            # ignore it
+agentrecall capture-status --last-turn    # what the last turn captured / suggested / skipped
+```
 
 ---
 

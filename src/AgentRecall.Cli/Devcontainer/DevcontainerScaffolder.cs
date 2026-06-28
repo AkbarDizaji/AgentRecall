@@ -178,6 +178,28 @@ public static class DevcontainerScaffolder
         - **Before** non-trivial work, call `inject_context` with the task description
           when you need the relevant rules mid-task (the hook already covers prompts).
 
+        ### Interactive Memory
+
+        AgentRecall owns the memory decision. Never ask "Want me to save it?" — instead,
+        report what AgentRecall decided and present its options:
+
+        - **AutoCapture** — a high-confidence lesson was stored automatically. Just notify
+          the user: "🧠 AgentRecall captured rule #28: <summary>." Do not ask anything.
+        - **SuggestCapture** — an ambiguous lesson was parked as a Pending rule. Present
+          AgentRecall's interactive options, e.g. "🧠 AgentRecall found a possible lesson.
+          Reply `remember` to save it or `ignore` to skip." If the user says remember, run
+          `agentrecall rules approve <id>`; if ignore, run `agentrecall rules archive <id>`.
+        - **Skip** — nothing was stored. Do not push the user to save unless they ask.
+
+        Forbidden — never say:
+
+        - "Want me to save it?"
+
+        Say instead, only for SuggestCapture/Pending:
+
+        - "🧠 AgentRecall found a possible lesson. Reply `remember` to save it or `ignore`
+          to skip."
+
         ### Store lessons, not facts
 
         Do not store information that can be recovered from the repository using search,

@@ -194,6 +194,12 @@ public enum ActivityType
 
     /// <summary>The user explicitly checked capture/finalization status.</summary>
     StatusChecked = 8,
+
+    /// <summary>A suggested (Pending) rule was remembered (approved) via Interactive Memory.</summary>
+    SuggestionRemembered = 9,
+
+    /// <summary>A suggested (Pending) rule was ignored (archived) via Interactive Memory.</summary>
+    SuggestionIgnored = 10,
 }
 
 /// <summary>Review state of a <see cref="RuleLifecycleRecommendation"/>.</summary>

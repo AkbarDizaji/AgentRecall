@@ -53,6 +53,8 @@ public static class TurnFinalizationFormatter
             {
                 var note = string.IsNullOrWhiteSpace(lesson.Note) ? string.Empty : $" ({lesson.Note})";
                 sb.Append($"\n- #{lesson.RuleId} Pending rule: {lesson.Text}{note}");
+                sb.Append($"\n  Run `agentrecall rules approve {lesson.RuleId}` to remember it, " +
+                          $"or `agentrecall rules archive {lesson.RuleId}` to ignore it.");
             }
         }
 
@@ -89,7 +91,8 @@ public static class TurnFinalizationFormatter
         if (result.Suggested.Count > 0)
         {
             var lesson = result.Suggested[0];
-            return $"AgentRecall suggested pending rule #{lesson.RuleId}: {Summarize(lesson.Text)}.";
+            return $"AgentRecall suggested pending rule #{lesson.RuleId}: {Summarize(lesson.Text)}. " +
+                   $"Run `agentrecall rules approve {lesson.RuleId}` to remember it.";
         }
 
         var duplicate = result.Skipped.FirstOrDefault(s => s.DuplicateOfRuleId is not null);

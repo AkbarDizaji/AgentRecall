@@ -331,20 +331,34 @@ public static class CommandRouter
                 output.WriteLine($"Recorded feedback as event #{result.Event.Id}.");
             }
 
-            var verb = result.ReusedExistingRule ? "Reused existing" : "Created";
-            output.WriteLine($"{verb} {result.Rule.Status} rule #{result.Rule.Id}: {result.Rule.RuleText}");
-            if (result.Decision is { } decision)
+            // Interactive Memory: surface an ambiguous SuggestCapture as a y/n/v prompt when
+            // a terminal is attached, or a non-blocking "approve later" notice otherwise. It
+            // owns the user-facing output for suggestions and remembered/ignored outcomes; an
+            // auto-capture falls through to the standard confirmation below.
+            var mode = services.GetRequiredService<AgentRecallOptions>().ResolvedInteractiveMemoryMode;
+            var isInteractive = !Console.IsInputRedirected;
+            var interaction = await InteractiveMemory
+                .HandleAsync(result, mode, isInteractive, Console.In, output, scope.ServiceProvider, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (interaction is InteractiveMemoryOutcome.AutoCaptured or InteractiveMemoryOutcome.ReusedDuplicate)
             {
-                output.WriteLine(
-                    $"Decision: {decision.Outcome} — {decision.Notice} " +
-                    $"(confidence {decision.Confidence:0.00}, scope {decision.ScopeLabel}).");
-            }
-            if (result.Worthiness?.Verdict == Core.Memory.MemoryWorthiness.NeedsReview)
-            {
-                output.WriteLine("Stored the generalized lesson instead of the raw code fact.");
+                var verb = result.ReusedExistingRule ? "Reused existing" : "Created";
+                output.WriteLine($"{verb} {result.Rule.Status} rule #{result.Rule.Id}: {result.Rule.RuleText}");
+                if (result.Decision is { } decision)
+                {
+                    output.WriteLine(
+                        $"Decision: {decision.Outcome} — {decision.Notice} " +
+                        $"(confidence {decision.Confidence:0.00}, scope {decision.ScopeLabel}).");
+                }
+                if (result.Worthiness?.Verdict == Core.Memory.MemoryWorthiness.NeedsReview)
+                {
+                    output.WriteLine("Stored the generalized lesson instead of the raw code fact.");
+                }
+
+                PrintNotice(output, notice, noticeLevel);
             }
 
-            PrintNotice(output, notice, noticeLevel);
             return 0;
         }
         catch (Exception ex)
@@ -372,10 +386,30 @@ public static class CommandRouter
         {
             case "list":
             {
+                var listOptions = ParseOptions(args[1..]);
+                RuleStatus? statusFilter = null;
+                if (listOptions.TryGetValue("status", out var rawStatus))
+                {
+                    if (!Enum.TryParse(rawStatus, ignoreCase: true, out RuleStatus parsed))
+                    {
+                        output.WriteLine($"Invalid --status '{rawStatus}'. Valid values: {string.Join(", ", Enum.GetNames<RuleStatus>())}");
+                        return 1;
+                    }
+
+                    statusFilter = parsed;
+                }
+
                 var all = await rules.ListAsync(cancellationToken).ConfigureAwait(false);
+                if (statusFilter is { } status)
+                {
+                    all = all.Where(r => r.Status == status).ToList();
+                }
+
                 if (all.Count == 0)
                 {
-                    output.WriteLine("No rules yet. Add one with: agentrecall feedback add ...");
+                    output.WriteLine(statusFilter is { } s
+                        ? $"No {s} rules."
+                        : "No rules yet. Add one with: agentrecall feedback add ...");
                     return 0;
                 }
 
@@ -485,7 +519,7 @@ public static class CommandRouter
 
             default:
                 output.WriteLine("Usage:");
-                output.WriteLine("  agentrecall rules list");
+                output.WriteLine("  agentrecall rules list [--status <status>]");
                 output.WriteLine("  agentrecall rules show <id>");
                 output.WriteLine("  agentrecall rules approve <id>");
                 output.WriteLine("  agentrecall rules promote <id>");
@@ -2535,7 +2569,7 @@ public static class CommandRouter
         output.WriteLine("  devcontainer init    Scaffold dev container wiring so AgentRecall");
         output.WriteLine("                       reinstalls automatically on every rebuild");
         output.WriteLine("  feedback add         Record feedback and extract a pending rule");
-        output.WriteLine("  rules list           List all rules");
+        output.WriteLine("  rules list           List all rules (--status <status>, e.g. Pending)");
         output.WriteLine("  rules show <id>      Show a single rule in detail");
         output.WriteLine("  rules approve <id>   Move a Pending rule to Active");
         output.WriteLine("  rules promote <id>   Promote a rule");

@@ -53,6 +53,13 @@ public static class ConfigurationLoader
         WarnIfInvalidNoticeLevel(nameof(AgentRecallOptions.ActivityNoticeLevel), options.ActivityNoticeLevel);
         WarnIfInvalidNoticeLevel(nameof(AgentRecallOptions.HookNoticeLevel), options.HookNoticeLevel);
 
+        if (!Core.Capture.InteractiveMemoryModes.IsValid(options.InteractiveMemoryMode))
+        {
+            Console.Error.WriteLine(
+                $"[agentrecall] warning: invalid {AgentRecallOptions.SectionName}.{nameof(AgentRecallOptions.InteractiveMemoryMode)} " +
+                $"'{options.InteractiveMemoryMode}'. Falling back to the default. Valid values: Auto, Ask, Silent.");
+        }
+
         return options;
     }
 

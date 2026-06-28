@@ -1,4 +1,5 @@
 using AgentRecall.Core.Activity;
+using AgentRecall.Core.Capture;
 using AgentRecall.Core.Domain;
 using AgentRecall.Core.Hooks;
 
@@ -159,6 +160,20 @@ public sealed class AgentRecallOptions
     /// <c>Verbose</c> is treated as <c>Normal</c> here. Defaults to <c>Normal</c>.
     /// </summary>
     public string HookNoticeLevel { get; set; } = nameof(NoticeLevel.Normal);
+
+    /// <summary>
+    /// Whether AgentRecall asks the user about an ambiguous capture: <c>Auto</c> (default;
+    /// auto-capture strong lessons, ask only for SuggestCapture), <c>Ask</c> (also downgrade
+    /// borderline auto-captures to a question), or <c>Silent</c> (never prompt). Parsed
+    /// defensively so an unrecognised value falls back to <c>Auto</c>. This is distinct from
+    /// <see cref="ActivityNoticeLevel"/>: this controls whether AgentRecall <em>asks</em>;
+    /// the notice level controls how loud the recorded notices are.
+    /// </summary>
+    public string InteractiveMemoryMode { get; set; } = nameof(Capture.InteractiveMemoryMode.Auto);
+
+    /// <summary>The parsed interactive-memory mode, falling back to Auto when invalid.</summary>
+    public InteractiveMemoryMode ResolvedInteractiveMemoryMode =>
+        InteractiveMemoryModes.Resolve(InteractiveMemoryMode);
 
     /// <summary>The parsed activity notice level, falling back to Verbose when invalid.</summary>
     public NoticeLevel ResolvedActivityNoticeLevel =>
