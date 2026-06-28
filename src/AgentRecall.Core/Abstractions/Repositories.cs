@@ -2,9 +2,39 @@ using AgentRecall.Core.Domain;
 
 namespace AgentRecall.Core.Abstractions;
 
+/// <summary>
+/// A database-side filter for rules, so callers don't load the whole table and filter
+/// in memory. Every set field is applied as a WHERE clause at the DB layer.
+/// </summary>
+public sealed record RuleQuery
+{
+    /// <summary>Match only this scope level when set.</summary>
+    public ScopeLevel? ScopeLevel { get; init; }
+
+    /// <summary>
+    /// Match this scope value (case-insensitive) when non-null. An empty string matches
+    /// the global/empty scope; <c>null</c> means "any scope value".
+    /// </summary>
+    public string? ScopeValue { get; init; }
+
+    /// <summary>Include only rules whose status is in this set, when provided.</summary>
+    public IReadOnlyCollection<RuleStatus>? Statuses { get; init; }
+
+    /// <summary>Exclude rules whose status is in this set, when provided.</summary>
+    public IReadOnlyCollection<RuleStatus>? ExcludeStatuses { get; init; }
+
+    /// <summary>Match only rules with this deprecated flag when set.</summary>
+    public bool? Deprecated { get; init; }
+}
+
 /// <summary>Persistence for <see cref="RecallRule"/>.</summary>
 public interface IRecallRuleRepository : IRepository<RecallRule>
 {
+    /// <summary>
+    /// Returns rules matching <paramref name="query"/>, filtered at the database layer
+    /// (scope, status, deprecation) rather than by loading the full table into memory.
+    /// </summary>
+    Task<IReadOnlyList<RecallRule>> QueryAsync(RuleQuery query, CancellationToken cancellationToken = default);
 }
 
 /// <summary>Persistence for <see cref="RecallEvent"/>.</summary>

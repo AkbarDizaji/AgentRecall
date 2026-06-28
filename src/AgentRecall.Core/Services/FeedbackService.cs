@@ -294,12 +294,17 @@ public sealed class FeedbackService : IFeedbackService
             return null;
         }
 
-        var all = await _rules.ListAsync(cancellationToken).ConfigureAwait(false);
-        return all.FirstOrDefault(r =>
-            !NotReusable.Contains(r.Status) &&
-            r.ScopeLevel == candidate.ScopeLevel &&
-            string.Equals(r.ScopeValue ?? string.Empty, candidate.ScopeValue ?? string.Empty, StringComparison.OrdinalIgnoreCase) &&
-            NormalizeGuidance(r.RuleText) == key);
+        // Scope and status filtering runs in the database; only the small same-scope set
+        // is loaded, and the in-memory step is just the normalized-guidance equivalence
+        // (which is not expressible in SQL).
+        var sameScope = await _rules.QueryAsync(new RuleQuery
+        {
+            ScopeLevel = candidate.ScopeLevel,
+            ScopeValue = candidate.ScopeValue ?? string.Empty,
+            ExcludeStatuses = NotReusable,
+        }, cancellationToken).ConfigureAwait(false);
+
+        return sameScope.FirstOrDefault(r => NormalizeGuidance(r.RuleText) == key);
     }
 
     /// <summary>

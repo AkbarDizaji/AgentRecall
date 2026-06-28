@@ -73,10 +73,14 @@ public sealed class KeywordRecallSearchService : IRecallSearchService
             return [];
         }
 
-        var candidates = (await _rules.ListAsync(cancellationToken).ConfigureAwait(false))
-            .Where(r => !Excluded.Contains(r.Status))
-            .Where(r => MatchesScope(r, options))
-            .ToList();
+        // Scope and excluded-status filtering runs in the database so search never loads
+        // the full rule table; only term scoring stays in memory.
+        var candidates = await _rules.QueryAsync(new RuleQuery
+        {
+            ScopeLevel = options.ScopeLevel,
+            ScopeValue = string.IsNullOrWhiteSpace(options.ScopeValue) ? null : options.ScopeValue,
+            ExcludeStatuses = Excluded,
+        }, cancellationToken).ConfigureAwait(false);
 
         // Optional semantic vector for the query (skipped when no provider).
         float[]? queryVector = _embeddings.IsAvailable
@@ -175,22 +179,6 @@ public sealed class KeywordRecallSearchService : IRecallSearchService
         var coverage = (double)matchedTerms / terms.Count;
         var densityBonus = Math.Min(weighted, 20.0) / 20.0 * 0.1;
         return Math.Min(1.0, coverage + densityBonus);
-    }
-
-    private static bool MatchesScope(RecallRule rule, SearchOptions options)
-    {
-        if (options.ScopeLevel is { } level && rule.ScopeLevel != level)
-        {
-            return false;
-        }
-
-        if (!string.IsNullOrWhiteSpace(options.ScopeValue) &&
-            !string.Equals(rule.ScopeValue, options.ScopeValue, StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        return true;
     }
 
     /// <summary>Ranking weight per status; higher surfaces first.</summary>

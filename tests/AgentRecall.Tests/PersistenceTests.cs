@@ -140,6 +140,34 @@ public class PersistenceTests
         Assert.False(await repo.DeleteAsync(added.Id));
     }
 
+    [Fact]
+    public async Task QueryAsync_FiltersByScopeAndStatus_AtDbLayer()
+    {
+        await using var db = new TestDatabase();
+        await InitializeAsync(db);
+
+        await using var scope = db.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IRecallRuleRepository>();
+
+        await repo.AddAsync(new RecallRule { Trigger = "t", RuleText = "a", Status = RuleStatus.Active, ScopeLevel = ScopeLevel.Repository, ScopeValue = "Skedda" });
+        await repo.AddAsync(new RecallRule { Trigger = "t", RuleText = "b", Status = RuleStatus.Archived, ScopeLevel = ScopeLevel.Repository, ScopeValue = "skedda" });
+        await repo.AddAsync(new RecallRule { Trigger = "t", RuleText = "c", Status = RuleStatus.Active, ScopeLevel = ScopeLevel.Repository, ScopeValue = "other" });
+        await repo.AddAsync(new RecallRule { Trigger = "t", RuleText = "d", Status = RuleStatus.Active, ScopeLevel = ScopeLevel.Global, ScopeValue = "" });
+
+        // Case-insensitive scope match, excluding Archived.
+        var skedda = await repo.QueryAsync(new RuleQuery
+        {
+            ScopeLevel = ScopeLevel.Repository,
+            ScopeValue = "SKEDDA",
+            ExcludeStatuses = [RuleStatus.Archived],
+        });
+        Assert.Equal(["a"], skedda.Select(r => r.RuleText).OrderBy(x => x).ToArray());
+
+        // Include-only filter by status.
+        var active = await repo.QueryAsync(new RuleQuery { Statuses = [RuleStatus.Active] });
+        Assert.Equal(["a", "c", "d"], active.Select(r => r.RuleText).OrderBy(x => x).ToArray());
+    }
+
     private static async Task InitializeAsync(TestDatabase db)
     {
         await using var scope = db.CreateScope();
