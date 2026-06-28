@@ -199,6 +199,16 @@ public sealed class McpServer
             // Invalid input from the caller — report as a tool error, not a protocol error.
             return Result(id, ToolContent(new JsonObject { ["error"] = ex.Message }, isError: true));
         }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Any other tool failure is contained as a tool-level error (isError:true)
+            // rather than a JSON-RPC internal error, so one tool throwing never corrupts
+            // the protocol stream. The full exception goes to stderr (stdout is the
+            // protocol channel) for diagnosis.
+            _logger.LogError(ex, "MCP tool {Tool} failed.", name);
+            Console.Error.WriteLine($"[agentrecall] MCP tool '{name}' failed: {ex}");
+            return Result(id, ToolContent(new JsonObject { ["error"] = $"Tool '{name}' failed: {ex.Message}" }, isError: true));
+        }
     }
 
     private static JsonObject ToolContent(JsonNode payload, bool isError)

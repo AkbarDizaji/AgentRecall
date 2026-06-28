@@ -50,6 +50,34 @@ public class McpTests
         });
     }
 
+    private sealed class ThrowingTool : IMcpTool
+    {
+        public string Name => "boom";
+        public string Description => "Always throws.";
+        public JsonObject InputSchema => new() { ["type"] = "object" };
+
+        public Task<JsonNode> InvokeAsync(JsonObject? arguments, IServiceProvider services, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("kaboom");
+    }
+
+    [Fact]
+    public async Task ToolThatThrows_ReturnsToolError_NotProtocolError()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+        var server = new McpServer(db.Services, [new ThrowingTool()]);
+
+        var request = """{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"boom","arguments":{}}}""";
+        var response = await server.HandleMessageAsync(request, CancellationToken.None);
+
+        Assert.NotNull(response);
+        // A tool failure must not become a JSON-RPC error; the protocol stream stays intact.
+        Assert.Null(response!["error"]);
+        var result = response["result"]!;
+        Assert.True(result["isError"]!.GetValue<bool>());
+        Assert.Contains("kaboom", result["structuredContent"]!["error"]!.GetValue<string>(), StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task ToolsList_OverJsonRpc_ReturnsAllTools()
     {
