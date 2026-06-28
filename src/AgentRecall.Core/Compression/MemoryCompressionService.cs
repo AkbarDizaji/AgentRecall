@@ -17,15 +17,18 @@ public sealed class MemoryCompressionService : IMemoryCompressionService
     private readonly IRecallRuleRepository _rules;
     private readonly IRecallEventRepository _events;
     private readonly ICanonicalRuleGenerator _generator;
+    private readonly ITransactionRunner _transactions;
 
     public MemoryCompressionService(
         IRecallRuleRepository rules,
         IRecallEventRepository events,
-        ICanonicalRuleGenerator generator)
+        ICanonicalRuleGenerator generator,
+        ITransactionRunner transactions)
     {
         _rules = rules ?? throw new ArgumentNullException(nameof(rules));
         _events = events ?? throw new ArgumentNullException(nameof(events));
         _generator = generator ?? throw new ArgumentNullException(nameof(generator));
+        _transactions = transactions ?? throw new ArgumentNullException(nameof(transactions));
     }
 
     public async Task<CompressionAnalysis> AnalyzeAsync(CompressionOptions options, CancellationToken cancellationToken = default)
@@ -65,57 +68,63 @@ public sealed class MemoryCompressionService : IMemoryCompressionService
 
         foreach (var cluster in clusters)
         {
-            var now = DateTimeOffset.UtcNow;
-            var canonicalContent = _generator.Generate(cluster.Rules);
-
-            var canonical = await _rules.AddAsync(new RecallRule
+            // Each cluster's canonical creation + supersede of every original + audit event
+            // is one atomic unit: a mid-operation failure must not leave a canonical rule
+            // without its sources superseded (or vice versa).
+            var group = await _transactions.RunAsync(async ct =>
             {
-                Version = 1,
-                Status = RuleStatus.Active,
-                Trigger = canonicalContent.Trigger,
-                Mistake = canonicalContent.Mistake,
-                RuleText = canonicalContent.RuleText,
-                TechnicalContext = canonicalContent.TechnicalContext,
-                Tags = canonicalContent.Tags,
-                Confidence = CanonicalConfidence(cluster.Rules),
-                ScopeLevel = cluster.Rules[0].ScopeLevel,
-                ScopeValue = cluster.Rules[0].ScopeValue,
-                SupersedesRuleId = cluster.Rules.OrderBy(r => r.Id).First().Id,
-                CreatedAt = now,
+                var canonicalContent = _generator.Generate(cluster.Rules);
+
+                var canonical = await _rules.AddAsync(new RecallRule
+                {
+                    Version = 1,
+                    Status = RuleStatus.Active,
+                    Trigger = canonicalContent.Trigger,
+                    Mistake = canonicalContent.Mistake,
+                    RuleText = canonicalContent.RuleText,
+                    TechnicalContext = canonicalContent.TechnicalContext,
+                    Tags = canonicalContent.Tags,
+                    Confidence = CanonicalConfidence(cluster.Rules),
+                    ScopeLevel = cluster.Rules[0].ScopeLevel,
+                    ScopeValue = cluster.Rules[0].ScopeValue,
+                    SupersedesRuleId = cluster.Rules.OrderBy(r => r.Id).First().Id,
+                }, ct).ConfigureAwait(false);
+
+                // Preserve each original: mark it superseded by — but never delete —
+                // the canonical rule. Its feedback events stay untouched. UpdatedAt is
+                // stamped by the repository's update hook.
+                foreach (var source in cluster.Rules)
+                {
+                    source.Status = RuleStatus.Superseded;
+                    source.SupersededById = canonical.Id;
+                }
+
+                await _rules.UpdateRangeAsync(cluster.Rules, ct).ConfigureAwait(false);
+
+                var sourceIds = string.Join(", ", cluster.Rules.Select(r => $"#{r.Id}"));
+                var auditEvent = await _events.AddAsync(new RecallEvent
+                {
+                    Type = RecallEventType.RulesCompressed,
+                    RuleId = canonical.Id,
+                    Trigger = "compress_memory",
+                    Details =
+                        $"Merged {cluster.Rules.Count} {cluster.Relationship} rule(s) [{sourceIds}] on \"{cluster.Subject}\" " +
+                        $"into canonical rule #{canonical.Id}: \"{canonical.RuleText}\". " +
+                        "Source rules and their feedback are preserved.",
+                }, ct).ConfigureAwait(false);
+
+                return new CompressedGroup
+                {
+                    Canonical = canonical,
+                    Sources = cluster.Rules,
+                    Relationship = cluster.Relationship,
+                    Subject = cluster.Subject,
+                    AuditEventId = auditEvent.Id,
+                };
             }, cancellationToken).ConfigureAwait(false);
 
-            // Preserve each original: mark it superseded by — but never delete —
-            // the canonical rule. Its feedback events stay untouched.
-            foreach (var source in cluster.Rules)
-            {
-                source.Status = RuleStatus.Superseded;
-                source.SupersededById = canonical.Id;
-                source.UpdatedAt = now;
-                await _rules.UpdateAsync(source, cancellationToken).ConfigureAwait(false);
-            }
-
+            groups.Add(group);
             mergedCount += cluster.Rules.Count;
-
-            var sourceIds = string.Join(", ", cluster.Rules.Select(r => $"#{r.Id}"));
-            var auditEvent = await _events.AddAsync(new RecallEvent
-            {
-                Type = RecallEventType.RulesCompressed,
-                RuleId = canonical.Id,
-                Trigger = "compress_memory",
-                Details =
-                    $"Merged {cluster.Rules.Count} {cluster.Relationship} rule(s) [{sourceIds}] on \"{cluster.Subject}\" " +
-                    $"into canonical rule #{canonical.Id}: \"{canonical.RuleText}\". " +
-                    "Source rules and their feedback are preserved.",
-            }, cancellationToken).ConfigureAwait(false);
-
-            groups.Add(new CompressedGroup
-            {
-                Canonical = canonical,
-                Sources = cluster.Rules,
-                Relationship = cluster.Relationship,
-                Subject = cluster.Subject,
-                AuditEventId = auditEvent.Id,
-            });
         }
 
         var stats = BuildStats(compressible.Count, groups.Count, mergedCount);

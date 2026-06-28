@@ -2,13 +2,65 @@ using System.Text.Json.Nodes;
 using AgentRecall.Core.Abstractions;
 using AgentRecall.Core.Compression;
 using AgentRecall.Core.Domain;
+using AgentRecall.Infrastructure.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace AgentRecall.Tests;
 
 public class CompressionTests
 {
+    // An event repository whose AddAsync always throws, to force a failure partway
+    // through a compression unit (after the canonical rule and supersedes are written).
+    private sealed class ThrowingEventRepository : IRecallEventRepository
+    {
+        public Task<RecallEvent> AddAsync(RecallEvent entity, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("simulated audit-event failure");
+
+        public Task<RecallEvent?> GetAsync(int id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<RecallEvent>> ListAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<RecallEvent> UpdateAsync(RecallEvent entity, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task AddRangeAsync(IReadOnlyCollection<RecallEvent> entities, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task UpdateRangeAsync(IReadOnlyCollection<RecallEvent> entities, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> DeleteAsync(int id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
+    [Fact]
+    public async Task Compress_RollsBackEntireCluster_WhenAStepFails()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+        await Seed(db, "Use parameterized SQL.", tags: "sql");
+        await Seed(db, "Avoid SQL interpolation.", tags: "security");
+        await Seed(db, "Don't concatenate SQL strings.", tags: "injection");
+
+        // A second provider over the same database whose event repo throws partway
+        // through the compression transaction.
+        var services = new ServiceCollection();
+        services.AddSingleton(db.Options);
+        services.AddLogging(b => b.SetMinimumLevel(LogLevel.Warning));
+        services.AddAgentRecallPersistence();
+        services.AddScoped<IRecallEventRepository, ThrowingEventRepository>();
+        await using var provider = services.BuildServiceProvider();
+
+        await using (var scope = provider.CreateAsyncScope())
+        {
+            var service = scope.ServiceProvider.GetRequiredService<IMemoryCompressionService>();
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.CompressAsync(CompressionOptions.Default));
+        }
+
+        // The transaction rolled back: no canonical rule was created and no original was
+        // superseded — the database is exactly as it was before.
+        await using (var scope = db.CreateScope())
+        {
+            var all = await scope.ServiceProvider.GetRequiredService<IRecallRuleRepository>().ListAsync();
+            Assert.Equal(3, all.Count);
+            Assert.All(all, r => Assert.Equal(RuleStatus.Active, r.Status));
+            Assert.DoesNotContain(all, r => r.SupersededById is not null);
+        }
+    }
+
     private static async Task Init(TestDatabase db)
     {
         await using var scope = db.CreateScope();

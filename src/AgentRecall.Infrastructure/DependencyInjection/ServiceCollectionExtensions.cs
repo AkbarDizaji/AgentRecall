@@ -46,6 +46,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ITurnFinalizationRepository, TurnFinalizationRepository>();
         services.AddScoped<IAgentRecallActivityRepository, AgentRecallActivityRepository>();
         services.AddScoped<IDatabaseInitializer, DatabaseInitializer>();
+        // Atomic multi-step writes over the scoped DbContext.
+        services.AddScoped<ITransactionRunner, EfTransactionRunner>();
 
         // Feedback capture and rule extraction.
         services.AddSingleton<IRecallRuleQualityValidator, RecallRuleQualityValidator>();
