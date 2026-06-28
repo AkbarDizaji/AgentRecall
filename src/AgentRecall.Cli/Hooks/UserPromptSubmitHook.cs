@@ -55,8 +55,10 @@ public static class UserPromptSubmitHook
             };
 
             await using var scope = services.CreateAsyncScope();
-            await scope.ServiceProvider.GetRequiredService<IDatabaseInitializer>()
-                .InitializeAsync(cancellationToken).ConfigureAwait(false);
+            // Initialize the database once per process; the reconciler is wasted work on
+            // every subsequent prompt. Usage recording itself is a single batched write.
+            await HookDatabaseGuard.EnsureInitializedAsync(scope.ServiceProvider, cancellationToken)
+                .ConfigureAwait(false);
 
             var context = scope.ServiceProvider.GetRequiredService<IContextInjectionService>();
             var result = await context.BuildContextAsync(request, cancellationToken).ConfigureAwait(false);
