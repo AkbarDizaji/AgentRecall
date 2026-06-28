@@ -185,9 +185,15 @@ public sealed class PolicyEngine : IPolicyEngine
             return "Deprecated and no longer applied.";
         }
 
+        // The in-force decision uses the shared effective set, so the policy engine,
+        // context injection, and search agree; the switch only supplies the message.
+        if (RuleStatusSets.Effective.Contains(rule.Status))
+        {
+            return null;
+        }
+
         return rule.Status switch
         {
-            RuleStatus.Active or RuleStatus.Promoted => null,
             RuleStatus.Superseded => "Superseded by a newer rule.",
             RuleStatus.Archived => "Archived.",
             RuleStatus.Retired => "Retired.",

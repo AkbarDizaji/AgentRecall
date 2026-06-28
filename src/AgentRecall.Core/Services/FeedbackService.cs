@@ -20,10 +20,9 @@ namespace AgentRecall.Core.Services;
 /// </summary>
 public sealed class FeedbackService : IFeedbackService
 {
-    // Statuses that should not be reused as a dedup target; a new rule is
-    // created instead so retired guidance is not silently revived.
-    private static readonly HashSet<RuleStatus> NotReusable =
-        [RuleStatus.Superseded, RuleStatus.Archived, RuleStatus.Retired];
+    // Statuses that should not be reused as a dedup target; a new rule is created instead
+    // so retired guidance is not silently revived. Shares the central dead-status set.
+    private static readonly IReadOnlyCollection<RuleStatus> NotReusable = RuleStatusSets.Inactive;
 
     /// <summary>Default confidence for a reusable engineering lesson.</summary>
     public const double EngineeringLessonConfidence = 0.7;

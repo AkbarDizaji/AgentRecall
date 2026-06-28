@@ -100,6 +100,38 @@ public class SearchTests
     }
 
     [Fact]
+    public async Task Search_IgnoresRetiredRules()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        var activeId = await Seed(db, Rule("concurrency", "Use a lock around shared state.", RuleStatus.Active));
+        await Seed(db, Rule("concurrency", "Use a lock around shared state.", RuleStatus.Retired));
+
+        var results = await Search(db, "concurrency lock");
+
+        // Retired rules are dead and must be excluded consistently with Superseded/Archived.
+        var result = Assert.Single(results);
+        Assert.Equal(activeId, result.Rule.Id);
+        Assert.DoesNotContain(results, r => r.Rule.Status == RuleStatus.Retired);
+    }
+
+    [Fact]
+    public async Task Search_StillSurfacesDraftAndPending()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        await Seed(db, Rule("null handling", "Guard against null references.", RuleStatus.Draft));
+        await Seed(db, Rule("null handling", "Guard against null references.", RuleStatus.Pending));
+
+        var results = await Search(db, "null references");
+
+        // Draft and Pending are in-progress, not dead, so they remain searchable.
+        Assert.Equal(2, results.Count);
+    }
+
+    [Fact]
     public async Task Search_RespectsScopeFilter()
     {
         await using var db = new TestDatabase();

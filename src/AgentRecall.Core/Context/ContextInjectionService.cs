@@ -80,7 +80,7 @@ public sealed class ContextInjectionService : IContextInjectionService
         var concepts = _concepts.Build(taskTokens.Concat(domainTokens));
 
         var all = await _rules.ListAsync(cancellationToken).ConfigureAwait(false);
-        var pool = all.Where(r => r.Status is RuleStatus.Active or RuleStatus.Promoted && !r.Deprecated).ToList();
+        var pool = all.Where(RuleStatusSets.IsEffective).ToList();
 
         // Score every rule; keep those clearing the relevance floor.
         var assessments = new Dictionary<int, Assessment>();

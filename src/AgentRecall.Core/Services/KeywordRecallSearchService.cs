@@ -28,8 +28,9 @@ public sealed class KeywordRecallSearchService : IRecallSearchService
         (r => r.TechnicalContext, 1.0),
     ];
 
-    // Statuses never surfaced by search.
-    private static readonly HashSet<RuleStatus> Excluded = [RuleStatus.Superseded, RuleStatus.Archived];
+    // Statuses never surfaced by search — the shared dead set (Superseded, Retired,
+    // Archived), so search agrees with dedup, the policy engine, and context injection.
+    private static readonly IReadOnlyCollection<RuleStatus> Excluded = RuleStatusSets.Inactive;
 
     // Composite-score weights.
     private const double RelevanceWeight = 1.0;

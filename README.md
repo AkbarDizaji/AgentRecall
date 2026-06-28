@@ -206,8 +206,13 @@ agentrecall rules supersede 1 2              # replace rule 1 with rule 2
 agentrecall rules archive 3                  # hide a rule from search
 ```
 
-A rule's lifecycle is `Pending → Active → Promoted`, plus `Superseded` and
-`Archived`. Superseded and archived rules never show up in search.
+A rule's lifecycle states (the `RuleStatus` enum) are `Draft`, `Pending`, `Active`,
+`Promoted`, `Superseded`, `Retired`, and `Archived`. The usual flow is
+`Pending → Active → Promoted`. `Active` and `Promoted` are the **in-force** states —
+the only ones the policy engine applies and context injection can mark must-follow.
+`Superseded`, `Retired`, and `Archived` are **dead**: they never show up in search and
+are never reused when deduplicating. `Draft` and `Pending` are still searchable but are
+not auto-applied until approved.
 
 Prefer to review before a rule counts? Capture it as pending with
 `agentrecall feedback add … --pending`, or make pending the default for every
