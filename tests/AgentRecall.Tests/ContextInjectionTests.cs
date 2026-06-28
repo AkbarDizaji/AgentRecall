@@ -44,6 +44,46 @@ public class ContextInjectionTests
         return await service.BuildContextAsync(request);
     }
 
+    // ---- Retrieval recording (batched writes) ---------------------------------
+
+    [Fact]
+    public async Task RecordUsage_BatchWritesEventsAndBumpsLastUsed()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        await Seed(db, "Always use parameterized SQL queries.", tags: "sql,security", confidence: 0.9);
+        await Seed(db, "Validate tenant scope before returning data.", tags: "security,tenant", confidence: 0.9);
+
+        ContextInjectionResult result;
+        await using (var scope = db.CreateScope())
+        {
+            var service = scope.ServiceProvider.GetRequiredService<IContextInjectionService>();
+            result = await service.BuildContextAsync(new ContextRequest
+            {
+                Task = "fix a SQL security issue with tenant validation",
+                RecordUsage = true,
+            });
+        }
+
+        Assert.NotEmpty(result.All);
+        Assert.NotNull(result.RetrievalId);
+
+        await using (var scope = db.CreateScope())
+        {
+            var events = await scope.ServiceProvider.GetRequiredService<IRecallEventRepository>().ListAsync();
+            var applied = events.Where(e => e.Type == RecallEventType.RuleApplied).ToList();
+            Assert.Equal(result.All.Count(), applied.Count);
+
+            // Every injected rule had its LastUsedAt stamped by the batched update.
+            var rules = await scope.ServiceProvider.GetRequiredService<IRecallRuleRepository>().ListAsync();
+            foreach (var injected in result.All)
+            {
+                Assert.NotNull(rules.Single(r => r.Id == injected.Rule.Id).LastUsedAt);
+            }
+        }
+    }
+
     // ---- Semantic similarity --------------------------------------------------
 
     [Fact]

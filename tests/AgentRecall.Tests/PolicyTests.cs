@@ -22,6 +22,12 @@ public class PolicyTests
         public Task<RecallRule> UpdateAsync(RecallRule entity, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
+        public Task AddRangeAsync(IReadOnlyCollection<RecallRule> entities, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task UpdateRangeAsync(IReadOnlyCollection<RecallRule> entities, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
         public Task<bool> DeleteAsync(int id, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
     }

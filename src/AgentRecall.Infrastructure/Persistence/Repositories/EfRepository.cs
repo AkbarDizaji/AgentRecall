@@ -42,6 +42,40 @@ public abstract class EfRepository<T> : IRepository<T> where T : class
         return entity;
     }
 
+    public virtual async Task AddRangeAsync(IReadOnlyCollection<T> entities, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        if (entities.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var entity in entities)
+        {
+            OnAdding(entity);
+        }
+
+        await Db.Set<T>().AddRangeAsync(entities, cancellationToken).ConfigureAwait(false);
+        await Db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public virtual async Task UpdateRangeAsync(IReadOnlyCollection<T> entities, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        if (entities.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var entity in entities)
+        {
+            OnUpdating(entity);
+        }
+
+        Db.Set<T>().UpdateRange(entities);
+        await Db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     public virtual async Task<bool> DeleteAsync(int id, CancellationToken cancellationToken = default)
     {
         var entity = await Db.Set<T>().FindAsync([id], cancellationToken).ConfigureAwait(false);

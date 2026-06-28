@@ -17,6 +17,19 @@ public interface IRepository<T> where T : class
     /// <summary>Persists changes to an existing entity and returns it.</summary>
     Task<T> UpdateAsync(T entity, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Adds many new entities in a single round-trip (one SaveChanges), avoiding the
+    /// N+1 write pattern of awaiting <see cref="AddAsync"/> in a loop.
+    /// </summary>
+    Task AddRangeAsync(IReadOnlyCollection<T> entities, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Persists changes to many existing entities in a single round-trip (one
+    /// SaveChanges), avoiding the N+1 write pattern of awaiting <see cref="UpdateAsync"/>
+    /// in a loop.
+    /// </summary>
+    Task UpdateRangeAsync(IReadOnlyCollection<T> entities, CancellationToken cancellationToken = default);
+
     /// <summary>Removes the entity with the given id. Returns true when a row was deleted.</summary>
     Task<bool> DeleteAsync(int id, CancellationToken cancellationToken = default);
 }

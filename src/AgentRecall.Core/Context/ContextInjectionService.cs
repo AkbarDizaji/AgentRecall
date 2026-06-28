@@ -230,19 +230,25 @@ public sealed class ContextInjectionService : IContextInjectionService
             return null;
         }
 
-        foreach (var rule in retrieved)
-        {
-            await _events.AddAsync(new RecallEvent
+        // Batch the writes: one insert for all RuleApplied events and one update for all
+        // LastUsedAt bumps, instead of an await-per-rule N+1 in this hot retrieval path.
+        var events = retrieved
+            .Select(rule => new RecallEvent
             {
                 Type = RecallEventType.RuleApplied,
                 RuleId = rule.Id,
                 Trigger = "retrieval",
                 Details = $"Rule #{rule.Id} retrieved for context injection.",
-            }, cancellationToken).ConfigureAwait(false);
+            })
+            .ToList();
+        await _events.AddRangeAsync(events, cancellationToken).ConfigureAwait(false);
 
+        foreach (var rule in retrieved)
+        {
             rule.LastUsedAt = now;
-            await _rules.UpdateAsync(rule, cancellationToken).ConfigureAwait(false);
         }
+
+        await _rules.UpdateRangeAsync(retrieved, cancellationToken).ConfigureAwait(false);
 
         var retrievalId = Guid.NewGuid().ToString("N")[..12];
         await _retrievals.AddAsync(new RetrievalRecord
