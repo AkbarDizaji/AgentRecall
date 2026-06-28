@@ -1,3 +1,4 @@
+using AgentRecall.Cli.Commands;
 using AgentRecall.Core;
 using AgentRecall.Core.Abstractions;
 using AgentRecall.Core.Activity;
@@ -21,7 +22,7 @@ namespace AgentRecall.Cli;
 /// Parses command-line arguments and dispatches to the matching command.
 /// Returns the process exit code.
 /// </summary>
-public static class CommandRouter
+public static partial class CommandRouter
 {
     public static async Task<int> RunAsync(
         string[] args,
@@ -35,89 +36,75 @@ public static class CommandRouter
         var command = args.Length == 0 ? "help" : args[0];
         var rest = args.Length > 1 ? args[1..] : [];
 
-        switch (command)
+        // Thin dispatch: the first argument selects a command handler from the table.
+        if (Dispatch.TryGetValue(command, out var handler))
         {
-            case "--version":
-            case "-v":
-            case "version":
-                output.WriteLine($"{AppInfo.Name} {AppInfo.Version}");
-                return 0;
-
-            case "help":
-            case "--help":
-            case "-h":
-                WriteHelp(output);
-                return 0;
-
-            case "init":
-                return await InitAsync(services, output, logger, cancellationToken).ConfigureAwait(false);
-
-            case "devcontainer":
-                return DevcontainerInit(rest, output);
-
-            case "setup":
-                return SetupPath(output);
-
-            case "feedback":
-                return await FeedbackAsync(rest, services, output, logger, cancellationToken).ConfigureAwait(false);
-
-            case "rules":
-                return await RulesAsync(rest, services, output, logger, cancellationToken).ConfigureAwait(false);
-
-            case "search":
-                return await SearchAsync(rest, services, output, logger, cancellationToken).ConfigureAwait(false);
-
-            case "inject-context":
-                return await InjectContextAsync(rest, services, output, cancellationToken).ConfigureAwait(false);
-
-            case "import":
-                return await ImportAsync(rest, services, output, logger, cancellationToken).ConfigureAwait(false);
-
-            case "eval":
-                return await EvalAsync(rest, output, cancellationToken).ConfigureAwait(false);
-
-            case "report":
-                return await ReportAsync(rest, services, output, cancellationToken).ConfigureAwait(false);
-
-            case "dna":
-                return await DnaAsync(rest, services, output, cancellationToken).ConfigureAwait(false);
-
-            case "outcome":
-                return await OutcomeAsync(rest, services, output, cancellationToken).ConfigureAwait(false);
-
-            case "lessons":
-                return await LessonsAsync(rest, services, output, cancellationToken).ConfigureAwait(false);
-
-            case "lifecycle":
-                return await LifecycleAsync(rest, services, output, cancellationToken).ConfigureAwait(false);
-
-            case "hook":
-                return await HookAsync(rest, services, output, cancellationToken).ConfigureAwait(false);
-
-            case "finalize-turn":
-            case "capture-status":
-                return await FinalizeTurnAsync(command, rest, services, output, cancellationToken).ConfigureAwait(false);
-
-            case "activity":
-                return await ActivityAsync(rest, services, output, cancellationToken).ConfigureAwait(false);
-
-            case "mcp":
-                var server = new Mcp.McpServer(services);
-                await server.RunAsync(Console.In, output, cancellationToken).ConfigureAwait(false);
-                return 0;
-
-            case "status":
-                var memory = services.GetRequiredService<IMemoryService>();
-                logger.LogDebug("Resolved memory service.");
-                output.WriteLine(memory.Status());
-                return 0;
-
-            default:
-                output.WriteLine($"Unknown command: {command}");
-                output.WriteLine();
-                WriteHelp(output);
-                return 1;
+            return await handler.ExecuteAsync(rest, services, output, logger, cancellationToken).ConfigureAwait(false);
         }
+
+        output.WriteLine($"Unknown command: {command}");
+        output.WriteLine();
+        WriteHelp(output);
+        return 1;
+    }
+
+    /// <summary>
+    /// The command table: maps each command name (and its aliases) to an
+    /// <see cref="ICommand"/>. Built once; the handlers are static and capture no state.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, ICommand> Dispatch = BuildDispatch();
+
+    private static Dictionary<string, ICommand> BuildDispatch()
+    {
+        var version = new DelegateCommand((_, _, o, _, _) =>
+        {
+            o.WriteLine($"{AppInfo.Name} {AppInfo.Version}");
+            return Task.FromResult(0);
+        });
+        var help = new DelegateCommand((_, _, o, _, _) =>
+        {
+            WriteHelp(o);
+            return Task.FromResult(0);
+        });
+
+        return new Dictionary<string, ICommand>(StringComparer.Ordinal)
+        {
+            ["--version"] = version,
+            ["-v"] = version,
+            ["version"] = version,
+            ["help"] = help,
+            ["--help"] = help,
+            ["-h"] = help,
+            ["init"] = new DelegateCommand((_, s, o, l, ct) => InitAsync(s, o, l, ct)),
+            ["devcontainer"] = new DelegateCommand((a, _, o, _, _) => Task.FromResult(DevcontainerInit(a, o))),
+            ["setup"] = new DelegateCommand((_, _, o, _, _) => Task.FromResult(SetupPath(o))),
+            ["feedback"] = new DelegateCommand((a, s, o, l, ct) => FeedbackAsync(a, s, o, l, ct)),
+            ["rules"] = new DelegateCommand((a, s, o, l, ct) => RulesAsync(a, s, o, l, ct)),
+            ["search"] = new DelegateCommand((a, s, o, l, ct) => SearchAsync(a, s, o, l, ct)),
+            ["inject-context"] = new DelegateCommand((a, s, o, _, ct) => InjectContextAsync(a, s, o, ct)),
+            ["import"] = new DelegateCommand((a, s, o, l, ct) => ImportAsync(a, s, o, l, ct)),
+            ["eval"] = new DelegateCommand((a, _, o, _, ct) => EvalAsync(a, o, ct)),
+            ["report"] = new DelegateCommand((a, s, o, _, ct) => ReportAsync(a, s, o, ct)),
+            ["dna"] = new DelegateCommand((a, s, o, _, ct) => DnaAsync(a, s, o, ct)),
+            ["outcome"] = new DelegateCommand((a, s, o, _, ct) => OutcomeAsync(a, s, o, ct)),
+            ["lessons"] = new DelegateCommand((a, s, o, _, ct) => LessonsAsync(a, s, o, ct)),
+            ["lifecycle"] = new DelegateCommand((a, s, o, _, ct) => LifecycleAsync(a, s, o, ct)),
+            ["hook"] = new DelegateCommand((a, s, o, _, ct) => HookAsync(a, s, o, ct)),
+            ["finalize-turn"] = new DelegateCommand((a, s, o, _, ct) => FinalizeTurnAsync("finalize-turn", a, s, o, ct)),
+            ["capture-status"] = new DelegateCommand((a, s, o, _, ct) => FinalizeTurnAsync("capture-status", a, s, o, ct)),
+            ["activity"] = new DelegateCommand((a, s, o, _, ct) => ActivityAsync(a, s, o, ct)),
+            ["mcp"] = new DelegateCommand(async (_, s, o, _, ct) =>
+            {
+                var server = new Mcp.McpServer(s);
+                await server.RunAsync(Console.In, o, ct).ConfigureAwait(false);
+                return 0;
+            }),
+            ["status"] = new DelegateCommand((_, s, o, _, _) =>
+            {
+                o.WriteLine(s.GetRequiredService<IMemoryService>().Status());
+                return Task.FromResult(0);
+            }),
+        };
     }
 
     private static async Task<int> InitAsync(
@@ -1671,219 +1658,6 @@ public static class CommandRouter
             duplicates = (result?.Duplicates ?? []).ToArray(),
             errors = (result?.Errors ?? []).ToArray(),
         };
-
-    /// <summary>
-    /// Shows the human-visible activity log: what AgentRecall recently fetched,
-    /// captured, skipped, resolved, mined, or recommended. Reads only — it never
-    /// records its own activity, so querying the log can never spam it.
-    /// </summary>
-    private static async Task<int> ActivityAsync(
-        string[] args,
-        IServiceProvider services,
-        TextWriter output,
-        CancellationToken cancellationToken)
-    {
-        var sub = args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal) ? args[0] : "last";
-        var options = ParseOptions(args);
-        var json = options.ContainsKey("json");
-
-        if (sub is not ("last" or "list"))
-        {
-            output.WriteLine("Usage:");
-            output.WriteLine("  agentrecall activity last [--json]");
-            output.WriteLine("  agentrecall activity list [--limit <n>] [--json]");
-            return 1;
-        }
-
-        await using var scope = services.CreateAsyncScope();
-        await EnsureInitializedAsync(scope, cancellationToken).ConfigureAwait(false);
-        var recorder = scope.ServiceProvider.GetRequiredService<IActivityRecorder>();
-
-        if (sub == "last")
-        {
-            var last = await recorder.GetLastAsync(cancellationToken).ConfigureAwait(false);
-            if (json)
-            {
-                WriteJson(output, last is null ? null : ActivityJson(last));
-                return 0;
-            }
-
-            if (last is null)
-            {
-                output.WriteLine($"{ActivityNoticeRenderer.Badge} no activity recorded yet.");
-                return 0;
-            }
-
-            // The explicit `activity` query always shows full detail, independent of the
-            // configured notice level (that level governs automatic notices, not lookups).
-            output.WriteLine(ActivityNoticeRenderer.Render(ActivityNotice.FromEntity(last), NoticeLevel.Verbose));
-            return 0;
-        }
-
-        var limit = 10;
-        if (options.TryGetValue("limit", out var rawLimit))
-        {
-            if (!int.TryParse(rawLimit, out limit) || limit <= 0)
-            {
-                output.WriteLine($"Invalid --limit '{rawLimit}'. Expected a positive integer.");
-                return 1;
-            }
-        }
-
-        var recent = await recorder.ListAsync(limit, cancellationToken).ConfigureAwait(false);
-        if (json)
-        {
-            WriteJson(output, recent.Select(ActivityJson).ToList());
-            return 0;
-        }
-
-        if (recent.Count == 0)
-        {
-            output.WriteLine($"{ActivityNoticeRenderer.Badge} no activity recorded yet.");
-            return 0;
-        }
-
-        // Newest first, one compact line each.
-        foreach (var activity in recent)
-        {
-            output.WriteLine(ActivityNoticeRenderer.Render(ActivityNotice.FromEntity(activity), NoticeLevel.Normal));
-        }
-
-        return 0;
-    }
-
-    /// <summary>
-    /// Projects an activity to its JSON shape. Fields are plain (no Markdown); the only
-    /// styled value is <c>rendered_notice</c>, a compact one-line render.
-    /// </summary>
-    private static object ActivityJson(AgentRecall.Core.Domain.AgentRecallActivity activity) => new
-    {
-        id = activity.Id,
-        timestamp = activity.CreatedAt.ToString("O"),
-        type = activity.ActivityType.ToString(),
-        summary = activity.Summary,
-        details = string.IsNullOrEmpty(activity.Details)
-            ? Array.Empty<string>()
-            : activity.Details.Split('\n', StringSplitOptions.RemoveEmptyEntries),
-        ruleIds = ParseIdList(activity.RuleIds),
-        candidateIds = ParseIdList(activity.CandidateIds),
-        recommendationIds = ParseIdList(activity.RecommendationIds),
-        source = activity.Source,
-        noticeLevel = activity.NoticeLevel.ToString(),
-        operationHash = activity.OperationHash,
-        renderedNotice = ActivityNoticeRenderer.RenderCompact(ActivityNotice.FromEntity(activity), NoticeLevel.Normal),
-    };
-
-    private static int[] ParseIdList(string? value) =>
-        string.IsNullOrEmpty(value)
-            ? []
-            : value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Select(s => int.TryParse(s, out var n) ? n : (int?)null)
-                .Where(n => n is not null)
-                .Select(n => n!.Value)
-                .ToArray();
-
-    private static async Task<int> EvalAsync(string[] args, TextWriter output, CancellationToken cancellationToken)
-    {
-        if (args.Length == 0 || args[0] != "retrieval")
-        {
-            output.WriteLine("Usage: agentrecall eval retrieval [--dataset <path>]");
-            return 1;
-        }
-
-        var options = ParseOptions(args);
-
-        EvaluationDataset dataset;
-        try
-        {
-            dataset = options.TryGetValue("dataset", out var path) && !string.IsNullOrWhiteSpace(path)
-                ? EvaluationDatasetLoader.LoadFile(path)
-                : EvaluationDatasetLoader.LoadDefault();
-        }
-        catch (Exception ex) when (ex is IOException or System.Text.Json.JsonException or InvalidOperationException)
-        {
-            output.WriteLine($"Failed to load evaluation dataset: {ex.Message}");
-            return 1;
-        }
-
-        // Evaluate against an isolated, throwaway store so the user's real DB is
-        // never touched or polluted.
-        var tempDirectory = Path.Combine(Path.GetTempPath(), "agentrecall-eval", Guid.NewGuid().ToString("N"));
-        var evalOptions = new AgentRecallOptions { DataDirectory = tempDirectory, DatabaseFileName = "eval.db" };
-
-        var collection = new ServiceCollection();
-        collection.AddSingleton(evalOptions);
-        collection.AddLogging(b => b.SetMinimumLevel(LogLevel.Warning));
-        collection.AddAgentRecallPersistence();
-
-        await using var provider = collection.BuildServiceProvider();
-        try
-        {
-            RetrievalEvaluationReport report;
-            await using (var scope = provider.CreateAsyncScope())
-            {
-                await scope.ServiceProvider.GetRequiredService<IDatabaseInitializer>().InitializeAsync(cancellationToken).ConfigureAwait(false);
-                var rules = scope.ServiceProvider.GetRequiredService<IRecallRuleRepository>();
-                var search = scope.ServiceProvider.GetRequiredService<IRecallSearchService>();
-                report = await RetrievalEvaluationHarness.RunAsync(dataset, rules, search, cancellationToken).ConfigureAwait(false);
-            }
-
-            WriteEvaluationReport(output, report);
-            return report.Passed ? 0 : 1;
-        }
-        finally
-        {
-            try
-            {
-                if (Directory.Exists(tempDirectory))
-                {
-                    Directory.Delete(tempDirectory, recursive: true);
-                }
-            }
-            catch (IOException)
-            {
-                // Best-effort cleanup of the throwaway store.
-            }
-        }
-    }
-
-    private static void WriteEvaluationReport(TextWriter output, RetrievalEvaluationReport report)
-    {
-        var m = report.Metrics;
-        var b = report.Baseline;
-
-        output.WriteLine($"Retrieval evaluation over {m.ScenarioCount} scenario(s):");
-        output.WriteLine($"  Precision@1: {m.PrecisionAt1:0.000}  (baseline {b.PrecisionAt1:0.000})");
-        output.WriteLine($"  Precision@3: {m.PrecisionAt3:0.000}  (baseline {b.PrecisionAt3:0.000})");
-        output.WriteLine($"  Recall@5:    {m.RecallAt5:0.000}  (baseline {b.RecallAt5:0.000})");
-
-        // Surface scenarios where the expected rule wasn't retrieved in the top 5.
-        var misses = report.Scenarios.Where(s => s.RecallAt5 < 1.0).ToList();
-        if (misses.Count > 0)
-        {
-            output.WriteLine();
-            output.WriteLine($"Misses ({misses.Count}):");
-            foreach (var miss in misses)
-            {
-                var ranked = miss.RankedTopK.Count > 0 ? string.Join(", ", miss.RankedTopK) : "(none)";
-                output.WriteLine($"  \"{miss.Query}\" expected [{string.Join(", ", miss.Expected)}] but got [{ranked}]");
-            }
-        }
-
-        output.WriteLine();
-        if (report.Passed)
-        {
-            output.WriteLine("PASS: retrieval quality meets the baseline.");
-        }
-        else
-        {
-            output.WriteLine("FAIL: retrieval quality dropped below the baseline.");
-            foreach (var failure in report.Failures)
-            {
-                output.WriteLine($"  - {failure}");
-            }
-        }
-    }
 
     private static readonly System.Text.Json.JsonSerializerOptions ReportJsonOptions = new()
     {
