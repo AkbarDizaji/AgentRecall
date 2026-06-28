@@ -34,7 +34,13 @@ public sealed class RecallRule
     /// <summary>Relevant technical context (frameworks, versions, constraints).</summary>
     public string TechnicalContext { get; set; } = string.Empty;
 
-    /// <summary>Free-form tags. Stored as a comma-separated string.</summary>
+    /// <summary>
+    /// Free-form tags, stored as a single comma-separated string rather than a normalized
+    /// child table. This keeps the schema simple, but means tag matching is not done in the
+    /// database: search tokenizes this field in memory and there is no indexed tag lookup or
+    /// SQL-level tag filter. Acceptable for the local-first, single-user corpus sizes
+    /// AgentRecall targets; revisit with a join table if tag-based querying needs to scale.
+    /// </summary>
     public string Tags { get; set; } = string.Empty;
 
     /// <summary>Confidence in the rule, 0.0–1.0.</summary>

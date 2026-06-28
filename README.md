@@ -194,6 +194,11 @@ embeddings are computed and no external service is contacted** by default. Until
 provider is configured, semantic similarity contributes nothing to the score — ranking
 stays keyword + concept based and fully local and deterministic.
 
+> **Tags are a comma-separated string, not a normalized table.** Tag matching therefore
+> happens in memory (search tokenizes the field), with no indexed/SQL-level tag filter.
+> This is fine for the local-first, single-user corpus sizes AgentRecall targets; a tag
+> join table would be the change to make if tag querying ever needs to scale.
+
 ### Curate rules
 
 Captured rules are **Active** by default, so they apply immediately. Promote the
