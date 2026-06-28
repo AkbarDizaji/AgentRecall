@@ -59,6 +59,7 @@ public sealed class FeedbackService : IFeedbackService
     public async Task<FeedbackResult> AddAsync(FeedbackInput input, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(input);
+        ValidateInput(input);
 
         // Screen the candidate against the "lessons, not facts" policy. A low-value
         // code fact is not a reusable lesson; a code fact that hints at a reusable
@@ -183,6 +184,33 @@ public sealed class FeedbackService : IFeedbackService
             CaptureReason = captureReason,
             EvidenceSummary = evidenceSummary,
         };
+    }
+
+    /// <summary>
+    /// Validates the feedback intake: feedback text is required (non-empty after trim), and
+    /// both feedback and task stay within sane length caps. The task may be empty (some
+    /// callers, e.g. the MCP capture tool, supply only feedback).
+    /// </summary>
+    private void ValidateInput(FeedbackInput input)
+    {
+        if (string.IsNullOrWhiteSpace(input.Feedback))
+        {
+            throw new ArgumentException("Feedback text is required and cannot be empty.", nameof(input));
+        }
+
+        if (input.Feedback.Length > _options.FeedbackMaxLength)
+        {
+            throw new ArgumentException(
+                $"Feedback is {input.Feedback.Length} characters, which exceeds the maximum of {_options.FeedbackMaxLength}.",
+                nameof(input));
+        }
+
+        if ((input.Task?.Length ?? 0) > _options.FeedbackMaxTaskLength)
+        {
+            throw new ArgumentException(
+                $"Task is {input.Task!.Length} characters, which exceeds the maximum of {_options.FeedbackMaxTaskLength}.",
+                nameof(input));
+        }
     }
 
     /// <summary>

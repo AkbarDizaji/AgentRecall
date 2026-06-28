@@ -78,6 +78,12 @@ public sealed class AgentRecallOptions
     /// </summary>
     public bool MemoryWorthinessEnabled { get; set; } = true;
 
+    /// <summary>Maximum characters allowed in feedback text; longer input is rejected. Defaults to 20000.</summary>
+    public int FeedbackMaxLength { get; set; } = 20_000;
+
+    /// <summary>Maximum characters allowed in the feedback task/context; longer input is rejected. Defaults to 2000.</summary>
+    public int FeedbackMaxTaskLength { get; set; } = 2_000;
+
     /// <summary>
     /// When true, a rejected (NotWorthStoring) candidate still records a
     /// <see cref="Domain.RecallEvent"/> for audit, even though no rule is created.

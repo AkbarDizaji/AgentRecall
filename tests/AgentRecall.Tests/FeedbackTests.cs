@@ -107,6 +107,51 @@ public class FeedbackTests
         Assert.Equal(RuleStatus.Pending, result.Rule.Status);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("\t\n")]
+    public async Task AddFeedback_EmptyAfterTrim_IsRejected(string feedback)
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        await using var scope = db.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IFeedbackService>();
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
+            service.AddAsync(new FeedbackInput { Task = "t", Feedback = feedback }));
+        Assert.Contains("required", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task AddFeedback_OverMaxLength_IsRejected()
+    {
+        await using var db = new TestDatabase(o => o.FeedbackMaxLength = 50);
+        await Init(db);
+
+        await using var scope = db.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IFeedbackService>();
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
+            service.AddAsync(new FeedbackInput { Task = "t", Feedback = new string('x', 51) }));
+        Assert.Contains("exceeds the maximum", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task AddFeedback_OverMaxTaskLength_IsRejected()
+    {
+        await using var db = new TestDatabase(o => o.FeedbackMaxTaskLength = 10);
+        await Init(db);
+
+        await using var scope = db.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IFeedbackService>();
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
+            service.AddAsync(new FeedbackInput { Task = new string('t', 11), Feedback = "use parameterized queries" }));
+        Assert.Contains("Task", ex.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task AddFeedback_WithoutBadOutput_LeavesMistakeEmpty()
     {
