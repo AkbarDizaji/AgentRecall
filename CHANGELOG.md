@@ -4,6 +4,48 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Performance
+- Context retrieval no longer does an N+1 write: `RecordRetrievalAsync` batches all
+  RuleApplied events and LastUsedAt bumps into bulk writes (new `AddRangeAsync` /
+  `UpdateRangeAsync` on the repository). The UserPromptSubmit hook initializes the database
+  once per process instead of re-running the schema reconciler on every prompt. Feedback
+  deduplication and keyword search now filter by scope and status in the database (new
+  `IRecallRuleRepository.QueryAsync`) rather than loading the full rule table into memory.
+
+### Changed
+- **Rule status taxonomy is now consistent.** `Superseded`, `Retired`, and `Archived` are
+  the dead set, excluded from search (previously `Retired` rules still appeared),
+  deduplication, the policy engine, and context injection via a shared `RuleStatusSets`.
+  `Draft` and `Pending` remain searchable. The README lifecycle description now lists every
+  `RuleStatus`.
+- Search ranking is documented as keyword + concept based; the only embedding provider is a
+  no-op, so no embeddings are computed and no external service is contacted by default.
+- `agentrecall rules list` accepts `--status <status>` to filter by lifecycle state.
+
+### Added
+- Feedback intake validation: empty-after-trim feedback is rejected with a clear error, and
+  feedback/task text is capped (`AgentRecall.FeedbackMaxLength`, `FeedbackMaxTaskLength`).
+- Log import is streamed line-by-line with a size cap (`AgentRecall.LogImportMaxBytes`) and a
+  per-line length cap (`AgentRecall.LogImportMaxLineLength`) instead of reading the whole
+  file into memory.
+- Repository layer gained `DeleteAsync` and an `OnUpdating` hook that stamps `UpdatedAt`
+  consistently, plus an `ITransactionRunner` so memory compression runs atomically.
+
+### Fixed
+- An MCP tool that throws now returns a tool-level error (`isError: true`) instead of
+  corrupting the JSON-RPC stream with an internal error; the exception is logged to stderr.
+- Compiled regexes carry a match timeout, and the search tokenizer dedupes with a HashSet.
+
+### Internal
+- `CommandRouter` is now a thin `ICommand` dispatch table rather than a large switch, with
+  command groups moving into their own files. The duplicate `Policy.RuleConflictDetector`
+  was renamed `PolarityConflictHeuristic` to disambiguate it from the authoritative
+  `Conflicts.RuleConflictDetector`. Tags remain a comma-separated string (documented
+  limitation), and the install scripts check for `dotnet` and resolve the tools directory
+  rather than hardcoding it.
+
 ## [0.12.0] - 2026-06-28
 
 ### Added
