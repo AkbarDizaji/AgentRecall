@@ -16,4 +16,7 @@ public interface IRepository<T> where T : class
 
     /// <summary>Persists changes to an existing entity and returns it.</summary>
     Task<T> UpdateAsync(T entity, CancellationToken cancellationToken = default);
+
+    /// <summary>Removes the entity with the given id. Returns true when a row was deleted.</summary>
+    Task<bool> DeleteAsync(int id, CancellationToken cancellationToken = default);
 }

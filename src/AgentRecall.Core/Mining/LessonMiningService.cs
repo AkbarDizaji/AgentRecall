@@ -136,7 +136,6 @@ public sealed class LessonMiningService : ILessonMiningService
                 current.FirstSeenAt = signals.Min(s => s.At);
                 current.LastSeenAt = signals.Max(s => s.At);
                 current.SupportingEventIds = string.Join(",", supporting);
-                current.UpdatedAt = DateTimeOffset.UtcNow;
                 touched.Add(await _candidates.UpdateAsync(current, cancellationToken).ConfigureAwait(false));
                 updated++;
             }
@@ -197,7 +196,6 @@ public sealed class LessonMiningService : ILessonMiningService
             await _rules.AddAsync(rule, cancellationToken).ConfigureAwait(false);
 
             candidate.Status = LessonCandidateStatus.Accepted;
-            candidate.UpdatedAt = DateTimeOffset.UtcNow;
             await _candidates.UpdateAsync(candidate, cancellationToken).ConfigureAwait(false);
         }
 
@@ -214,7 +212,6 @@ public sealed class LessonMiningService : ILessonMiningService
 
         candidate.Status = LessonCandidateStatus.Rejected;
         candidate.RejectedReason = string.IsNullOrWhiteSpace(reason) ? "Rejected." : reason.Trim();
-        candidate.UpdatedAt = DateTimeOffset.UtcNow;
         await _candidates.UpdateAsync(candidate, cancellationToken).ConfigureAwait(false);
         return candidate;
     }

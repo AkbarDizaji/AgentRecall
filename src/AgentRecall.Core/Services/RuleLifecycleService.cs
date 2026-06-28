@@ -35,7 +35,6 @@ public sealed class RuleLifecycleService : IRuleLifecycleService
         }
 
         rule.Status = RuleStatus.Active;
-        rule.UpdatedAt = DateTimeOffset.UtcNow;
         return await _rules.UpdateAsync(rule, cancellationToken).ConfigureAwait(false);
     }
 
@@ -49,7 +48,6 @@ public sealed class RuleLifecycleService : IRuleLifecycleService
         }
 
         rule.Status = RuleStatus.Promoted;
-        rule.UpdatedAt = DateTimeOffset.UtcNow;
         var promoted = await _rules.UpdateAsync(rule, cancellationToken).ConfigureAwait(false);
         await RecordPromotionAsync(promoted.Id, "promote", cancellationToken).ConfigureAwait(false);
         return promoted;
@@ -65,15 +63,11 @@ public sealed class RuleLifecycleService : IRuleLifecycleService
         var old = await GetOrThrowAsync(oldId, cancellationToken).ConfigureAwait(false);
         var replacement = await GetOrThrowAsync(newId, cancellationToken).ConfigureAwait(false);
 
-        var now = DateTimeOffset.UtcNow;
-
         old.Status = RuleStatus.Superseded;
         old.SupersededById = newId;
-        old.UpdatedAt = now;
 
         // The replacement is a newer version of the same guidance.
         replacement.Version = Math.Max(replacement.Version, old.Version + 1);
-        replacement.UpdatedAt = now;
 
         await _rules.UpdateAsync(old, cancellationToken).ConfigureAwait(false);
         await _rules.UpdateAsync(replacement, cancellationToken).ConfigureAwait(false);
@@ -94,7 +88,6 @@ public sealed class RuleLifecycleService : IRuleLifecycleService
         var rule = await GetOrThrowAsync(id, cancellationToken).ConfigureAwait(false);
 
         rule.Status = RuleStatus.Archived;
-        rule.UpdatedAt = DateTimeOffset.UtcNow;
         var archived = await _rules.UpdateAsync(rule, cancellationToken).ConfigureAwait(false);
 
         await _events.AddAsync(new RecallEvent
@@ -114,7 +107,6 @@ public sealed class RuleLifecycleService : IRuleLifecycleService
 
         // Round to avoid floating-point drift accumulating across reinforcements.
         rule.Confidence = Math.Round(Math.Min(1.0, rule.Confidence + amount), 2);
-        rule.UpdatedAt = DateTimeOffset.UtcNow;
 
         // Automatically promote a sufficiently-confident rule that is still in an
         // earlier state.

@@ -36,13 +36,36 @@ public abstract class EfRepository<T> : IRepository<T> where T : class
     {
         ArgumentNullException.ThrowIfNull(entity);
 
+        OnUpdating(entity);
         Db.Set<T>().Update(entity);
         await Db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         return entity;
     }
 
+    public virtual async Task<bool> DeleteAsync(int id, CancellationToken cancellationToken = default)
+    {
+        var entity = await Db.Set<T>().FindAsync([id], cancellationToken).ConfigureAwait(false);
+        if (entity is null)
+        {
+            return false;
+        }
+
+        Db.Set<T>().Remove(entity);
+        await Db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        return true;
+    }
+
     /// <summary>Hook invoked before an entity is added; default is a no-op.</summary>
     protected virtual void OnAdding(T entity)
+    {
+    }
+
+    /// <summary>
+    /// Hook invoked before an existing entity is persisted; default is a no-op.
+    /// Repositories whose entity carries an <c>UpdatedAt</c> override this to stamp it,
+    /// so timestamping is consistent across every update rather than set ad-hoc in services.
+    /// </summary>
+    protected virtual void OnUpdating(T entity)
     {
     }
 }

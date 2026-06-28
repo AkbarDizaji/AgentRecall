@@ -19,4 +19,7 @@ public sealed class LessonCandidateRepository : EfRepository<LessonCandidate>, I
 
         entity.UpdatedAt = now;
     }
+
+    protected override void OnUpdating(LessonCandidate entity) =>
+        entity.UpdatedAt = DateTimeOffset.UtcNow;
 }

@@ -99,6 +99,47 @@ public class PersistenceTests
         Assert.Single(await scopes.ListAsync());
     }
 
+    [Fact]
+    public async Task UpdateAsync_StampsUpdatedAt_WithoutCallerSettingIt()
+    {
+        await using var db = new TestDatabase();
+        await InitializeAsync(db);
+
+        await using var scope = db.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IRecallRuleRepository>();
+
+        var added = await repo.AddAsync(new RecallRule
+        {
+            Trigger = "t", RuleText = "r", Status = RuleStatus.Pending, Confidence = 0.5,
+        });
+        var firstStamp = added.UpdatedAt;
+
+        // Mutate without touching UpdatedAt; the OnUpdating hook must stamp it.
+        await Task.Delay(5);
+        added.Status = RuleStatus.Active;
+        var updated = await repo.UpdateAsync(added);
+
+        Assert.True(updated.UpdatedAt > firstStamp, "Expected the OnUpdating hook to stamp UpdatedAt.");
+    }
+
+    [Fact]
+    public async Task DeleteAsync_RemovesEntity_AndReportsMissing()
+    {
+        await using var db = new TestDatabase();
+        await InitializeAsync(db);
+
+        await using var scope = db.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IRecallRuleRepository>();
+
+        var added = await repo.AddAsync(new RecallRule { Trigger = "t", RuleText = "r", Status = RuleStatus.Active });
+
+        Assert.True(await repo.DeleteAsync(added.Id));
+        Assert.Null(await repo.GetAsync(added.Id));
+        Assert.Empty(await repo.ListAsync());
+        // Deleting a missing row is a no-op that reports false rather than throwing.
+        Assert.False(await repo.DeleteAsync(added.Id));
+    }
+
     private static async Task InitializeAsync(TestDatabase db)
     {
         await using var scope = db.CreateScope();

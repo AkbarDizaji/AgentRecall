@@ -21,6 +21,9 @@ public class PolicyTests
 
         public Task<RecallRule> UpdateAsync(RecallRule entity, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+
+        public Task<bool> DeleteAsync(int id, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 
     // A fixed clock so CreatedAt ordering in tests is explicit, not wall-clock.

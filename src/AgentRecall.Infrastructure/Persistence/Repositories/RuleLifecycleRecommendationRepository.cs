@@ -20,4 +20,7 @@ public sealed class RuleLifecycleRecommendationRepository
 
         entity.UpdatedAt = now;
     }
+
+    protected override void OnUpdating(RuleLifecycleRecommendation entity) =>
+        entity.UpdatedAt = DateTimeOffset.UtcNow;
 }

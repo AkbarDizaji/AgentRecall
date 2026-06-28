@@ -24,4 +24,7 @@ public sealed class RecallRuleRepository : EfRepository<RecallRule>, IRecallRule
             entity.Version = 1;
         }
     }
+
+    protected override void OnUpdating(RecallRule entity) =>
+        entity.UpdatedAt = DateTimeOffset.UtcNow;
 }
