@@ -4,6 +4,33 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-06-28
+
+### Added
+- **Interactive Memory** turns an uncertain capture into a visible, lightweight choice.
+  It surfaces the existing capture decision (`AutoCapture` / `SuggestCapture` / `Skip`)
+  without making a parallel flow and without re-classifying worthiness: a high-confidence
+  lesson is still captured automatically with a notice, a skip never asks, and only an
+  ambiguous `SuggestCapture` is surfaced. With a terminal attached it shows a `[y]/[n]/[v]`
+  prompt — remember (approve), ignore (archive), or view full details before deciding again.
+- `AgentRecall.InteractiveMemoryMode` (`Auto` default | `Ask` | `Silent`) controls whether
+  AgentRecall asks. It is distinct from `ActivityNoticeLevel` (which controls how loud
+  notices are). `Ask` also downgrades a borderline auto-capture to a question; `Silent`
+  never prompts. An invalid value falls back to `Auto` with a warning.
+- Non-interactive surfaces never block. Hooks, pipes, and MCP park the suggestion as a
+  Pending rule and name the follow-up command (`agentrecall rules approve <id>` /
+  `archive <id>`). The MCP `capture_feedback` / `add_feedback` response carries
+  `capture_decision`, `pending_rule_id`, and `suggested_actions: [approve, reject,
+  view_details]` — no terminal prompt text.
+- `agentrecall rules list --status <status>` filters by lifecycle status (e.g. `Pending`).
+  Remembering or ignoring a suggestion records an activity notice (`SuggestionRemembered` /
+  `SuggestionIgnored`) with the reason.
+
+### Changed
+- The generated `CLAUDE.md` and the README document Interactive Memory: never ask "Want me
+  to save it?" — for a `SuggestCapture`, present AgentRecall's `remember` / `ignore`
+  options; for an `AutoCapture`, simply notify; for a `Skip`, don't push.
+
 ## [0.11.0] - 2026-06-27
 
 ### Added
