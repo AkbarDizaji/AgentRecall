@@ -11,7 +11,7 @@ internal sealed record RuleCluster(IReadOnlyList<RecallRule> Rules, string Subje
 /// (near-duplicates), or different things about the same subject (overlapping
 /// rules / repeated corrections). Deterministic and LLM-free.
 ///
-/// Rules that directly contradict each other (per <see cref="RuleConflictDetector"/>)
+/// Rules that directly contradict each other (per <see cref="PolarityConflictHeuristic"/>)
 /// are never grouped — resolving contradictions is the policy engine's job, not
 /// compression's.
 /// </summary>
@@ -118,7 +118,7 @@ internal static class RuleSimilarity
         CompressionOptions options)
     {
         // Direct contradictions are not compressible.
-        if (RuleConflictDetector.Conflicts(a, b))
+        if (PolarityConflictHeuristic.Conflicts(a, b))
         {
             return false;
         }

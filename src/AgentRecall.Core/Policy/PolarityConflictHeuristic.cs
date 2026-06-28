@@ -3,11 +3,21 @@ using AgentRecall.Core.Domain;
 namespace AgentRecall.Core.Policy;
 
 /// <summary>
-/// Detects direct conflicts between two rules: guidance that points the same
-/// subject in opposite directions, e.g. "Use the repository pattern" versus
-/// "Do not use the repository pattern". Heuristic and deterministic; no LLM.
+/// A deliberately narrow pairwise check for <em>directly opposite</em> guidance on a
+/// shared subject — e.g. "Use the repository pattern" versus "Do not use the repository
+/// pattern". Heuristic and deterministic; no LLM.
+///
+/// This is NOT the same as <see cref="Conflicts.RuleConflictDetector"/>, and the two are
+/// intentionally kept separate. The richer <see cref="Conflicts.IRuleConflictDetector"/>
+/// also flags competing-but-same-polarity approaches (curated antonyms like unit vs
+/// integration tests) and action-vs-anti-pattern overlaps, and runs at context-injection
+/// time to <em>surface</em> a conflict to the user. The policy engine, by contrast, uses
+/// this narrow polarity check for its clustering so that it silently settles only the
+/// unambiguous "X vs not-X" contradictions and leaves the subtler competing-approach
+/// conflicts intact for the injection layer to show. Broadening this to the full detector
+/// would make the policy engine prune those conflicts before they can be surfaced.
 /// </summary>
-internal static class RuleConflictDetector
+internal static class PolarityConflictHeuristic
 {
     // Phrases that flip a rule's guidance to negative. Multi-word markers are
     // checked against the raw text; single words are matched as whole tokens.
@@ -31,9 +41,7 @@ internal static class RuleConflictDetector
     /// <summary>Minimum subject overlap (Jaccard) for two opposing rules to clash.</summary>
     private const double MinSubjectOverlap = 0.5;
 
-    /// <summary>
-    /// True when the two rules give opposing guidance on a shared subject.
-    /// </summary>
+    /// <summary>True when the two rules give opposing guidance on a shared subject.</summary>
     public static bool Conflicts(RecallRule a, RecallRule b) =>
         Conflicts(a, b, out _);
 

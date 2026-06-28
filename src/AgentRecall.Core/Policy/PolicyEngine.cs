@@ -245,7 +245,7 @@ public sealed class PolicyEngine : IPolicyEngine
 
                     foreach (var member in members)
                     {
-                        if (RuleConflictDetector.Conflicts(member, rules[j], out var s))
+                        if (PolarityConflictHeuristic.Conflicts(member, rules[j], out var s))
                         {
                             members.Add(rules[j]);
                             if (subject.Length == 0)
