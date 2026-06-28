@@ -20,7 +20,12 @@ knowledge so the right guidance reaches your agent at the right moment:
 - **Ranks what to surface.** Retrieval scores rules by keyword + semantic +
   domain + task-type + scope match, weighted by confidence, and returns them
   bucketed into **must-follow**, **suggested**, and **warnings** within a token
-  budget — not a flat keyword dump.
+  budget — not a flat keyword dump. Here "semantic" means a deterministic,
+  built-in concept graph (e.g. *refund* relates to *money*), **not** vector
+  embeddings — ranking is keyword + concept based out of the box. Embedding-based
+  similarity is an optional extension point that stays off until an
+  `IEmbeddingProvider` is configured (the default contributes nothing); see
+  [Search ranking](#search-ranking).
 - **Resolves conflicts automatically.** When rules disagree ("use the repository
   pattern" vs "do not"), the policy engine picks the effective one by scope,
   explicit supersede, priority, recency, then confidence.
@@ -173,6 +178,21 @@ agentrecall rules show 1                      # full detail for one rule
 ```
 
 Results are ranked by relevance, rule status, and confidence.
+
+### Search ranking
+
+Ranking is **keyword-based out of the box** — there is no semantic vector search
+unless you wire one up. `search` scores rules by weighted term matches across the
+trigger, tags, rule text, mistake, and technical context, blended with status and
+confidence. Context injection adds a deterministic, built-in **concept graph** so a
+task about *refunds* can surface a *money* rule with no shared words; this is rule-based
+relatedness, not embeddings.
+
+The pipeline has an `IEmbeddingProvider` extension point for hybrid (keyword + vector)
+search, but the only provider shipped is a no-op (`IsAvailable == false`), so **no
+embeddings are computed and no external service is contacted** by default. Until a real
+provider is configured, semantic similarity contributes nothing to the score — ranking
+stays keyword + concept based and fully local and deterministic.
 
 ### Curate rules
 

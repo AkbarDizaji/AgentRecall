@@ -9,9 +9,12 @@ namespace AgentRecall.Core.Services;
 /// pipeline. Relevance is computed from term matches across the rule's text
 /// fields; the final score blends relevance with status and confidence.
 ///
-/// The pipeline is structured so that a future <see cref="IEmbeddingProvider"/>
-/// can contribute semantic similarity without changing callers: when one is
-/// available, its score is blended into <see cref="ComputeRelevanceAsync"/>.
+/// Ranking is keyword-only by default: the only registered
+/// <see cref="IEmbeddingProvider"/> is a no-op (<c>IsAvailable == false</c>), so no
+/// embeddings are computed and no external service is contacted. The pipeline is
+/// structured so that a real provider can contribute semantic similarity without
+/// changing callers: when one is available, its cosine score is blended into
+/// <see cref="ComputeRelevanceAsync"/>. Until then the semantic path is skipped.
 /// </summary>
 public sealed class KeywordRecallSearchService : IRecallSearchService
 {
