@@ -190,9 +190,23 @@ public sealed class AgentRecallOptions
     /// </summary>
     public string InteractiveMemoryMode { get; set; } = nameof(Capture.InteractiveMemoryMode.Auto);
 
+    /// <summary>
+    /// How much of the aggregated end-of-turn memory summary AgentRecall prints after a
+    /// turn is finalized: <c>Silent</c> (none), <c>Compact</c> (one aggregate line), or
+    /// <c>Detailed</c> (grouped sections with short titles). Parsed defensively so an
+    /// unrecognised value falls back to <c>Compact</c>. This is distinct from
+    /// <see cref="ActivityNoticeLevel"/>: that governs per-event notices, this governs the
+    /// single per-turn summary. Defaults to <c>Compact</c>.
+    /// </summary>
+    public string TurnSummaryLevel { get; set; } = nameof(Domain.TurnSummaryLevel.Compact);
+
     /// <summary>The parsed interactive-memory mode, falling back to Auto when invalid.</summary>
     public InteractiveMemoryMode ResolvedInteractiveMemoryMode =>
         InteractiveMemoryModes.Resolve(InteractiveMemoryMode);
+
+    /// <summary>The parsed turn-summary level, falling back to Compact when invalid.</summary>
+    public TurnSummaryLevel ResolvedTurnSummaryLevel =>
+        TurnSummaryLevels.Resolve(TurnSummaryLevel);
 
     /// <summary>The parsed activity notice level, falling back to Verbose when invalid.</summary>
     public NoticeLevel ResolvedActivityNoticeLevel =>

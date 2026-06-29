@@ -73,6 +73,11 @@ public sealed class TurnFinalizer : ITurnFinalizer
 
         var hash = ComputeHash(input);
 
+        // The deterministic turn id (cwd + prompt) joins this capture to the retrieval
+        // activity recorded at UserPromptSubmit. Distinct from the idempotency hash, which
+        // also folds in the assistant response.
+        var turnId = Activity.TurnCorrelation.Compute(input.Cwd, input.Prompt);
+
         // Idempotent: an identical turn that was already finalized returns the prior
         // result and creates nothing new (the Stop hook may fire more than once).
         var prior = await FindByHashAsync(hash, cancellationToken).ConfigureAwait(false);
@@ -119,6 +124,7 @@ public sealed class TurnFinalizer : ITurnFinalizer
                 DuplicateRuleIds = Join(duplicates),
                 ErrorSummary = string.Join("; ", errors),
                 RawHash = hash,
+                TurnId = turnId ?? string.Empty,
                 Transcript = _options.StoreTurnTranscript ? input.RawTranscript ?? string.Empty : string.Empty,
             };
 
@@ -142,6 +148,7 @@ public sealed class TurnFinalizer : ITurnFinalizer
             Errors = errors,
             Id = id,
             Source = input.Source,
+            TurnId = turnId,
         };
     }
 
@@ -392,6 +399,7 @@ public sealed class TurnFinalizer : ITurnFinalizer
             Id = finalization.Id,
             CreatedAt = finalization.CreatedAt,
             Source = finalization.Source,
+            TurnId = string.IsNullOrEmpty(finalization.TurnId) ? null : finalization.TurnId,
         };
     }
 

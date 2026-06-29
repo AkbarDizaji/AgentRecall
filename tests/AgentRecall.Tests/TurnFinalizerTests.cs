@@ -442,7 +442,7 @@ public class TurnFinalizerTests
         }
     }
 
-    // The Stop-hook (--hook) path emits a non-blocking systemMessage on capture.
+    // The Stop-hook (--hook) path emits a non-blocking Turn Memory Summary systemMessage on capture.
     [Fact]
     public async Task HookFlag_EmitsSystemMessageOnCapture()
     {
@@ -462,7 +462,10 @@ public class TurnFinalizerTests
 
             Assert.Equal(0, code);
             var node = JsonNode.Parse(output.ToString().Trim())!;
-            Assert.Contains("AgentRecall finalized", node["systemMessage"]!.GetValue<string>(), StringComparison.Ordinal);
+            var message = node["systemMessage"]!.GetValue<string>();
+            // The hook now carries the aggregated Turn Memory Summary, not a per-event line.
+            Assert.Contains("🧠 **AgentRecall:**", message, StringComparison.Ordinal);
+            Assert.Contains("captured 1", message, StringComparison.Ordinal);
         }
         finally
         {

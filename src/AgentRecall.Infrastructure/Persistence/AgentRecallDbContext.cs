@@ -102,9 +102,13 @@ public sealed class AgentRecallDbContext : DbContext
         modelBuilder.Entity<TurnFinalization>(entity =>
         {
             entity.HasKey(e => e.Id);
+            // Stored with a default so the additive reconciler can backfill the column on
+            // databases created before turn correlation existed.
+            entity.Property(e => e.TurnId).HasDefaultValue(string.Empty);
             entity.HasIndex(e => e.CreatedAt);
             entity.HasIndex(e => e.RawHash);
             entity.HasIndex(e => e.Cwd);
+            entity.HasIndex(e => e.TurnId);
         });
 
         modelBuilder.Entity<AgentRecallActivity>(entity =>
@@ -115,6 +119,7 @@ public sealed class AgentRecallDbContext : DbContext
             entity.HasIndex(e => e.CreatedAt);
             entity.HasIndex(e => e.ActivityType);
             entity.HasIndex(e => e.OperationHash);
+            entity.HasIndex(e => e.TurnId);
         });
     }
 }

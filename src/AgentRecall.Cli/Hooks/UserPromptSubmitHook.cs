@@ -72,17 +72,20 @@ public static class UserPromptSubmitHook
 
             // Persist the activity for the human-visible log. Verbose detail is stored
             // but never injected — the hook output only carries a compact summary line.
+            // Stamp the deterministic turn id so the rules used here can later be joined
+            // with this turn's capture into one end-of-turn summary.
             var recorder = scope.ServiceProvider.GetRequiredService<IActivityRecorder>();
+            var turnId = TurnCorrelation.Compute(cwd, prompt);
             var notice = ActivityNoticeFactory.ForContextFetched(result, "hook");
             if (notice is not null)
             {
-                await recorder.RecordAsync(notice, cancellationToken).ConfigureAwait(false);
+                await recorder.RecordAsync(notice with { TurnId = turnId }, cancellationToken).ConfigureAwait(false);
             }
 
             var conflictNotice = ActivityNoticeFactory.ForConflictResolved(result.Conflicts, "hook");
             if (conflictNotice is not null)
             {
-                await recorder.RecordAsync(conflictNotice, cancellationToken).ConfigureAwait(false);
+                await recorder.RecordAsync(conflictNotice with { TurnId = turnId }, cancellationToken).ConfigureAwait(false);
             }
 
             // The model-visible notice is a single compact line (never the detail

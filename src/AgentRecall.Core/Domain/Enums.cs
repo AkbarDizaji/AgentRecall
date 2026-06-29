@@ -163,6 +163,23 @@ public enum NoticeLevel
 }
 
 /// <summary>
+/// How much of the aggregated end-of-turn memory summary AgentRecall prints after a
+/// turn is finalized. This is distinct from <see cref="NoticeLevel"/>: the notice level
+/// controls per-event notices, while this controls the single per-turn summary.
+/// </summary>
+public enum TurnSummaryLevel
+{
+    /// <summary>No automatic end-of-turn summary is printed (status commands still work).</summary>
+    Silent = 0,
+
+    /// <summary>One short aggregate line: used / captured / suggested / skipped counts.</summary>
+    Compact = 1,
+
+    /// <summary>Grouped sections with short rule titles and reasons (bounded; no full bodies).</summary>
+    Detailed = 2,
+}
+
+/// <summary>
 /// The kind of user-facing activity AgentRecall recorded. Stored on an
 /// <see cref="AgentRecallActivity"/> so the activity log can be filtered and rendered.
 /// </summary>

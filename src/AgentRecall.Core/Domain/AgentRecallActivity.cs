@@ -44,4 +44,12 @@ public sealed class AgentRecallActivity
     /// activity records so a repeated (cached) operation is not logged twice.
     /// </summary>
     public string? OperationHash { get; set; }
+
+    /// <summary>
+    /// Optional deterministic turn correlation id (see
+    /// <see cref="Activity.TurnCorrelation"/>). Lets retrieval activity from
+    /// UserPromptSubmit and capture activity from Stop/finalize-turn be joined into a
+    /// single per-turn summary. Null for activity that is not tied to a specific turn.
+    /// </summary>
+    public string? TurnId { get; set; }
 }

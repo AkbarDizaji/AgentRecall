@@ -108,6 +108,9 @@ public static class ServiceCollectionExtensions
         // Activity notices: the human-visible ledger of what AgentRecall did.
         services.AddScoped<Core.Activity.IActivityRecorder, Core.Activity.ActivityRecorder>();
 
+        // Turn memory summary: aggregate one turn's recorded activity into a single view.
+        services.AddScoped<Core.Summary.ITurnSummaryService, Core.Summary.TurnSummaryService>();
+
         // Project DNA: distil the corpus into an onboarding-ready personality summary.
         services.AddScoped<IProjectDnaService, ProjectDnaService>();
 

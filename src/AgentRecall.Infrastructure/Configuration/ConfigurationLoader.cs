@@ -60,6 +60,13 @@ public static class ConfigurationLoader
                 $"'{options.InteractiveMemoryMode}'. Falling back to the default. Valid values: Auto, Ask, Silent.");
         }
 
+        if (!Core.Activity.TurnSummaryLevels.IsValid(options.TurnSummaryLevel))
+        {
+            Console.Error.WriteLine(
+                $"[agentrecall] warning: invalid {AgentRecallOptions.SectionName}.{nameof(AgentRecallOptions.TurnSummaryLevel)} " +
+                $"'{options.TurnSummaryLevel}'. Falling back to the default. Valid values: Silent, Compact, Detailed.");
+        }
+
         return options;
     }
 

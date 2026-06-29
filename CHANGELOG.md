@@ -4,6 +4,28 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-06-29
+
+### Added
+- **Turn Memory Summary.** After a turn is finalized, AgentRecall prints one aggregated
+  summary of what it did that turn — rules used, captured, suggested, and skipped, plus
+  Interactive Memory remember/ignore decisions and any recoverable errors — instead of
+  many scattered notices. A new `AgentRecall.TurnSummaryLevel` (`Silent` | `Compact` |
+  `Detailed`, default `Compact`) controls it, independently of `ActivityNoticeLevel`. The
+  Stop hook now emits this summary; `agentrecall turn-summary --last` (with `--json`,
+  `--detailed`, `--compact`) reports it on demand. The summary is human-visible only, is
+  never injected into model context, and is bounded even in detailed mode.
+- Turn correlation: retrieval activity (UserPromptSubmit) and capture activity
+  (Stop/finalize-turn) now share a deterministic turn id derived from the working
+  directory and prompt, so a turn's used and captured rules join into one summary without
+  fragile cross-process state. When no id is available the summary falls back to a
+  conservative time window. Additive schema columns (`AgentRecallActivity.TurnId`,
+  `TurnFinalization.TurnId`) are backfilled by the schema reconciler.
+
+### Changed
+- `capture-status` now points to `agentrecall turn-summary --last` for the full per-turn
+  activity, keeping its own output focused on the capture decision.
+
 ## [0.13.0] - 2026-06-28
 
 ### Performance

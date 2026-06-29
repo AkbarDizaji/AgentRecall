@@ -47,6 +47,7 @@ public sealed class ActivityRecorder : IActivityRecorder
             Source = notice.Source,
             NoticeLevel = _options.ResolvedActivityNoticeLevel,
             OperationHash = notice.OperationHash,
+            TurnId = notice.TurnId,
         };
 
         return await _repository.AddAsync(activity, cancellationToken).ConfigureAwait(false);

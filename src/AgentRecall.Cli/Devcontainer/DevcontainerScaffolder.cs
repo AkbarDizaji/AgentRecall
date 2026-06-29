@@ -178,6 +178,31 @@ public static class DevcontainerScaffolder
         - **Before** non-trivial work, call `inject_context` with the task description
           when you need the relevant rules mid-task (the hook already covers prompts).
 
+        ### Turn Memory Summary
+
+        After it finalizes a turn, AgentRecall prints a **Turn Memory Summary** — one
+        aggregated line (or grouped sections), governed by `AgentRecall.TurnSummaryLevel`
+        (`Silent` | `Compact` | `Detailed`). It reports the rules AgentRecall used,
+        captured, suggested, and skipped this turn.
+
+        When the user asks "did you save anything?", check
+        `agentrecall capture-status --last-turn` or `agentrecall turn-summary --last` and
+        answer from the result. Do not guess, do not mention manual tool calls, and do not
+        say the hook "may have" captured something. Use the Turn Summary result as the
+        source of truth.
+
+        Good:
+
+        - "🧠 AgentRecall captured rule #28: Preserve else semantics when flattening
+          nested conditionals."
+        - "🧠 AgentRecall did not capture a new rule. It skipped 1 candidate because it
+          was not reusable enough."
+
+        Bad:
+
+        - "I didn't manually save anything."
+        - "The hook may have captured it."
+
         ### Interactive Memory
 
         AgentRecall owns the memory decision. Never ask "Want me to save it?" — instead,

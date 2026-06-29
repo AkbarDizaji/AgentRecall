@@ -29,6 +29,9 @@ public sealed record ActivityNotice
     /// <summary>Optional stable identity used to deduplicate repeated operations.</summary>
     public string? OperationHash { get; init; }
 
+    /// <summary>Optional turn correlation id joining this activity to one turn's summary.</summary>
+    public string? TurnId { get; init; }
+
     /// <summary>Reconstructs a notice from a persisted activity for re-rendering.</summary>
     public static ActivityNotice FromEntity(AgentRecallActivity activity)
     {
@@ -43,6 +46,7 @@ public sealed record ActivityNotice
             RecommendationIds = ParseIds(activity.RecommendationIds),
             Source = activity.Source,
             OperationHash = activity.OperationHash,
+            TurnId = activity.TurnId,
         };
     }
 

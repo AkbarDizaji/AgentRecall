@@ -11,6 +11,7 @@ using AgentRecall.Core.Finalization;
 using AgentRecall.Core.Reporting;
 using AgentRecall.Core.Search;
 using AgentRecall.Core.Services;
+using AgentRecall.Core.Summary;
 using AgentRecall.Infrastructure.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -92,6 +93,7 @@ public static partial class CommandRouter
             ["hook"] = new DelegateCommand((a, s, o, _, ct) => HookAsync(a, s, o, ct)),
             ["finalize-turn"] = new DelegateCommand((a, s, o, _, ct) => FinalizeTurnAsync("finalize-turn", a, s, o, ct)),
             ["capture-status"] = new DelegateCommand((a, s, o, _, ct) => FinalizeTurnAsync("capture-status", a, s, o, ct)),
+            ["turn-summary"] = new DelegateCommand((a, s, o, _, ct) => TurnSummaryAsync(a, s, o, ct)),
             ["activity"] = new DelegateCommand((a, s, o, _, ct) => ActivityAsync(a, s, o, ct)),
             ["mcp"] = new DelegateCommand(async (_, s, o, _, ct) =>
             {
@@ -1523,6 +1525,13 @@ public static partial class CommandRouter
                 else
                 {
                     RenderFinalization(output, last);
+                    if (command == "capture-status")
+                    {
+                        // capture-status answers "what did capture decide?"; point to the
+                        // turn summary for the full per-turn activity without duplicating it.
+                        output.WriteLine();
+                        output.WriteLine("For full turn activity: agentrecall turn-summary --last");
+                    }
                 }
 
                 return 0;
@@ -1549,12 +1558,13 @@ public static partial class CommandRouter
             var result = await finalizer.FinalizeAsync(input, cancellationToken).ConfigureAwait(false);
 
             // Record the finalization for the human-visible log (deduped by turn id, so
-            // a cached re-finalization never double-logs).
+            // a cached re-finalization never double-logs). Stamp the turn id so this
+            // capture joins the rules used earlier in the same turn.
             var notice = ActivityNoticeFactory.ForTurnFinalized(result, input.Source ?? "cli");
             if (notice is not null)
             {
                 await scope.ServiceProvider.GetRequiredService<IActivityRecorder>()
-                    .RecordAsync(notice, cancellationToken).ConfigureAwait(false);
+                    .RecordAsync(notice with { TurnId = result.TurnId }, cancellationToken).ConfigureAwait(false);
             }
 
             if (json)
@@ -1563,8 +1573,10 @@ public static partial class CommandRouter
             }
             else if (hook)
             {
-                // The Stop-hook surface stays compact: a one-line systemMessage only.
-                EmitHookNotice(services, output, result);
+                // The Stop-hook surface prints the aggregated Turn Memory Summary (one
+                // bounded systemMessage), governed by TurnSummaryLevel. It never blocks.
+                await EmitTurnSummaryHookAsync(scope.ServiceProvider, output, result, cancellationToken)
+                    .ConfigureAwait(false);
             }
             else
             {
@@ -1593,38 +1605,181 @@ public static partial class CommandRouter
     }
 
     /// <summary>
-    /// Emits the Stop-hook <c>systemMessage</c> for a finalization, honouring the
-    /// notice and duplicate-suppression options. Stays silent when there is nothing
-    /// worth telling the user (e.g. only a duplicate was reinforced).
+    /// Emits the Stop-hook <c>systemMessage</c> carrying the aggregated Turn Memory
+    /// Summary, at the configured <see cref="AgentRecallOptions.ResolvedTurnSummaryLevel"/>.
+    /// Stays silent for <c>Silent</c> level and for a no-op turn, so it never spams. The
+    /// output is bounded (short titles only, max items per section) so it cannot bloat the
+    /// session, and any failure is swallowed so the hook never blocks.
     /// </summary>
-    private static void EmitHookNotice(IServiceProvider services, TextWriter output, TurnFinalizationResult result)
+    private static async Task EmitTurnSummaryHookAsync(
+        IServiceProvider services,
+        TextWriter output,
+        TurnFinalizationResult result,
+        CancellationToken cancellationToken)
     {
         var options = services.GetRequiredService<AgentRecallOptions>();
-        if (!options.FinalizerShowUserNotice)
+        var level = options.ResolvedTurnSummaryLevel;
+        if (level == TurnSummaryLevel.Silent || !options.FinalizerShowUserNotice)
         {
             return;
         }
 
-        var hasNews = result.Captured.Count > 0 || result.Suggested.Count > 0;
-        var hasRealSkip = result.Skipped.Any(s => s.DuplicateOfRuleId is null);
-
-        // A run that only reinforced a duplicate changes nothing visible.
-        if (!hasNews && options.SuppressDuplicateNotices && !hasRealSkip)
+        try
         {
-            return;
+            var summaryService = services.GetRequiredService<ITurnSummaryService>();
+            var summary = await summaryService.BuildForTurnAsync(result.TurnId, cancellationToken).ConfigureAwait(false);
+
+            // An ordinary turn with no memory activity stays silent (never spam a no-op).
+            if (summary.IsEmpty)
+            {
+                return;
+            }
+
+            // A turn whose only news is reinforcing a duplicate changes nothing visible;
+            // honour SuppressDuplicateNotices and stay silent (used rules / captures still print).
+            if (options.SuppressDuplicateNotices && OnlyReinforcedDuplicate(summary, result))
+            {
+                return;
+            }
+
+            var text = TurnSummaryRenderer.Render(summary, level, "this turn");
+            if (string.IsNullOrEmpty(text))
+            {
+                return;
+            }
+
+            output.WriteLine(new System.Text.Json.Nodes.JsonObject
+            {
+                ["systemMessage"] = text,
+            }.ToJsonString());
         }
-
-        if (result.IsEmpty)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return;
+            // Never block Claude Code; the summary is best-effort.
+            Console.Error.WriteLine($"[agentrecall] turn summary skipped: {ex.Message}");
         }
-
-        var message = "AgentRecall finalized the turn. " + TurnFinalizationFormatter.SummaryLine(result);
-        output.WriteLine(new System.Text.Json.Nodes.JsonObject
-        {
-            ["systemMessage"] = message,
-        }.ToJsonString());
     }
+
+    /// <summary>
+    /// <c>turn-summary [--last] [--json] [--detailed|--compact]</c>: print the aggregated
+    /// Turn Memory Summary for the current/last turn. <c>--last</c> is the default (and only)
+    /// scope today. Without a level flag it follows <c>TurnSummaryLevel</c>, except an
+    /// explicit invocation never stays Silent. Always exits 0 so it never blocks an agent.
+    /// </summary>
+    private static async Task<int> TurnSummaryAsync(
+        string[] args,
+        IServiceProvider services,
+        TextWriter output,
+        CancellationToken cancellationToken)
+    {
+        var options = ParseOptions(args);
+        var json = options.ContainsKey("json");
+
+        try
+        {
+            await using var scope = services.CreateAsyncScope();
+            await EnsureInitializedAsync(scope, cancellationToken).ConfigureAwait(false);
+
+            var summaryService = scope.ServiceProvider.GetRequiredService<ITurnSummaryService>();
+            var summary = await summaryService.BuildLastAsync(cancellationToken).ConfigureAwait(false);
+
+            if (json)
+            {
+                WriteJson(output, TurnSummaryJson(summary));
+                return 0;
+            }
+
+            var configured = scope.ServiceProvider.GetRequiredService<AgentRecallOptions>().ResolvedTurnSummaryLevel;
+            var level = ResolveTurnSummaryLevel(options, configured);
+            // An explicit command is never a no-op: surface at least the compact line even
+            // when the configured level is Silent.
+            if (level == TurnSummaryLevel.Silent)
+            {
+                level = TurnSummaryLevel.Compact;
+            }
+
+            output.WriteLine(TurnSummaryRenderer.Render(summary, level, "the last turn"));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Never block the agent; report the failure on stderr only.
+            Console.Error.WriteLine($"[agentrecall] turn-summary failed: {ex.Message}");
+            if (json)
+            {
+                WriteJson(output, TurnSummaryJson(new TurnSummary()));
+            }
+        }
+
+        return 0;
+    }
+
+    /// <summary>
+    /// True when the turn's only memory activity was reinforcing an existing rule (a pure
+    /// duplicate) — nothing was used, captured, suggested, remembered, ignored, or errored,
+    /// and every skip was a duplicate. Uses the structured result, not parsed text.
+    /// </summary>
+    private static bool OnlyReinforcedDuplicate(TurnSummary summary, TurnFinalizationResult result) =>
+        summary.Used.Count == 0 &&
+        summary.Remembered.Count == 0 &&
+        summary.Ignored.Count == 0 &&
+        result.Captured.Count == 0 &&
+        result.Suggested.Count == 0 &&
+        result.Errors.Count == 0 &&
+        result.Skipped.Count > 0 &&
+        result.Skipped.All(s => s.DuplicateOfRuleId is not null);
+
+    /// <summary>Resolves the display level from <c>--detailed</c>/<c>--compact</c>, else the configured level.</summary>
+    private static TurnSummaryLevel ResolveTurnSummaryLevel(
+        IReadOnlyDictionary<string, string> options,
+        TurnSummaryLevel fallback)
+    {
+        if (options.ContainsKey("detailed"))
+        {
+            return TurnSummaryLevel.Detailed;
+        }
+
+        if (options.ContainsKey("compact"))
+        {
+            return TurnSummaryLevel.Compact;
+        }
+
+        return fallback;
+    }
+
+    /// <summary>Stable, deterministic JSON for a turn summary (snake_case keys, no timestamp).</summary>
+    private static object TurnSummaryJson(TurnSummary summary) =>
+        new
+        {
+            turn_id = summary.TurnId,
+            summary = new
+            {
+                used = summary.Used.Count,
+                captured = summary.Captured.Count,
+                suggested = summary.Suggested.Count,
+                skipped = summary.Skipped.Count,
+                remembered = summary.Remembered.Count,
+                ignored = summary.Ignored.Count,
+                errors = summary.Errors.Count,
+            },
+            used_rules = summary.Used.Select(UsedRuleJson).ToArray(),
+            captured_rules = summary.Captured.Select(CapturedRuleJson).ToArray(),
+            suggested_rules = summary.Suggested.Select(CapturedRuleJson).ToArray(),
+            skipped_candidates = summary.Skipped
+                .Select(s => new { title = s.Title, reason = s.Reason })
+                .ToArray(),
+            remembered_suggestions = summary.Remembered.Select(SuggestionRuleJson).ToArray(),
+            ignored_suggestions = summary.Ignored.Select(SuggestionRuleJson).ToArray(),
+            errors = summary.Errors.ToArray(),
+        };
+
+    private static object UsedRuleJson(TurnSummaryRule rule) =>
+        new { id = rule.Id, title = rule.Title, category = rule.Category };
+
+    private static object CapturedRuleJson(TurnSummaryRule rule) =>
+        new { id = rule.Id, title = rule.Title, reason = rule.Reason };
+
+    private static object SuggestionRuleJson(TurnSummaryRule rule) =>
+        new { id = rule.Id, title = rule.Title };
 
     private static void RenderFinalization(TextWriter output, TurnFinalizationResult result) =>
         output.WriteLine(TurnFinalizationFormatter.RenderText(result));
@@ -2384,6 +2539,8 @@ public static partial class CommandRouter
         output.WriteLine("  finalize-turn        Finalize a completed turn from a Stop-hook payload on stdin:");
         output.WriteLine("                       extract lessons and auto-capture/suggest/skip (--json, --hook)");
         output.WriteLine("  finalize-turn status Show the last finalization result (--json); also --last");
+        output.WriteLine("  turn-summary --last  Show the aggregated Turn Memory Summary for the last turn");
+        output.WriteLine("                       (--json, --detailed, --compact)");
         output.WriteLine("  activity last        Show the latest AgentRecall activity notice (--json)");
         output.WriteLine("  activity list        Show recent activity notices (--limit <n>, --json)");
         output.WriteLine("  mcp                  Run the MCP server over stdio (for Claude Code)");

@@ -41,6 +41,15 @@ public sealed class TurnFinalization
     public string RawHash { get; set; } = string.Empty;
 
     /// <summary>
+    /// Deterministic turn correlation id derived from the working directory and prompt
+    /// (see <see cref="Activity.TurnCorrelation"/>). Distinct from <see cref="RawHash"/>
+    /// (which also folds in the assistant response for idempotency): this id is shared
+    /// with the retrieval activity recorded at UserPromptSubmit so a turn's captures and
+    /// the rules it used can be joined into one summary. Empty when no prompt was present.
+    /// </summary>
+    public string TurnId { get; set; } = string.Empty;
+
+    /// <summary>
     /// The raw turn transcript, stored only when transcript persistence is enabled;
     /// otherwise empty.
     /// </summary>

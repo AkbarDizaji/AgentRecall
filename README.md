@@ -295,6 +295,7 @@ on a retrieval regression. The same check also runs as a unit test.
 | `eval retrieval` | Evaluate retrieval quality against the bundled dataset (`--dataset <path>`); non-zero exit below baseline. |
 | `activity last` | Show the latest AgentRecall activity notice (`--json`). |
 | `activity list` | Show recent activity notices, newest first (`--limit <n>`, `--json`). |
+| `turn-summary --last` | Show the aggregated Turn Memory Summary for the last turn (`--json`, `--detailed`, `--compact`). |
 | `mcp` | Run the MCP server over stdio (for Claude Code). |
 | `status` | Show where data is stored. |
 | `help` / `--help` / `-h` | Show usage. |
@@ -923,6 +924,81 @@ pass `--no-notice` to suppress the human notice entirely.
 
 ---
 
+## Turn Memory Summary
+
+At the end of each turn — after the Stop hook finalizes it — AgentRecall prints **one
+aggregated summary** of everything it did that turn, instead of many scattered notices.
+It answers, proactively and from recorded state, the questions you'd otherwise have to
+ask: which rules were used, what was captured, what was suggested, what was skipped, and
+whether anything went wrong.
+
+It aggregates, per turn:
+
+- **rules used** — retrieved/injected by the UserPromptSubmit hook
+- **rules captured** — auto-captured while finalizing the turn
+- **pending suggestions** — rules parked as `Pending` for review
+- **skipped candidates** — candidates rejected, with the reason
+- **remembered / ignored** — Interactive Memory decisions made this turn
+- **errors** — any recoverable problem the finalizer hit
+
+The summary is **human-visible only**: it is never injected back into the model context,
+and even the detailed form is bounded (short titles only, at most five items per section),
+so it can't bloat a Claude Code session.
+
+This is governed by its own setting, distinct from `ActivityNoticeLevel` (which controls
+per-event notices):
+
+```json
+{ "AgentRecall": { "TurnSummaryLevel": "Compact" } }
+```
+
+`AgentRecall.TurnSummaryLevel` = `Silent` | `Compact` | `Detailed`. Defaults to `Compact`.
+
+- `Silent` — no automatic end-of-turn summary (the `turn-summary` command still works).
+- `Compact` — one short line:
+
+  ```
+  🧠 **AgentRecall:** used 5 rules, captured 1, suggested 0, skipped 1.
+  ```
+- `Detailed` — grouped sections with short titles and reasons (never full rule bodies):
+
+  ```
+  🧠 **AgentRecall Turn Summary**
+
+  Used:
+  - #12 Scope-safe validators
+  - #18 Pass loaded entities instead of re-querying
+
+  Captured:
+  - #28 Preserve else semantics when flattening nested template conditionals
+
+  Suggested:
+  - none
+
+  Skipped:
+  - Generic template refactoring: not reusable enough
+  ```
+
+**Review the last turn** any time:
+
+```bash
+agentrecall turn-summary --last             # human-readable, at the configured level
+agentrecall turn-summary --last --json      # stable, deterministic JSON
+agentrecall turn-summary --last --detailed  # force grouped detail
+agentrecall turn-summary --last --compact   # force the one-line summary
+```
+
+When the last turn had no memory activity:
+
+```
+🧠 **AgentRecall:** no memory activity recorded for the last turn.
+```
+
+`capture-status` answers a narrower question — *what did capture decide?* — and points
+to `agentrecall turn-summary --last` for the full per-turn activity.
+
+---
+
 ## Configuration
 
 AgentRecall reads an optional `agentrecall.json` from the current directory, then
@@ -935,7 +1011,8 @@ applies environment-variable overrides prefixed with `AGENTRECALL_`.
     "LogLevel": "Information",
     "AutoApproveFeedback": true,
     "ActivityNoticeLevel": "Verbose",
-    "HookNoticeLevel": "Normal"
+    "HookNoticeLevel": "Normal",
+    "TurnSummaryLevel": "Compact"
   }
 }
 ```

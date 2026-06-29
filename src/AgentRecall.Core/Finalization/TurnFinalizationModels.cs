@@ -79,6 +79,13 @@ public sealed record TurnFinalizationResult
     /// <summary>Where the finalization was triggered from (e.g. <c>stop_hook</c>), when known.</summary>
     public string? Source { get; init; }
 
+    /// <summary>
+    /// The deterministic turn correlation id for this turn, when a prompt was present.
+    /// Shared with the retrieval activity recorded at UserPromptSubmit so the turn's
+    /// captures and the rules it used join into one summary.
+    /// </summary>
+    public string? TurnId { get; init; }
+
     /// <summary>True when this result was returned from a prior identical finalization.</summary>
     public bool FromCache { get; init; }
 
