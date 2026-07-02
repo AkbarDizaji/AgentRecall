@@ -63,6 +63,14 @@ public sealed class CaptureDecisionPolicy : ICaptureDecisionPolicy
             return AutoCapture(signals, "captured automatically because the acceptance signal was strong");
         }
 
+        // 3a′. An explicitly stated, safe user preference is the user's own word about how
+        //      the assistant should behave. Capture it without asking, independent of the
+        //      auto-approve posture, so a clear preference never lingers as a low-value pending.
+        if (signals.IsExplicitUserPreference)
+        {
+            return AutoCapture(signals, "captured automatically as an explicitly stated user preference");
+        }
+
         // 3b. Held back for review (approve posture off, or the caller forced it).
         //     Park it as a suggestion rather than acting unilaterally.
         if (!signals.ApprovePosture)

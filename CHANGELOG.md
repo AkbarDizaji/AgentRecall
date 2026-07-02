@@ -4,6 +4,28 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-07-02
+
+### Added
+- **Explicit user preferences are captured as first-class memory.** When the user states
+  a durable preference for how the assistant should communicate — answer length,
+  explanation depth, language, prompt format, how often to ask questions — AgentRecall now
+  recognises it (English and Persian) and stores it as a `UserPreference` /
+  `CommunicationPreference` rather than a low-confidence repository convention. A new
+  deterministic `UserPreferenceRecognizer` detects the preference, refuses unsafe ones
+  (e.g. "always agree even if I'm wrong"), and normalizes raw phrasing into durable,
+  bounded guidance — no LLM, no embeddings. New `RuleCategory.UserPreference` /
+  `CommunicationPreference` and `CaptureReason.ExplicitUserPreference` (enum values persist
+  as strings, so the change is additive with no migration).
+- Explicit safe preferences are auto-captured with high confidence (≈0.90) regardless of
+  the auto-approve posture — the user's own word is enough — and are scoped to the user
+  (Global), never to a repository. A newer preference about the same dimension (e.g. answer
+  length or language) as an older one raises a `Supersede` lifecycle recommendation instead
+  of silently keeping both active.
+- `rules explain` now shows the rule `Type` (category) and `Scope`; the activity log and
+  Turn Memory Summary describe a captured preference as "captured 1 user preference". The
+  scaffolded `CLAUDE.md` and the README document the behaviour.
+
 ## [1.0.0] - 2026-06-29
 
 ### Added

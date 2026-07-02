@@ -34,4 +34,12 @@ public enum CaptureReason
 
     /// <summary>Captured from an external import (a pull request, a failure log).</summary>
     ImportedFeedback,
+
+    /// <summary>
+    /// The user explicitly stated a durable preference for how the assistant should
+    /// behave or communicate ("answer briefly", "reply in Persian", "give me the
+    /// prompt directly"). A first-class acceptance signal: an explicit preference is
+    /// captured on the user's word, not inferred from a single message.
+    /// </summary>
+    ExplicitUserPreference,
 }

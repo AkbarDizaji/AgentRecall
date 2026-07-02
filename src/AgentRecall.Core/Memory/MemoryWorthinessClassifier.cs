@@ -1,5 +1,7 @@
 using System.Text.RegularExpressions;
+using AgentRecall.Core.Capture;
 using AgentRecall.Core.Domain;
+using AgentRecall.Core.Preferences;
 
 namespace AgentRecall.Core.Memory;
 
@@ -14,6 +16,13 @@ namespace AgentRecall.Core.Memory;
 /// </summary>
 public sealed class MemoryWorthinessClassifier : IMemoryWorthinessClassifier
 {
+    /// <summary>
+    /// Confidence for an explicitly stated user preference. High, because the signal is
+    /// the user's own word — not an inferred lesson — but below 1.0 to leave room for
+    /// outcome-reinforced engineering rules to rank as certain.
+    /// </summary>
+    public const double UserPreferenceConfidence = 0.9;
+
     // A candidate that opens with a condition ("when …", "if …") and prescribes a
     // principle reads as a reusable lesson, not a one-off fact.
     private static readonly string[] PrincipleVerbs =
@@ -56,6 +65,44 @@ public sealed class MemoryWorthinessClassifier : IMemoryWorthinessClassifier
 
         var text = candidate.Trim();
         var lower = text.ToLowerInvariant();
+
+        // 0. An explicitly stated user preference is classified before the lessons/facts
+        //    rules. It is not an uncertain engineering lesson: it is the user's word about
+        //    how the assistant should behave, so it is captured with high trust (or, when
+        //    unsafe/honesty-conflicting, refused outright) rather than penalized for not
+        //    being a repository convention.
+        var preference = UserPreferenceRecognizer.Match(text);
+        if (preference.IsPreference)
+        {
+            if (preference.IsDoNotSave)
+            {
+                return new MemoryWorthinessResult(
+                    MemoryWorthiness.NotWorthStoring,
+                    "The user explicitly asked not to save this.",
+                    1.0,
+                    Category: preference.Category);
+            }
+
+            if (preference.IsUnsafe)
+            {
+                return new MemoryWorthinessResult(
+                    MemoryWorthiness.NotWorthStoring,
+                    "This preference conflicts with correctness or honesty, so it is not captured as-is.",
+                    0.9,
+                    Category: preference.Category);
+            }
+
+            return new MemoryWorthinessResult(
+                MemoryWorthiness.WorthStoring,
+                "Captures an explicitly stated user preference.",
+                UserPreferenceConfidence,
+                SuggestedGeneralizedLesson: preference.NormalizedRule,
+                Category: preference.Category,
+                CaptureReason: CaptureReason.ExplicitUserPreference,
+                NormalizedTrigger: preference.NormalizedTrigger,
+                EvidenceSummary: preference.EvidenceSummary,
+                Tags: preference.Tags);
+        }
 
         // 1. A generalized lesson wins outright — even if it mentions a symbol.
         if (HasLessonSignal(lower))

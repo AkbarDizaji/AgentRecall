@@ -118,9 +118,11 @@ public static class ActivityNoticeFactory
                 return new ActivityNotice
                 {
                     Type = ActivityType.RuleCaptured,
-                    Summary = IsObservedMistake(result.CaptureReason)
-                        ? "captured 1 rule from an observed mistake."
-                        : "captured 1 new rule.",
+                    Summary = captured.Category is RuleCategory.UserPreference or RuleCategory.CommunicationPreference
+                        ? "captured 1 user preference."
+                        : IsObservedMistake(result.CaptureReason)
+                            ? "captured 1 rule from an observed mistake."
+                            : "captured 1 new rule.",
                     Details = [$"#{captured.Id} {Truncate(captured.RuleText, LabelLength)}"],
                     RuleIds = ruleIds,
                     Source = source,

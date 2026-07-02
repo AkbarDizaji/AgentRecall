@@ -270,6 +270,32 @@ public static class DevcontainerScaffolder
         **engineering lessons** for reusable why/patterns that survive refactors — e.g.
         "Frontend and backend feature gate definitions must match."
 
+        ### User preferences are memory too
+
+        When the user explicitly states a durable preference for how you should
+        communicate — answer length, explanation depth, language, prompt format, how
+        often to ask questions — AgentRecall may capture it as a **UserPreference**.
+
+        - Do not treat a user preference as a repository engineering convention.
+        - Do not lower its confidence just because it is non-technical; an explicit
+          preference is the user's own word, captured with high confidence.
+        - A communication preference is scoped to the user, not the repository.
+        - If the user asks whether a preference was saved, check
+          `agentrecall capture-status --last-turn` or `agentrecall turn-summary --last`
+          and answer from that — do not guess.
+
+        Bad:
+
+        - "I didn't manually save it."
+
+        Good:
+
+        - "🧠 AgentRecall captured a user preference: answer briefly and simply first,
+          with examples when helpful."
+
+        A preference that conflicts with correctness or honesty (e.g. "always agree even
+        if I'm wrong") is **not** captured.
+
         """;
 
     /// <summary>

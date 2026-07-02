@@ -305,6 +305,57 @@ Run `agentrecall help` any time for the same list.
 
 ---
 
+## User Preferences
+
+AgentRecall remembers explicit **user preferences** separately from repository
+conventions and engineering lessons. When you state a durable preference for how the
+assistant should behave, it is captured as a `UserPreference` (or, for communication
+style, a `CommunicationPreference`) — not a repository coding rule.
+
+Examples of preferences it recognises (English and Persian):
+
+- preferred explanation style — *"answer short and simple, add an example if needed"*
+- language — *"reply in Persian unless I ask in English"* / *"فارسی جواب بده مگر اینکه انگلیسی پرسیدم"*
+- prompt format — *"when I ask for a prompt, give it directly with tests and edge cases"*
+- interaction style — *"don't ask me too many questions; make a reasonable assumption"*
+- verbosity — concise vs. detailed answers
+
+How preferences differ from other memory:
+
+- **Higher confidence.** An explicit preference is your own word, so it is captured
+  with high confidence (≈0.9) and auto-captured when safe — not parked as a
+  low-confidence pending suggestion.
+- **User scope, not repository scope.** A communication preference applies to you
+  everywhere, so it is stored at user (global) scope. Technical repository conventions
+  still use `Repository` scope; engineering lessons still use their own scope.
+- **The phrasing is normalized.** Raw wording (*"always answer caveman form"*) is
+  rewritten into durable, bounded guidance (*"Answer briefly and simply first, and
+  prefer concrete examples; provide more detail when asked."*) — overbroad absolutes
+  and throwaway wording are dropped, your intent is kept.
+- **Unsafe preferences are refused.** A preference that conflicts with correctness or
+  honesty (*"always agree even if I'm wrong"*) is skipped, never stored.
+- **Conflicts are surfaced.** A newer preference about the same dimension (e.g. answer
+  length) as an older one raises a `Supersede` recommendation rather than silently
+  keeping both.
+
+Record one explicitly:
+
+```bash
+agentrecall feedback add \
+  --task "how to answer me" \
+  --feedback "From now on, answer short and simple, add examples only if needed."
+# → captured a CommunicationPreference at user scope with high confidence
+
+agentrecall rules explain <id>   # shows Type: CommunicationPreference, Captured because:
+                                 # ExplicitUserPreference, Evidence, Scope, Confidence
+```
+
+Preferences are recalled alongside other rules when relevant, and captured preferences
+appear in the activity log and Turn Memory Summary (*"🧠 AgentRecall: captured 1 user
+preference."*).
+
+---
+
 ## Project DNA
 
 **Project DNA** distils everything AgentRecall has learned about a repository into a

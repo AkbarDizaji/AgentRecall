@@ -66,6 +66,13 @@ public sealed record CaptureSignals
     /// <summary>True when accepted code facts are allowed to bypass the worthiness filter.</summary>
     public bool CodeFactOverrideAllowed { get; init; }
 
+    /// <summary>
+    /// True when the candidate is an explicitly stated user preference. Treated like an
+    /// explicit acceptance: a safe explicit preference is captured on the user's word,
+    /// so it is not held for review just because auto-approve posture is off.
+    /// </summary>
+    public bool IsExplicitUserPreference { get; init; }
+
     /// <summary>Scope granularity the candidate applies to.</summary>
     public ScopeLevel ScopeLevel { get; init; }
 

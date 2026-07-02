@@ -1,3 +1,4 @@
+using AgentRecall.Core.Capture;
 using AgentRecall.Core.Domain;
 
 namespace AgentRecall.Core.Memory;
@@ -47,13 +48,32 @@ public enum MemoryWorthiness
 /// place of the raw code fact; otherwise <c>null</c>.
 /// </param>
 /// <param name="Category">Which kind of knowledge the candidate is.</param>
+/// <param name="CaptureReason">
+/// The outcome-aware reason the classifier already knows from the text alone — today
+/// only <see cref="Capture.CaptureReason.ExplicitUserPreference"/> for an explicitly
+/// stated preference. <see cref="Capture.CaptureReason.None"/> otherwise, so callers
+/// that supply their own context are unaffected.
+/// </param>
+/// <param name="NormalizedTrigger">
+/// A durable "when …" condition to store as the rule's trigger, when the classifier
+/// rewrote the candidate (e.g. a normalized user preference); otherwise <c>null</c>.
+/// </param>
+/// <param name="EvidenceSummary">A short account of the evidence, when the classifier knows it.</param>
+/// <param name="Tags">Comma-separated tags to attach, when the classifier assigns any.</param>
 public sealed record MemoryWorthinessResult(
     MemoryWorthiness Verdict,
     string Reason,
     double Confidence,
     string? SuggestedGeneralizedLesson = null,
-    RuleCategory Category = RuleCategory.Unknown)
+    RuleCategory Category = RuleCategory.Unknown,
+    CaptureReason CaptureReason = CaptureReason.None,
+    string? NormalizedTrigger = null,
+    string? EvidenceSummary = null,
+    string? Tags = null)
 {
+    /// <summary>True when the candidate is an explicitly stated user preference.</summary>
+    public bool IsExplicitUserPreference => CaptureReason == CaptureReason.ExplicitUserPreference;
+
     /// <summary>The store/reject/review decision, projected from <see cref="Verdict"/>.</summary>
     public MemoryDecision Decision => Verdict switch
     {

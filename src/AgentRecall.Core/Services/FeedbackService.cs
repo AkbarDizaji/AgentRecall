@@ -30,12 +30,16 @@ public sealed class FeedbackService : IFeedbackService
     /// <summary>Default confidence for a repository convention (lower than a lesson).</summary>
     public const double RepositoryConventionConfidence = 0.55;
 
+    /// <summary>Default confidence for an explicitly stated user preference (high; the user's own word).</summary>
+    public const double UserPreferenceConfidence = MemoryWorthinessClassifier.UserPreferenceConfidence;
+
     private readonly IRecallEventRepository _events;
     private readonly IRecallRuleRepository _rules;
     private readonly IRecallExtractor _extractor;
     private readonly IMemoryWorthinessClassifier _classifier;
     private readonly ICaptureDecisionPolicy _decisionPolicy;
     private readonly IAdaptiveWorthinessPolicy _adaptivePolicy;
+    private readonly IRuleLifecycleRecommendationRepository _recommendations;
     private readonly AgentRecallOptions _options;
 
     public FeedbackService(
@@ -45,6 +49,7 @@ public sealed class FeedbackService : IFeedbackService
         IMemoryWorthinessClassifier classifier,
         ICaptureDecisionPolicy decisionPolicy,
         IAdaptiveWorthinessPolicy adaptivePolicy,
+        IRuleLifecycleRecommendationRepository recommendations,
         AgentRecallOptions options)
     {
         _events = events ?? throw new ArgumentNullException(nameof(events));
@@ -53,6 +58,7 @@ public sealed class FeedbackService : IFeedbackService
         _classifier = classifier ?? throw new ArgumentNullException(nameof(classifier));
         _decisionPolicy = decisionPolicy ?? throw new ArgumentNullException(nameof(decisionPolicy));
         _adaptivePolicy = adaptivePolicy ?? throw new ArgumentNullException(nameof(adaptivePolicy));
+        _recommendations = recommendations ?? throw new ArgumentNullException(nameof(recommendations));
         _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
@@ -92,9 +98,39 @@ public sealed class FeedbackService : IFeedbackService
             rule.Mistake = conditional.Mistake;
         }
 
+        // An explicitly stated user preference is normalized into durable, bounded
+        // conditional form (never the raw "always caveman" phrasing) and stored as a
+        // user/communication preference — not a repository convention. It applies to the
+        // user everywhere, so any repository-narrow scope is corrected to Global.
+        var preference = worthiness is { CaptureReason: CaptureReason.ExplicitUserPreference };
+        if (preference)
+        {
+            if (worthiness!.SuggestedGeneralizedLesson is { Length: > 0 } normalized)
+            {
+                rule.RuleText = normalized;
+            }
+
+            if (!string.IsNullOrWhiteSpace(worthiness.NormalizedTrigger))
+            {
+                rule.Trigger = worthiness.NormalizedTrigger!;
+            }
+
+            if (!string.IsNullOrWhiteSpace(worthiness.Tags))
+            {
+                rule.Tags = MergeTags(rule.Tags, worthiness.Tags!);
+            }
+
+            if (rule.ScopeLevel is ScopeLevel.Repository or ScopeLevel.Directory or ScopeLevel.File)
+            {
+                rule.ScopeLevel = ScopeLevel.Global;
+                rule.ScopeValue = string.Empty;
+            }
+        }
+
         // Record the classified category and let it set the default trust: an
         // engineering lesson survives refactors, so it is trusted more than a
-        // repository convention that names specific symbols.
+        // repository convention that names specific symbols; an explicit user
+        // preference is trusted highly because it is the user's own word.
         rule.Category = worthiness?.Category ?? RuleCategory.Unknown;
         ApplyCategoryConfidence(rule);
 
@@ -115,17 +151,27 @@ public sealed class FeedbackService : IFeedbackService
             ApprovePosture = input.AutoApprove ?? _options.AutoApproveFeedback,
             IsDuplicate = existing is not null,
             CodeFactOverrideAllowed = _options.AllowCodeFactsWhenAccepted,
+            IsExplicitUserPreference = preference,
             ScopeLevel = rule.ScopeLevel,
             ScopeValue = rule.ScopeValue,
             WorthinessReason = worthiness?.Reason ?? "Memory-worthiness screening disabled.",
         });
 
+        // An explicit user preference carries its reason and evidence from the classifier
+        // (the text alone is enough), so it is recorded even on the manual path with no
+        // outcome context. A supplied context (turn finalizer) overrides below.
+        var captureReason = worthiness?.CaptureReason ?? CaptureReason.None;
+        string? evidenceSummary = preference && !string.IsNullOrWhiteSpace(worthiness!.EvidenceSummary)
+            ? worthiness.EvidenceSummary!.Trim()
+            : null;
+
         // Outcome-aware adjustment. Only applied when the caller supplied a context, so
         // every existing path (manual CLI/MCP feedback with no context) is unchanged. The
         // adaptive policy never re-derives signals; it only raises or lowers the decision.
-        var captureReason = CaptureReason.None;
-        string? evidenceSummary = null;
-        if (input.Context is { } context)
+        // An explicit user preference is exempt: it is captured on the user's word, so the
+        // outcome-evidence heuristics (which would otherwise skip "generic advice") never
+        // downgrade it — its reason and evidence already came from the classifier.
+        if (input.Context is { } context && !preference)
         {
             var adaptive = _adaptivePolicy.Adjust(
                 worthiness, context, decision, isDuplicate: existing is not null, conflictExists: context.ConflictExists);
@@ -167,6 +213,15 @@ public sealed class FeedbackService : IFeedbackService
         }
 
         rule = await _rules.AddAsync(rule, cancellationToken).ConfigureAwait(false);
+
+        // A newer explicit preference about the same dimension (e.g. answer length) as an
+        // older active one conflicts with it. Silently keeping both active would leave the
+        // agent with contradictory guidance, so — rather than auto-superseding, which is
+        // risky — record a Supersede recommendation the user can apply.
+        if (preference && rule.Status == RuleStatus.Active)
+        {
+            await RecommendSupersedeConflictingPreferencesAsync(rule, worthiness!, cancellationToken).ConfigureAwait(false);
+        }
 
         var recallEvent = await _events.AddAsync(new RecallEvent
         {
@@ -309,9 +364,86 @@ public sealed class FeedbackService : IFeedbackService
         {
             RuleCategory.EngineeringLesson => EngineeringLessonConfidence,
             RuleCategory.RepositoryConvention => RepositoryConventionConfidence,
+            RuleCategory.UserPreference or RuleCategory.CommunicationPreference => UserPreferenceConfidence,
             _ => rule.Confidence,
         };
     }
+
+    // The communication/interaction dimensions a preference can be about. Two preferences
+    // about the same dimension (e.g. both about answer length) are treated as conflicting.
+    private static readonly string[] PreferenceDimensionTags =
+        ["verbosity", "language", "prompt-format", "questioning", "honesty", "explanation-level"];
+
+    /// <summary>
+    /// Merges the extractor's tags with the classifier-assigned preference tags,
+    /// de-duplicated and order-preserving, into a single comma-separated string.
+    /// </summary>
+    private static string MergeTags(string? existing, string added)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var merged = new List<string>();
+        foreach (var tag in $"{existing},{added}".Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (seen.Add(tag))
+            {
+                merged.Add(tag);
+            }
+        }
+
+        return string.Join(",", merged);
+    }
+
+    /// <summary>
+    /// Records a Supersede recommendation for each in-force preference rule that governs
+    /// the same dimension as the newly captured one but prescribes different guidance, so
+    /// the user can retire the stale preference deliberately. Never mutates the old rule.
+    /// </summary>
+    private async Task RecommendSupersedeConflictingPreferencesAsync(
+        RecallRule newer, MemoryWorthinessResult worthiness, CancellationToken cancellationToken)
+    {
+        var dimension = PreferenceDimensionTags.FirstOrDefault(d =>
+            (worthiness.Tags ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Any(t => string.Equals(t, d, StringComparison.OrdinalIgnoreCase)));
+        if (dimension is null)
+        {
+            return;
+        }
+
+        var newerKey = NormalizeGuidance(newer.RuleText);
+        var candidates = await _rules.QueryAsync(new RuleQuery
+        {
+            ScopeLevel = newer.ScopeLevel,
+            ScopeValue = newer.ScopeValue ?? string.Empty,
+            ExcludeStatuses = NotReusable,
+        }, cancellationToken).ConfigureAwait(false);
+
+        foreach (var older in candidates)
+        {
+            if (older.Id == newer.Id ||
+                older.Category is not (RuleCategory.CommunicationPreference or RuleCategory.UserPreference) ||
+                NormalizeGuidance(older.RuleText) == newerKey ||
+                !HasDimensionTag(older.Tags, dimension))
+            {
+                continue;
+            }
+
+            await _recommendations.AddAsync(new RuleLifecycleRecommendation
+            {
+                RuleId = older.Id,
+                TargetRuleId = newer.Id,
+                RecommendationType = RecommendationType.Supersede,
+                Reason = $"A newer explicit {dimension} preference (#{newer.Id}) replaces this one.",
+                Evidence = $"Both rules set the user's {dimension} preference; the newer one is #{newer.Id}.",
+                Confidence = UserPreferenceConfidence,
+                Signature = $"Supersede:{older.Id}:{newer.Id}",
+            }, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static bool HasDimensionTag(string? tags, string dimension) =>
+        (tags ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Any(t => string.Equals(t, dimension, StringComparison.OrdinalIgnoreCase));
 
     private async Task<RecallRule?> FindEquivalentAsync(RecallRule candidate, CancellationToken cancellationToken)
     {

@@ -2434,6 +2434,10 @@ public static partial class CommandRouter
         var retrievedCount = events.Count(e => e.Type == RecallEventType.RuleApplied && e.RuleId == rule.Id);
         var netChange = Math.Round(ruleOutcomes.Sum(o => o.ConfidenceDelta), 2);
 
+        output.WriteLine("Type:");
+        output.WriteLine(rule.Category.ToString());
+        output.WriteLine();
+
         output.WriteLine("Rule:");
         output.WriteLine(rule.RuleText);
         output.WriteLine();
@@ -2452,6 +2456,10 @@ public static partial class CommandRouter
                 output.WriteLine();
             }
         }
+
+        output.WriteLine("Scope:");
+        output.WriteLine(DescribeRuleScope(rule));
+        output.WriteLine();
 
         output.WriteLine("Confidence:");
         output.WriteLine($"{rule.Confidence:0.00}");
@@ -2484,6 +2492,25 @@ public static partial class CommandRouter
 
     private static string Truncate(string value, int max) =>
         value.Length <= max ? value : value[..(max - 1)] + "…";
+
+    /// <summary>
+    /// A human scope label for `rules explain`. A user/communication preference is scoped
+    /// to the user (stored Global so it applies everywhere for this user), so it is shown
+    /// as "User" rather than "Global"; other rules show their stored scope.
+    /// </summary>
+    private static string DescribeRuleScope(RecallRule rule)
+    {
+        if (rule.Category is RuleCategory.UserPreference or RuleCategory.CommunicationPreference)
+        {
+            return "User (applies to this user everywhere)";
+        }
+
+        return rule.ScopeLevel == ScopeLevel.Global
+            ? "Global"
+            : string.IsNullOrWhiteSpace(rule.ScopeValue)
+                ? rule.ScopeLevel.ToString()
+                : $"{rule.ScopeLevel}:{rule.ScopeValue}";
+    }
 
     private static void WriteHelp(TextWriter output)
     {

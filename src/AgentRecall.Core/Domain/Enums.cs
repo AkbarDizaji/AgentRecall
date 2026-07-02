@@ -56,6 +56,22 @@ public enum RuleCategory
     /// patterns, reasoned principles). Stored with higher default trust.
     /// </summary>
     EngineeringLesson = 3,
+
+    /// <summary>
+    /// A durable preference the user stated about how the assistant should behave,
+    /// that is not specifically about communication (e.g. a workflow or interaction
+    /// preference). Applies to the user, not to a repository, so it is never a
+    /// repository convention. Captured with high trust when stated explicitly.
+    /// </summary>
+    UserPreference = 4,
+
+    /// <summary>
+    /// A durable preference about how the assistant should communicate: answer
+    /// length, explanation depth, formatting, language, prompt delivery, how often
+    /// to ask questions. A specialization of <see cref="UserPreference"/> for the
+    /// communication surface; scoped to the user, never to a repository.
+    /// </summary>
+    CommunicationPreference = 5,
 }
 
 /// <summary>The kind of activity recorded by a <see cref="RecallEvent"/>.</summary>
