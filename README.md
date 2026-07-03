@@ -458,10 +458,13 @@ How seed rules behave:
   its confidence and can trigger an archive/suppress lifecycle recommendation — exactly like any
   learned rule. Repeated uneventful use raises confidence a small, capped amount; explicit
   acceptance raises it more.
-- **Idempotent and safe.** Installing the same pack twice creates no duplicates, an install
-  never overwrites a rule you edited, and removing a pack archives its rules (and preserves
-  ones you edited or promoted). A reinstall will not resurrect a removed rule unless you pass
-  `--force`.
+- **Idempotent and safe.** Installing a pack only ever *adds* seed rules — it never edits or
+  deletes rules you already have. Your own (learned) rules are matched by source and left
+  completely untouched, so installing on top of an existing corpus is safe; if a seed rule
+  happens to overlap one of yours, the two coexist and your rule wins (seed rules rank lower).
+  Installing the same pack twice creates no duplicates, an install never overwrites a seed rule
+  you edited, and removing a pack archives only that pack's rules (preserving ones you edited or
+  promoted). A reinstall will not resurrect a removed rule unless you pass `--force`.
 
 The `tidy-first` pack is paraphrased practical guidance inspired by common tidying and
 refactoring practices. It contains no copied or quoted book text.
