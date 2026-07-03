@@ -42,7 +42,7 @@
     <RepositoryUrl>https://github.com/AkbarDizaji/AgentRecall</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>0.10.0 makes AgentRecall visibly useful and its state queryable. Activity Notices surface what it fetched, captured, skipped, resolved, mined, and recommended through a recognizable badge — kept separate from the model-visible context so verbose detail never inflates injected tokens — with `agentrecall activity last|list` and configurable ActivityNoticeLevel/HookNoticeLevel. The generated CLAUDE.md now carries an explicit behavior contract that routes capture/state questions to the existing status commands and forbids speculative non-answers. Full notes: https://github.com/AkbarDizaji/AgentRecall/blob/main/CHANGELOG.md</PackageReleaseNotes>
+    <PackageReleaseNotes>1.2.0 adds opt-in built-in seed packs: curated starter rules that give an agent useful engineering instincts before a project has learned its own memory. The first pack, `tidy-first`, ships ten paraphrased conditional refactoring rules (no copied book text). Install a pack with `agentrecall seed install tidy-first` (Active from day one at moderate confidence; `--suggested` keeps them Pending for manual approval), and manage them with `seed list|show|status|remove`. Seed rules are marked seed-derived, rank below project-specific rules, never overwrite your own rules, and evolve their confidence like any rule. Full notes: https://github.com/AkbarDizaji/AgentRecall/blob/main/CHANGELOG.md</PackageReleaseNotes>
   </PropertyGroup>
 
   <ItemGroup>

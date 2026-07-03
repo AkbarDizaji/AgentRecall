@@ -4,7 +4,7 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.0] - 2026-07-03
 
 ### Added
 - **Built-in seed packs.** AgentRecall can now install curated, opt-in starter rules that
