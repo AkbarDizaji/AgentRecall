@@ -16,6 +16,29 @@ public sealed class RecallRule
     public RuleStatus Status { get; set; } = RuleStatus.Active;
 
     /// <summary>
+    /// Where this rule came from. Defaults to <see cref="RuleSource.Learned"/> so every
+    /// rule captured before seed packs existed keeps its original meaning. A
+    /// <see cref="RuleSource.BuiltInSeed"/> rule is starter guidance installed from a
+    /// curated pack (see <see cref="SeedPack"/>), ranked below learned rules until
+    /// repeated successful local use earns it more trust.
+    /// </summary>
+    public RuleSource Source { get; set; } = RuleSource.Learned;
+
+    /// <summary>
+    /// The seed pack this rule was installed from (e.g. "tidy-first"), or empty when the
+    /// rule was not seed-derived. Together with <see cref="SeedRuleKey"/> it makes a seed
+    /// install idempotent: the same pack rule is never added twice.
+    /// </summary>
+    public string SeedPack { get; set; } = string.Empty;
+
+    /// <summary>
+    /// A stable key identifying this rule within its <see cref="SeedPack"/>, independent of
+    /// the database id or wording. Used to recognise an already-installed seed rule (so a
+    /// reinstall is a no-op) and to survive edits to the rule's text.
+    /// </summary>
+    public string SeedRuleKey { get; set; } = string.Empty;
+
+    /// <summary>
     /// What kind of knowledge this rule captures. Defaults to
     /// <see cref="RuleCategory.Unknown"/> so rules from earlier versions keep
     /// working unchanged.

@@ -114,6 +114,10 @@ public static class ServiceCollectionExtensions
         // Project DNA: distil the corpus into an onboarding-ready personality summary.
         services.AddScoped<IProjectDnaService, ProjectDnaService>();
 
+        // Seed packs: opt-in curated starter rules, and their passive confidence evolution.
+        services.AddScoped<Core.Seeds.ISeedPackService, Core.Seeds.SeedPackService>();
+        services.AddScoped<Core.Seeds.ISeedConfidenceService, Core.Seeds.SeedConfidenceService>();
+
         return services;
     }
 }

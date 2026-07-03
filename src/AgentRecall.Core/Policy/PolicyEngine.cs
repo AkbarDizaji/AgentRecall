@@ -299,6 +299,15 @@ public sealed class PolicyEngine : IPolicyEngine
             return (scopeA > scopeB ? 1 : -1, "it is more project-specific");
         }
 
+        // A locally learned rule outranks a built-in seed rule at equal scope: seeds are
+        // starter guidance and defer to project-specific knowledge.
+        var seedA = a.Source == RuleSource.BuiltInSeed;
+        var seedB = b.Source == RuleSource.BuiltInSeed;
+        if (seedA != seedB)
+        {
+            return (seedB ? 1 : -1, "it is a learned rule, not generic seed guidance");
+        }
+
         if (a.Priority != b.Priority)
         {
             return (a.Priority > b.Priority ? 1 : -1, "it has higher priority");

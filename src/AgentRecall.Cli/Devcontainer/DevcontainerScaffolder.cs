@@ -296,6 +296,22 @@ public static class DevcontainerScaffolder
         A preference that conflicts with correctness or honesty (e.g. "always agree even
         if I'm wrong") is **not** captured.
 
+        ### Seed rules
+
+        AgentRecall may include optional **seed rules** installed from a built-in seed pack
+        (e.g. `tidy-first`). Once a pack is installed they are **active starter guidance** —
+        in force from day one — but they are not project-specific truth.
+
+        - Apply a seed rule when its When/If condition matches the task.
+        - Do not treat a seed rule as absolute.
+        - Prefer project-specific rules over seed rules when they conflict; explicit user
+          corrections always override a seed rule.
+        - A seed rule is marked as seed-derived and starts at moderate confidence; it earns
+          more trust from repeated successful use.
+        - If the user rejects a seed rule for this project (or says it is not applicable),
+          AgentRecall lowers its confidence, suppresses it, or archives it — do not keep
+          pushing it.
+
         """;
 
     /// <summary>

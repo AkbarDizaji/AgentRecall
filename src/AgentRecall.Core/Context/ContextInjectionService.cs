@@ -26,6 +26,26 @@ public sealed class ContextInjectionService : IContextInjectionService
     /// <summary>Score at or above which a high-trust rule is "must-follow".</summary>
     private const double MustFollowFloor = 0.15;
 
+    /// <summary>
+    /// Score multiplier applied to built-in seed rules so a locally learned rule of equal
+    /// relevance always ranks above generic starter guidance. Repeated successful local use
+    /// raises a seed rule's confidence, which lifts its score back up over time.
+    /// </summary>
+    private const double SeedScoreDampening = 0.85;
+
+    /// <summary>
+    /// Most seed rules injected per prompt when the task is not about tidying/refactoring,
+    /// so starter guidance never floods the context. Lifted for tidy-focused tasks.
+    /// </summary>
+    private const int SeedInjectionCap = 2;
+
+    /// <summary>Task words that signal a tidy/refactor prompt, where seed rules are on-topic.</summary>
+    private static readonly HashSet<string> TidyTaskTerms = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "tidy", "refactor", "refactoring", "cleanup", "clean", "rename", "extract",
+        "guard", "readability", "restructure", "simplify", "nested", "conditional", "conditionals",
+    };
+
     // Tokens/words associated with each task type, used for the task-type signal.
     private static readonly Dictionary<TaskType, string[]> TaskTypeTerms = new()
     {
@@ -126,6 +146,10 @@ public sealed class ContextInjectionService : IContextInjectionService
             .ThenByDescending(a => a.Rule.Confidence)
             .ThenBy(a => a.Rule.Id)
             .ToList();
+
+        // Cap seed rules so starter guidance never floods the context — unless the task is
+        // itself about tidying/refactoring, where seed rules are the point.
+        ranked = CapSeedRules(ranked, taskTokens, request.TaskType);
 
         var result = PackIntoBudget(ranked, request.TokenBudget, request.Limit, prunedByPolicy);
 
@@ -348,7 +372,10 @@ public sealed class ContextInjectionService : IContextInjectionService
         var confidence = Math.Clamp(rule.Confidence, 0.0, 1.0);
         var confidenceFactor = 0.5 + 0.5 * confidence;
         var statusFactor = rule.Status == RuleStatus.Promoted ? 1.1 : 1.0;
-        var score = relevance * confidenceFactor * statusFactor;
+        // Seed rules are dampened so learned rules of equal relevance outrank them.
+        var isSeed = rule.Source == RuleSource.BuiltInSeed;
+        var sourceFactor = isSeed ? SeedScoreDampening : 1.0;
+        var score = relevance * confidenceFactor * statusFactor * sourceFactor;
 
         var highTrust = confidence >= 0.8 || rule.Status == RuleStatus.Promoted;
         if (highTrust)
@@ -356,7 +383,45 @@ public sealed class ContextInjectionService : IContextInjectionService
             reasons.Add($"high confidence ({confidence:0.00}){(rule.Status == RuleStatus.Promoted ? ", promoted" : string.Empty)}");
         }
 
-        return new Assessment(rule, relevance, score, reasons, projectScoped, highTrust, IsProhibition(rule), false);
+        if (isSeed)
+        {
+            reasons.Add("seed rule (starter guidance)");
+        }
+
+        return new Assessment(rule, relevance, score, reasons, projectScoped, highTrust, IsProhibition(rule), false, isSeed);
+    }
+
+    /// <summary>
+    /// Keeps at most <see cref="SeedInjectionCap"/> seed rules (highest-ranked first) unless
+    /// the task is tidy/refactor-focused, in which case all ranked seeds are kept. Learned
+    /// rules are never dropped by this cap.
+    /// </summary>
+    private static List<Assessment> CapSeedRules(List<Assessment> ranked, HashSet<string> taskTokens, TaskType taskType)
+    {
+        var tidyFocused = taskType == TaskType.Refactor || taskTokens.Overlaps(TidyTaskTerms);
+        if (tidyFocused)
+        {
+            return ranked;
+        }
+
+        var seedsKept = 0;
+        var capped = new List<Assessment>(ranked.Count);
+        foreach (var a in ranked)
+        {
+            if (!a.IsSeed)
+            {
+                capped.Add(a);
+                continue;
+            }
+
+            if (seedsKept < SeedInjectionCap)
+            {
+                capped.Add(a);
+                seedsKept++;
+            }
+        }
+
+        return capped;
     }
 
     private static ContextInjectionResult PackIntoBudget(List<Assessment> ranked, int budget, int limit, int prunedByPolicy)
@@ -425,8 +490,9 @@ public sealed class ContextInjectionService : IContextInjectionService
     {
         var importance = a.Prohibition
             ? RuleImportance.Warning
-            // Unapproved (Pending) rules are surfaced but never as must-follow.
-            : !a.Unapproved && (a.HighTrust || a.ProjectScoped) && a.Score >= MustFollowFloor
+            // Unapproved (Pending) rules, and seed rules, are surfaced but never as
+            // must-follow: seeds are starter guidance, not project truth.
+            : !a.Unapproved && !a.IsSeed && (a.HighTrust || a.ProjectScoped) && a.Score >= MustFollowFloor
                 ? RuleImportance.MustFollow
                 : RuleImportance.Suggested;
 
@@ -482,5 +548,6 @@ public sealed class ContextInjectionService : IContextInjectionService
         bool ProjectScoped,
         bool HighTrust,
         bool Prohibition,
-        bool Unapproved);
+        bool Unapproved,
+        bool IsSeed);
 }

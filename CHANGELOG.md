@@ -4,6 +4,32 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Built-in seed packs.** AgentRecall can now install curated, opt-in starter rules that
+  give an agent useful engineering instincts before a project has accumulated its own
+  memory. The first pack, `tidy-first`, ships ten paraphrased, conditional rules for
+  separating behaviour-preserving cleanup from behaviour change (no copied book text). New
+  commands: `agentrecall seed list | show <pack> | install <pack> [--active] [--suggested]
+  [--force] | remove <pack> [--force] | status` (all support `--json`). Packs are never
+  installed automatically. Installing a pack is the opt-in, so its rules go in **Active** at
+  moderate confidence (~0.65) from day one; `--suggested` is the conservative mode that
+  installs them as Pending for manual approval.
+- Seed rules are stored as normal rules but marked seed-derived: additive
+  `RuleSource.BuiltInSeed`, `RecallRule.SeedPack` / `SeedRuleKey`, and
+  `CaptureReason.BuiltInSeed` (enum values persist as strings, so the change needs no
+  migration). Installs are idempotent (no duplicates, never overwrite user edits); removal
+  archives a pack's rules while preserving ones the user edited or promoted, and a reinstall
+  will not resurrect a removed rule without `--force`.
+- Seed-aware retrieval: seed rules rank below locally learned rules, lose conflicts against
+  repository conventions, are never injected as "must-follow", and are capped at two per
+  prompt unless the task itself is about tidying/refactoring. Their confidence evolves like
+  any rule — a small, capped bump for repeated uneventful use, larger moves on explicit
+  acceptance or rejection. Used seed rules show a `[seed]` marker in the Turn Memory Summary,
+  and installing a pack emits an activity notice. The scaffolded `CLAUDE.md` and the README
+  document that seed rules are starter guidance, not project truth.
+
 ## [1.1.0] - 2026-07-02
 
 ### Added

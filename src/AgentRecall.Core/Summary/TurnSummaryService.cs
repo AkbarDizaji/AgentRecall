@@ -201,6 +201,7 @@ public sealed class TurnSummaryService : ITurnSummaryService
             Title = ShortTitle(rule),
             Category = category,
             Reason = reason,
+            Seed = rule.Source == RuleSource.BuiltInSeed,
         };
     }
 

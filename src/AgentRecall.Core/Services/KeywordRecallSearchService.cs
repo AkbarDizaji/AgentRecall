@@ -37,6 +37,10 @@ public sealed class KeywordRecallSearchService : IRecallSearchService
     private const double StatusWeight = 0.3;
     private const double ConfidenceWeight = 0.2;
 
+    // Score penalty for built-in seed rules so a learned rule of equal relevance ranks
+    // above generic starter guidance. Seeds still appear in results, just lower.
+    private const double SeedPenalty = 0.15;
+
     // Relevance blend between keyword and semantic similarity (1.0 = keyword-only).
     private const double KeywordBlend = 0.6;
 
@@ -104,7 +108,8 @@ public sealed class KeywordRecallSearchService : IRecallSearchService
             var score =
                 relevance * RelevanceWeight +
                 StatusScore(rule.Status) * StatusWeight +
-                Math.Clamp(rule.Confidence, 0.0, 1.0) * ConfidenceWeight;
+                Math.Clamp(rule.Confidence, 0.0, 1.0) * ConfidenceWeight -
+                (rule.Source == RuleSource.BuiltInSeed ? SeedPenalty : 0.0);
 
             results.Add(new SearchResult { Rule = rule, Score = score, Relevance = relevance });
         }

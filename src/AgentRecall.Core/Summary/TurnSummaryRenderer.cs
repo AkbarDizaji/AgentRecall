@@ -117,6 +117,11 @@ public static class TurnSummaryRenderer
         foreach (var rule in rules.Take(MaxItems))
         {
             sb.Append("\n- #").Append(rule.Id).Append(' ').Append(rule.Title);
+            if (rule.Seed)
+            {
+                sb.Append(" [seed]");
+            }
+
             if (withApprove)
             {
                 sb.Append("\n  Approve: `agentrecall rules approve ").Append(rule.Id).Append('`');

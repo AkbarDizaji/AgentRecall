@@ -19,6 +19,28 @@ public enum RuleStatus
 }
 
 /// <summary>
+/// Where a <see cref="RecallRule"/> came from. Distinct from <see cref="RuleCategory"/>
+/// (what kind of knowledge it is): a seed rule can still be a repository-convention or
+/// engineering-lesson category rule. Defaults to <see cref="Learned"/> so every rule
+/// captured before seed packs existed keeps its original meaning.
+/// </summary>
+public enum RuleSource
+{
+    /// <summary>
+    /// Learned locally from this project — feedback, corrections, mined lessons, imports.
+    /// The default and the only source before seed packs existed.
+    /// </summary>
+    Learned = 0,
+
+    /// <summary>
+    /// Installed from a curated built-in seed pack (see <c>agentrecall seed</c>). Starter
+    /// guidance, not a project fact: ranked below learned rules and clearly marked as
+    /// seed-derived until repeated successful local use earns it more trust.
+    /// </summary>
+    BuiltInSeed = 1,
+}
+
+/// <summary>
 /// The granularity at which a rule or scope applies, from broadest to narrowest.
 /// </summary>
 public enum ScopeLevel
@@ -233,6 +255,12 @@ public enum ActivityType
 
     /// <summary>A suggested (Pending) rule was ignored (archived) via Interactive Memory.</summary>
     SuggestionIgnored = 10,
+
+    /// <summary>A built-in seed pack was installed.</summary>
+    SeedInstalled = 11,
+
+    /// <summary>Seed rules gained confidence from repeated uneventful use.</summary>
+    SeedReinforced = 12,
 }
 
 /// <summary>Review state of a <see cref="RuleLifecycleRecommendation"/>.</summary>

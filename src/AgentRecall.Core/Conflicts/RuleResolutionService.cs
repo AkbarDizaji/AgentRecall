@@ -25,6 +25,10 @@ public sealed class RuleResolutionService : IRuleResolutionService
     private const double RecencyWeight = 0.10;
     private const double TriggerWeight = 0.10;
 
+    // A locally learned rule wins a tie against a built-in seed rule: a repository
+    // convention or lesson should beat generic starter guidance when they conflict.
+    private const double SourceWeight = 0.15;
+
     public RuleResolution Resolve(IReadOnlyList<RecallRule> conflictingRules)
     {
         ArgumentNullException.ThrowIfNull(conflictingRules);
@@ -81,13 +85,15 @@ public sealed class RuleResolutionService : IRuleResolutionService
         var status = StatusScore(rule);
         var recency = Normalize(Recency(rule), tickMin, tickMax);
         var trigger = Normalize(TriggerSpecificity(rule.Trigger), triggerMin, triggerMax);
+        var source = rule.Source == RuleSource.BuiltInSeed ? 0.0 : 1.0;
 
         var total =
             ScopeWeight * scope +
             ConfidenceWeight * confidence +
             StatusWeight * status +
             RecencyWeight * recency +
-            TriggerWeight * trigger;
+            TriggerWeight * trigger +
+            SourceWeight * source;
 
         return new RuleScore
         {

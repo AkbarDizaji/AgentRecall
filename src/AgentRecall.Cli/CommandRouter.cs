@@ -95,6 +95,7 @@ public static partial class CommandRouter
             ["capture-status"] = new DelegateCommand((a, s, o, _, ct) => FinalizeTurnAsync("capture-status", a, s, o, ct)),
             ["turn-summary"] = new DelegateCommand((a, s, o, _, ct) => TurnSummaryAsync(a, s, o, ct)),
             ["activity"] = new DelegateCommand((a, s, o, _, ct) => ActivityAsync(a, s, o, ct)),
+            ["seed"] = new DelegateCommand((a, s, o, l, ct) => SeedAsync(a, s, o, l, ct)),
             ["mcp"] = new DelegateCommand(async (_, s, o, _, ct) =>
             {
                 var server = new Mcp.McpServer(s);
@@ -1557,6 +1558,18 @@ public static partial class CommandRouter
 
             var result = await finalizer.FinalizeAsync(input, cancellationToken).ConfigureAwait(false);
 
+            // Passive seed reinforcement: a seed rule used repeatedly across turns without a
+            // correction earns a small, capped confidence bump. Runs on the end-of-turn path
+            // so evolution is deterministic and never touches the hot retrieval path.
+            var seedReinforcement = await scope.ServiceProvider.GetRequiredService<Core.Seeds.ISeedConfidenceService>()
+                .ReinforceAsync(cancellationToken).ConfigureAwait(false);
+            var seedNotice = ActivityNoticeFactory.ForSeedReinforced(seedReinforcement, input.Source ?? "cli");
+            if (seedNotice is not null)
+            {
+                await scope.ServiceProvider.GetRequiredService<IActivityRecorder>()
+                    .RecordAsync(seedNotice with { TurnId = result.TurnId }, cancellationToken).ConfigureAwait(false);
+            }
+
             // Record the finalization for the human-visible log (deduped by turn id, so
             // a cached re-finalization never double-logs). Stamp the turn id so this
             // capture joins the rules used earlier in the same turn.
@@ -1581,7 +1594,9 @@ public static partial class CommandRouter
             else
             {
                 RenderFinalization(output, result);
-                PrintNotice(output, notice, services.GetRequiredService<AgentRecallOptions>().ResolvedActivityNoticeLevel);
+                var level = services.GetRequiredService<AgentRecallOptions>().ResolvedActivityNoticeLevel;
+                PrintNotice(output, notice, level);
+                PrintNotice(output, seedNotice, level);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -2570,6 +2585,11 @@ public static partial class CommandRouter
         output.WriteLine("                       (--json, --detailed, --compact)");
         output.WriteLine("  activity last        Show the latest AgentRecall activity notice (--json)");
         output.WriteLine("  activity list        Show recent activity notices (--limit <n>, --json)");
+        output.WriteLine("  seed list            List built-in seed packs (curated starter rules)");
+        output.WriteLine("  seed show <pack>     Show a seed pack's rules, defaults, and provenance");
+        output.WriteLine("  seed install <pack>  Install a seed pack (--active, --suggested, --force, --json)");
+        output.WriteLine("  seed remove <pack>   Remove an installed seed pack (--force, --json)");
+        output.WriteLine("  seed status          Show installed seed packs and rule counts (--json)");
         output.WriteLine("  mcp                  Run the MCP server over stdio (for Claude Code)");
         output.WriteLine("  status               Show the memory subsystem status");
         output.WriteLine("  help                 Show this help text");

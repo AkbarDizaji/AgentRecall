@@ -37,12 +37,20 @@ public sealed class AgentRecallDbContext : DbContext
             // additive schema reconciler can backfill the columns on older databases.
             entity.Property(e => e.CaptureReason).HasConversion<string>().HasDefaultValue(Core.Capture.CaptureReason.None);
             entity.Property(e => e.EvidenceSummary).HasDefaultValue(string.Empty);
+            // Seed provenance. Stored as strings with defaults so the additive schema
+            // reconciler can backfill the columns on databases created before seed packs.
+            entity.Property(e => e.Source).HasConversion<string>().HasDefaultValue(RuleSource.Learned);
+            entity.Property(e => e.SeedPack).HasDefaultValue(string.Empty);
+            entity.Property(e => e.SeedRuleKey).HasDefaultValue(string.Empty);
             entity.Property(e => e.Trigger).IsRequired();
             entity.Property(e => e.Priority).HasDefaultValue(0);
             entity.Property(e => e.Deprecated).HasDefaultValue(false);
             entity.HasIndex(e => new { e.ScopeLevel, e.ScopeValue });
             entity.HasIndex(e => e.Status);
             entity.HasIndex(e => e.Deprecated);
+            // Non-unique: every non-seed rule shares the empty (pack, key) pair, so this
+            // is a lookup index for idempotent seed installs, not a uniqueness constraint.
+            entity.HasIndex(e => new { e.SeedPack, e.SeedRuleKey });
         });
 
         modelBuilder.Entity<RecallEvent>(entity =>

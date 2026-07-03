@@ -42,4 +42,11 @@ public enum CaptureReason
     /// captured on the user's word, not inferred from a single message.
     /// </summary>
     ExplicitUserPreference,
+
+    /// <summary>
+    /// Installed from a curated built-in seed pack (see <c>agentrecall seed</c>). Not
+    /// project-observed evidence: starter guidance the user opted into, carried so a
+    /// seed rule explains that it came from a pack rather than a local observation.
+    /// </summary>
+    BuiltInSeed,
 }

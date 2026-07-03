@@ -257,6 +257,57 @@ public static class ActivityNoticeFactory
         };
     }
 
+    /// <summary>A notice for a seed-pack install, or null when nothing was added or restored.</summary>
+    public static ActivityNotice? ForSeedInstalled(Seeds.SeedInstallResult result, string source)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+
+        var added = result.Added;
+        var restored = result.Restored;
+        if (added == 0 && restored == 0)
+        {
+            return null;
+        }
+
+        var statusWord = result.Status == RuleStatus.Active ? "active" : "suggested";
+        var parts = new List<string>();
+        if (added > 0) parts.Add($"{added} {statusWord} {Plural(added, "rule")}");
+        if (restored > 0) parts.Add($"{restored} restored");
+
+        return new ActivityNotice
+        {
+            Type = ActivityType.SeedInstalled,
+            Summary = $"installed seed pack `{result.Pack}` — {string.Join(", ", parts)}.",
+            Details = result.AffectedRules
+                .Select(r => $"#{r.Id} {Truncate(r.Trigger, LabelLength)}")
+                .ToList(),
+            RuleIds = result.AffectedRules.Select(r => r.Id).ToList(),
+            Source = source,
+        };
+    }
+
+    /// <summary>A notice for seed passive reinforcement, or null when no confidence moved.</summary>
+    public static ActivityNotice? ForSeedReinforced(Seeds.SeedReinforcementResult result, string source)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        if (result.Adjustments.Count == 0)
+        {
+            return null;
+        }
+
+        var count = result.Adjustments.Count;
+        return new ActivityNotice
+        {
+            Type = ActivityType.SeedReinforced,
+            Summary = $"seed rule confidence increased after repeated successful use ({count} {Plural(count, "rule")}).",
+            Details = result.Adjustments
+                .Select(a => $"#{a.RuleId} {Truncate(a.Title, LabelLength)}: {a.PreviousConfidence:0.00} → {a.NewConfidence:0.00}")
+                .ToList(),
+            RuleIds = result.Adjustments.Select(a => a.RuleId).ToList(),
+            Source = source,
+        };
+    }
+
     private static string DescribeConflict(ResolvedConflict conflict)
     {
         var ignored = conflict.Resolution.IgnoredRuleIds;

@@ -13,6 +13,9 @@ public sealed record TurnSummaryRule
 
     /// <summary>An optional short reason (e.g. the capture evidence), when relevant.</summary>
     public string? Reason { get; init; }
+
+    /// <summary>True when the rule came from a built-in seed pack (shown as a [seed] marker).</summary>
+    public bool Seed { get; init; }
 }
 
 /// <summary>A skipped capture candidate in a turn summary: why it was not stored.</summary>

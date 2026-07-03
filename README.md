@@ -296,6 +296,11 @@ on a retrieval regression. The same check also runs as a unit test.
 | `activity last` | Show the latest AgentRecall activity notice (`--json`). |
 | `activity list` | Show recent activity notices, newest first (`--limit <n>`, `--json`). |
 | `turn-summary --last` | Show the aggregated Turn Memory Summary for the last turn (`--json`, `--detailed`, `--compact`). |
+| `seed list` | List built-in seed packs and whether they are installed (`--json`). |
+| `seed show <pack>` | Show a seed pack's rules, defaults, and provenance (`--json`). |
+| `seed install <pack>` | Install a seed pack; rules are Active by default (`--active` spells that out, `--suggested` installs them as Pending for manual approval, `--force`, `--json`). |
+| `seed remove <pack>` | Remove an installed seed pack (`--force`, `--json`). |
+| `seed status` | Show installed seed packs and rule counts by status (`--json`). |
 | `mcp` | Run the MCP server over stdio (for Claude Code). |
 | `status` | Show where data is stored. |
 | `help` / `--help` / `-h` | Show usage. |
@@ -411,6 +416,55 @@ The Markdown output is designed to drop straight into a `PROJECT_DNA.md`,
   point new contributors at it. Regenerate it whenever the rule corpus changes.
 - **Agents:** paste `agentrecall dna` (or the Markdown) into an agent's context at the
   start of a session so it inherits the project's conventions before writing any code.
+
+---
+
+## Seed Packs
+
+Seed packs provide optional **starter engineering memories** — curated, conditional rules
+that give an agent useful instincts before a project has accumulated enough learned memory
+of its own. They are **not** project facts, they are **opt-in at the pack level**, and they
+can be removed at any time. AgentRecall never installs a seed pack automatically.
+
+The first built-in pack is `tidy-first`: ten paraphrased, practical rules for separating
+behaviour-preserving cleanup from behaviour change (guard clauses, naming, extraction,
+scoping a tidy, and so on).
+
+```bash
+agentrecall seed list                    # what packs exist, and whether they're installed
+agentrecall seed show tidy-first         # rules, defaults, and provenance
+agentrecall seed install tidy-first      # install as Active (the default)
+agentrecall seed install tidy-first --active     # same as the default, spelled out
+agentrecall seed install tidy-first --suggested  # conservative mode: install as Pending for manual approval
+agentrecall seed status                  # installed packs and rule counts by status
+agentrecall seed remove tidy-first       # archive the pack's rules
+```
+
+How seed rules behave:
+
+- **Active by default.** Installing a pack is the opt-in, so its rules are in force from day
+  one at a moderate confidence (~0.65). Prefer manual approval? Pass `--suggested` to install
+  them as Pending/Suggested and approve individual rules with `agentrecall rules approve <id>`.
+- **Marked as seed-derived** (source `BuiltInSeed`, tagged `seed` and the pack name) so you
+  can always tell starter guidance from learned memory. Used seed rules show a `[seed]`
+  marker in the Turn Memory Summary.
+- **Ranked below learned rules.** Project-specific `RepositoryConvention` / `EngineeringLesson`
+  rules and explicit user corrections override seed rules: they outrank seed rules in retrieval
+  and win conflicts against them, and a seed rule is never injected as "must-follow". Seed
+  injection is capped (at most two per prompt) unless the task is itself about tidying or
+  refactoring, so starter guidance never floods the context.
+- **Not absolute.** Apply a seed rule only when its condition matches. If a seed rule is not
+  applicable in this project, reject or archive it: rejections, corrections, or archiving lower
+  its confidence and can trigger an archive/suppress lifecycle recommendation — exactly like any
+  learned rule. Repeated uneventful use raises confidence a small, capped amount; explicit
+  acceptance raises it more.
+- **Idempotent and safe.** Installing the same pack twice creates no duplicates, an install
+  never overwrites a rule you edited, and removing a pack archives its rules (and preserves
+  ones you edited or promoted). A reinstall will not resurrect a removed rule unless you pass
+  `--force`.
+
+The `tidy-first` pack is paraphrased practical guidance inspired by common tidying and
+refactoring practices. It contains no copied or quoted book text.
 
 ---
 
