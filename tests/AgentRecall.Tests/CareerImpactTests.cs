@@ -268,6 +268,18 @@ public class CareerImpactTests
         Assert.Equal(a.SuggestedMetrics, b.SuggestedMetrics);
     }
 
+    [Fact] // The promotion note reads as natural prose, not an enum/fragment dump.
+    public void PromotionNote_ReadsNaturally()
+    {
+        var analysis = Analyze("Plan the database migration and the architecture decision, optimizing latency");
+        Assert.StartsWith("Staff-level engineering work that ", analysis.PromotionNote, StringComparison.Ordinal);
+        Assert.EndsWith(".", analysis.PromotionNote, StringComparison.Ordinal);
+        // No PascalCase enum name or "Category: fragment" shape leaks into the prose.
+        Assert.DoesNotContain("TechnicalImpact", analysis.PromotionNote, StringComparison.Ordinal);
+        Assert.DoesNotContain(": involves", analysis.PromotionNote, StringComparison.Ordinal);
+        Assert.Contains(" and ", analysis.PromotionNote, StringComparison.Ordinal);
+    }
+
     // ---- Renderer bounds ------------------------------------------------------------
 
     [Fact] // T. The compact summary is at most five bullets.

@@ -23,7 +23,7 @@ public sealed class CareerImpactDetector
     private static readonly Signal[] PositiveSignals =
     [
         new(["migration", "migrate", "migrations", "migrating"], [ImpactCategory.Architecture, ImpactCategory.TechnicalImpact], "involves a migration", true),
-        new(["architecture", "architectural", "design decision", "api design"], [ImpactCategory.Architecture], "involves an architectural decision", true),
+        new(["architecture", "architectural", "design decision", "api design"], [ImpactCategory.Architecture], "makes an architectural decision", true),
         new(["incident", "outage", "postmortem", "post-mortem"], [ImpactCategory.IncidentResponse, ImpactCategory.Reliability], "responds to an incident or outage", true),
         new(["optimization", "optimize", "optimized", "optimizing", "optimisation"], [ImpactCategory.Performance], "optimizes a system", true),
         new(["performance", "latency", "throughput"], [ImpactCategory.Performance], "targets performance", true),
@@ -123,7 +123,7 @@ public sealed class CareerImpactDetector
             TechnicalImpact = BuildTechnical(categories),
             BusinessImpact = BuildBusiness(categories),
             LongTermImpact = BuildLongTerm(categories),
-            PromotionNote = BuildPromotionNote(categories, reasons),
+            PromotionNote = BuildPromotionNote(reasons, isSignificant),
             CompactSummary = compactSummary,
         };
     }
@@ -321,11 +321,28 @@ public sealed class CareerImpactDetector
             : "Mostly near-term impact; consider how to make it reusable.";
     }
 
-    private static string BuildPromotionNote(IReadOnlyList<ImpactCategory> categories, IReadOnlyList<string> reasons)
+    private static string BuildPromotionNote(IReadOnlyList<string> reasons, bool isSignificant)
     {
-        var lead = reasons.Count > 0 ? reasons[0] : "advanced meaningful engineering work";
-        var area = categories.Count > 0 ? categories[0].ToString() : "engineering impact";
-        return $"Demonstrated {area}: {lead}.";
+        var lead = isSignificant ? "Staff-level engineering work" : "Engineering work";
+        if (reasons.Count == 0)
+        {
+            return $"{lead} worth capturing for a future review.";
+        }
+
+        return $"{lead} that {JoinWithAnd(reasons.Take(2))}.";
+    }
+
+    /// <summary>Joins phrases into natural prose: "a", "a and b", "a, b, and c".</summary>
+    private static string JoinWithAnd(IEnumerable<string> parts)
+    {
+        var list = parts.ToList();
+        return list.Count switch
+        {
+            0 => string.Empty,
+            1 => list[0],
+            2 => $"{list[0]} and {list[1]}",
+            _ => $"{string.Join(", ", list.Take(list.Count - 1))}, and {list[^1]}",
+        };
     }
 
     private static string BuildHaystack(CareerImpactInput input)
