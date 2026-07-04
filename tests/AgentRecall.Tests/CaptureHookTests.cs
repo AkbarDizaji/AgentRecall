@@ -80,6 +80,42 @@ public class CaptureHookTests
         Assert.Equal(RuleStatus.Active, rule.Status);
     }
 
+    // B2. Acceptance intent expressed in the prompt text (no `accepted` flag) forces Active.
+    // The regex patterns tolerate intervening words that the old fixed phrases missed.
+    [Theory]
+    [InlineData("Always validate inputs at the API boundary. Apply the review comment.")]
+    [InlineData("Always validate inputs at the API boundary. Please apply the reviewer's second comment.")]
+    [InlineData("Always validate inputs at the API boundary. Do exactly what the reviewer said.")]
+    [InlineData("Always validate inputs at the API boundary, per the review feedback.")]
+    [InlineData("Always validate inputs at the API boundary, following the review suggestions.")]
+    public async Task Capture_TextAcceptanceIntent_CreatesActiveRule(string prompt)
+    {
+        // Default off so only text-expressed acceptance can force Active.
+        await using var db = new TestDatabase(o => o.AutoApproveFeedback = false);
+        await Init(db);
+
+        var message = await CaptureHook.RunAsync(Payload(prompt), db.Services, new StringWriter());
+
+        Assert.NotNull(message);
+        var rule = Assert.Single(await Rules(db));
+        Assert.Equal(RuleStatus.Active, rule.Status);
+    }
+
+    // B3. A plain correction with no acceptance intent follows the default (Pending when off).
+    [Fact]
+    public async Task Capture_NoAcceptanceIntent_FollowsDefault_Pending()
+    {
+        await using var db = new TestDatabase(o => o.AutoApproveFeedback = false);
+        await Init(db);
+
+        var message = await CaptureHook.RunAsync(
+            Payload("Always validate inputs at the API boundary."), db.Services, new StringWriter());
+
+        Assert.NotNull(message);
+        var rule = Assert.Single(await Rules(db));
+        Assert.Equal(RuleStatus.Pending, rule.Status);
+    }
+
     // C. Code fact → rejected (no rule).
     [Fact]
     public async Task Capture_CodeFact_IsRejected()
