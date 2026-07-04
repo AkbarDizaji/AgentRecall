@@ -1,7 +1,6 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using System.Text.RegularExpressions;
 using AgentRecall.Core.Abstractions;
 using AgentRecall.Core.Activity;
 using AgentRecall.Core.Capture;
@@ -31,28 +30,6 @@ public static class CaptureHook
 {
     /// <summary>Tag applied to every rule learned automatically by the capture hook.</summary>
     public const string SourceTag = "auto-capture";
-
-    // Patterns that signal the user accepted external review guidance, which should be
-    // stored as Active straight away rather than following the per-call default. Regexes
-    // (rather than fixed phrases) so intervening words don't defeat the match — e.g.
-    // "apply the reviewer's second comment" or "do exactly what the review says".
-    private static readonly Regex[] AcceptanceIntent =
-    [
-        // apply/address/accept/… + review/comment/feedback/suggestion
-        new(
-            @"\b(apply|address|accept|implement|take)\b.{0,40}\b(the\s+)?(review|comment|feedback|suggestion)s?\b",
-            RegexOptions.IgnoreCase | RegexOptions.Compiled),
-
-        // do/make/fix … as/per/what … review/comment
-        new(
-            @"\b(do|make|fix)\b.{0,40}\b(as|per|what)\b.{0,40}\b(the\s+)?(review|reviewer|comment)s?\b",
-            RegexOptions.IgnoreCase | RegexOptions.Compiled),
-
-        // per/following/based on … review/comment/feedback/suggestion
-        new(
-            @"\b(per|following|based\s+on)\b.{0,20}\b(the\s+)?(review|comment|feedback|suggestion)s?\b",
-            RegexOptions.IgnoreCase | RegexOptions.Compiled),
-    ];
 
     public static async Task<string?> RunAsync(
         string? hookInputJson,
@@ -358,7 +335,7 @@ public static class CaptureHook
     }
 
     private static bool HasAcceptanceIntent(string text) =>
-        AcceptanceIntent.Any(p => p.IsMatch(text));
+        ReviewAcceptanceIntent.Matches(text);
 
     private static string BuildTask(string? assistantText, string? repository)
     {

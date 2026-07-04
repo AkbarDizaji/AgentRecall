@@ -118,11 +118,10 @@ public sealed class TurnCandidateExtractor : ITurnCandidateExtractor
         "no need to save", "don't remember", "do not remember", "nothing to save",
     ];
 
-    private static readonly string[] AcceptanceSignals =
+    // Explicit "keep this" intent. Review-acceptance intent is detected separately by the
+    // shared regex (see ReviewAcceptanceIntent), so only save/remember phrases live here.
+    private static readonly string[] SaveIntentSignals =
     [
-        "apply the review", "apply the comment", "apply that comment", "address the comment",
-        "address the review", "as the reviewer", "as suggested in the review", "accept the review",
-        "do what the comment", "make the review change", "take the review comment",
         "save this", "store this", "remember this", "yes save", "please save", "do save",
         "save it", "yes, save",
     ];
@@ -144,12 +143,12 @@ public sealed class TurnCandidateExtractor : ITurnCandidateExtractor
         "should have preserved", "put it back",
     ];
 
-    // Phrases by which a review comment is applied/accepted.
-    private static readonly string[] ReviewAcceptedSignals =
+    // Review-acceptance phrasings the shared regex cannot catch because the verb trails the
+    // noun ("the review comment WAS APPLIED") or there is no action verb ("the reviewer was
+    // right"). The apply/per/based-on/as forms are handled by ReviewAcceptanceIntent.
+    private static readonly string[] ReviewAcceptedExtraSignals =
     [
-        "the review comment was applied", "review comment was applied", "applied the review comment",
-        "fix this based on the review", "based on the review", "apply the review", "per the review",
-        "as the reviewer", "address the review", "the reviewer was right",
+        "the review comment was applied", "review comment was applied", "the reviewer was right",
     ];
 
     // Phrases evidencing a test that failed then was fixed.
@@ -183,7 +182,8 @@ public sealed class TurnCandidateExtractor : ITurnCandidateExtractor
         {
             ObservedFailure = ContainsAny(userText, ObservedFailureSignals) || ContainsAny(assistantText, ObservedFailureSignals),
             UserCorrection = ContainsAny(userText, UserCorrectionSignals),
-            ReviewAccepted = ContainsAny(userText, ReviewAcceptedSignals) || ContainsAny(assistantText, ReviewAcceptedSignals),
+            ReviewAccepted = ReviewAcceptanceIntent.Matches(userText) || ReviewAcceptanceIntent.Matches(assistantText)
+                || ContainsAny(userText, ReviewAcceptedExtraSignals) || ContainsAny(assistantText, ReviewAcceptedExtraSignals),
             TestFailedThenFixed = ContainsAny(userText, TestFailedSignals) || ContainsAny(assistantText, TestFailedSignals),
             // A recurrence implies at least two observations of the same correction.
             RepeatedCorrectionCount = repeated ? 2 : 0,
@@ -212,7 +212,7 @@ public sealed class TurnCandidateExtractor : ITurnCandidateExtractor
             stripped = stripped.Replace(marker, " ", StringComparison.OrdinalIgnoreCase);
         }
 
-        return ContainsAny(stripped, AcceptanceSignals);
+        return ContainsAny(stripped, SaveIntentSignals) || ReviewAcceptanceIntent.Matches(stripped);
     }
 
     public IReadOnlyList<TurnLessonCandidate> Extract(string? userText, string? assistantText, int maxCandidateCharacters)
