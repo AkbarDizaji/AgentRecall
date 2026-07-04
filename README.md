@@ -103,21 +103,33 @@ install survive rebuilds:
 agentrecall devcontainer init
 ```
 
-It writes `.devcontainer/agentrecall-post-create.sh`, which reinstalls AgentRecall
-from NuGet, persists the database on a named Docker volume, and re-registers the
-MCP server on every create/rebuild. The script logs each step and, on failure,
-names the command that aborted it. If your project has no `devcontainer.json`,
-one is generated and wired to run the script; if you already have one, it's left
-untouched and the exact keys to merge in are printed — the JSONC is never
-rewritten.
-
-It also wires the **`UserPromptSubmit` hook** into `.claude/settings.json` (see
+It always wires the **`UserPromptSubmit` hook** into `.claude/settings.json` (see
 [Guarantee it with a hook](#guarantee-it-with-a-hook-deterministic-injection)),
 so relevant rules are injected automatically on every prompt rather than only
 when the agent decides to call an MCP tool, and appends the **`CLAUDE.md`
 guidance block** so the agent recalls rules and captures accepted PR comments as
-Active rules by default. Existing settings, `CLAUDE.md` content, and JSONC are
-merged or left untouched — never overwritten — and a re-run is a no-op.
+Active rules by default. These work in any environment, with or without a dev
+container. Existing settings, `CLAUDE.md` content, and JSONC are merged or left
+untouched — never overwritten — and a re-run is a no-op.
+
+The dev-container scaffolding is separate and **opt-in**:
+
+- If you **already have** a `devcontainer.json`, it's wired into automatically: the
+  `.devcontainer/agentrecall-post-create.sh` script is written and the exact keys to
+  merge in are printed — your JSONC is left untouched, never rewritten.
+- If you have **none**, none is created. AgentRecall doesn't hand your project a dev
+  container it didn't ask for; it prints the one command to generate one when you want
+  it:
+
+```bash
+agentrecall devcontainer init --create
+```
+
+`--create` writes `.devcontainer/devcontainer.json` and the
+`agentrecall-post-create.sh` script, which reinstalls AgentRecall from NuGet, persists
+the database on a named Docker volume, and re-registers the MCP server on every
+create/rebuild. The script logs each step and, on failure, names the command that
+aborted it.
 
 > **PATH note.** A global tool lives in `~/.dotnet/tools`, and VS Code often opens
 > integrated terminals as non-login shells that don't read `~/.profile`, so
@@ -277,7 +289,7 @@ on a retrieval regression. The same check also runs as a unit test.
 | --- | --- |
 | `init` | Create the local data directory and database. |
 | `setup` | Ensure the .NET tools directory is on your PATH (runs automatically on first use). |
-| `devcontainer init` | Scaffold dev container wiring so AgentRecall reinstalls on every rebuild (optional `[path]`). |
+| `devcontainer init` | Wire AgentRecall's hooks + CLAUDE.md guidance; pass `--create` to also scaffold a dev container that reinstalls it on every rebuild (optional `[path]`). |
 | `feedback add` | Record feedback and extract a rule from it. |
 | `search "<query>"` | Search rules by keyword (`--scope-level`, `--scope-value`, `--limit`). |
 | `rules list` | List all rules (`--status <status>`, e.g. `Pending`). |

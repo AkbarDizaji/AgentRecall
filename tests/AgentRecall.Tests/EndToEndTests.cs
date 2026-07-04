@@ -137,8 +137,8 @@ public class DevcontainerAndCaptureE2ETests
         const string existingClaudeMd = "# My Project\n\nProject-specific notes that must survive.\n";
         File.WriteAllText(Path.Combine(repo.Path, "CLAUDE.md"), existingClaudeMd);
 
-        DevcontainerScaffolder.Init(repo.Path);
-        DevcontainerScaffolder.Init(repo.Path);
+        DevcontainerScaffolder.Init(repo.Path, createDevcontainer: true);
+        DevcontainerScaffolder.Init(repo.Path, createDevcontainer: true);
 
         var script = Path.Combine(repo.Path, DevcontainerScaffolder.PostCreateRelativePath);
         var settings = Path.Combine(repo.Path, DevcontainerScaffolder.ClaudeSettingsRelativePath);

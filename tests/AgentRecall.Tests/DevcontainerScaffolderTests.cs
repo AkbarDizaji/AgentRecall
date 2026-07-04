@@ -14,14 +14,16 @@ public class DevcontainerScaffolderTests
     }
 
     [Fact]
-    public void Init_WithNoDevcontainer_CreatesScriptAndManifest()
+    public void Init_WithNoDevcontainer_AndCreate_CreatesScriptAndManifest()
     {
         var root = NewTempProject();
         try
         {
-            var result = DevcontainerScaffolder.Init(root);
+            var result = DevcontainerScaffolder.Init(root, createDevcontainer: true);
 
             Assert.True(result.CreatedDevcontainerJson);
+            Assert.True(result.WroteScript);
+            Assert.False(result.DevcontainerDeferred);
             Assert.False(result.ScriptOverwritten);
             Assert.Null(result.ManualSteps);
 
@@ -67,6 +69,35 @@ public class DevcontainerScaffolderTests
     }
 
     [Fact]
+    public void Init_WithNoDevcontainer_ByDefault_DefersManifestButWiresHooksAndGuidance()
+    {
+        var root = NewTempProject();
+        try
+        {
+            var result = DevcontainerScaffolder.Init(root);
+
+            // The container-only artifacts are deferred until explicitly asked for.
+            Assert.True(result.DevcontainerDeferred);
+            Assert.False(result.CreatedDevcontainerJson);
+            Assert.False(result.WroteScript);
+            Assert.NotNull(result.ManualSteps);
+            Assert.Contains("devcontainer init --create", result.ManualSteps);
+
+            // No .devcontainer directory is created.
+            Assert.False(File.Exists(Path.Combine(root, DevcontainerScaffolder.PostCreateRelativePath)));
+            Assert.False(File.Exists(Path.Combine(root, DevcontainerScaffolder.DevcontainerJsonRelativePath)));
+
+            // But the environment-agnostic wiring is applied.
+            Assert.True(File.Exists(Path.Combine(root, DevcontainerScaffolder.ClaudeSettingsRelativePath)));
+            Assert.True(File.Exists(Path.Combine(root, DevcontainerScaffolder.ClaudeMdRelativePath)));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void Init_WithExistingManifest_LeavesItUntouchedAndReturnsSteps()
     {
         var root = NewTempProject();
@@ -101,8 +132,8 @@ public class DevcontainerScaffolderTests
         var root = NewTempProject();
         try
         {
-            DevcontainerScaffolder.Init(root);
-            var second = DevcontainerScaffolder.Init(root);
+            DevcontainerScaffolder.Init(root, createDevcontainer: true);
+            var second = DevcontainerScaffolder.Init(root, createDevcontainer: true);
 
             Assert.True(second.ScriptOverwritten);
         }

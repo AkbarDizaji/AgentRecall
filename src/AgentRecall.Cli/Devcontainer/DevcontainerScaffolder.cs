@@ -508,26 +508,27 @@ public static class DevcontainerScaffolder
         """;
 
     /// <summary>
-    /// Generates the setup script and, when the project has no
-    /// <c>devcontainer.json</c>, a complete manifest. Returns a description of what
-    /// was written and any manual steps the caller must apply to an existing manifest.
+    /// Wires the environment-agnostic AgentRecall integration — the recall/capture hooks in
+    /// <c>.claude/settings.json</c> and the <c>CLAUDE.md</c> guidance — which are always
+    /// applied because they work with or without a dev container.
+    ///
+    /// The dev-container artifacts (the manifest and the reinstall-on-rebuild script) are
+    /// only materialised when the project already has a <c>devcontainer.json</c> (so we wire
+    /// into it) or when <paramref name="createDevcontainer"/> is set — the explicit opt-in.
+    /// A project that has no dev container is never handed one it did not ask for; instead the
+    /// result is marked deferred and carries the follow-up instructions.
     /// </summary>
     /// <param name="projectRoot">Root directory whose <c>.devcontainer</c> is targeted.</param>
-    public static DevcontainerInitResult Init(string projectRoot)
+    /// <param name="createDevcontainer">
+    /// When true, generate the <c>devcontainer.json</c> + post-create script even if the
+    /// project has none. When false (the default), defer that scaffolding until asked.
+    /// </param>
+    public static DevcontainerInitResult Init(string projectRoot, bool createDevcontainer = false)
     {
-        var devcontainerDir = Path.Combine(projectRoot, ".devcontainer");
-        Directory.CreateDirectory(devcontainerDir);
-
-        var scriptPath = Path.Combine(projectRoot, PostCreateRelativePath);
-        var scriptExisted = File.Exists(scriptPath);
-        File.WriteAllText(scriptPath, PostCreateScript);
-        MakeExecutable(scriptPath);
-
         // Wire the deterministic hooks into the project's Claude Code settings: the
-        // UserPromptSubmit hook injects recall context, and the Stop hook captures
-        // reusable lessons after each turn. The hooks live in the workspace (persist
-        // across rebuilds and are committed), so unlike the MCP registration they are
-        // set once here, not per-rebuild.
+        // UserPromptSubmit hook injects recall context, and the Stop hook finalizes each
+        // turn. Both live in the workspace and work in any environment, so they are always
+        // applied — regardless of whether a dev container is scaffolded.
         var hookOutcome = EnsureUserPromptSubmitHook(projectRoot);
         var captureHookOutcome = EnsureCaptureHook(projectRoot);
 
@@ -537,6 +538,35 @@ public static class DevcontainerScaffolder
 
         var jsonPath = Path.Combine(projectRoot, DevcontainerJsonRelativePath);
         var jsonExisted = File.Exists(jsonPath);
+
+        // The container-only artifacts matter once the project actually uses a dev container.
+        // Write them when one already exists (wire into it) or on the explicit --create
+        // opt-in; otherwise defer, leaving no .devcontainer directory behind.
+        if (!jsonExisted && !createDevcontainer)
+        {
+            return new DevcontainerInitResult(
+                ScriptPath: PostCreateRelativePath,
+                ScriptOverwritten: false,
+                WroteScript: false,
+                CreatedDevcontainerJson: false,
+                DevcontainerDeferred: true,
+                DevcontainerJsonPath: DevcontainerJsonRelativePath,
+                ManualSteps: DeferredManifestInstructions,
+                HookOutcome: hookOutcome,
+                CaptureHookOutcome: captureHookOutcome,
+                ClaudeSettingsPath: ClaudeSettingsRelativePath,
+                GuidanceOutcome: guidanceOutcome,
+                ClaudeMdPath: ClaudeMdRelativePath);
+        }
+
+        var devcontainerDir = Path.Combine(projectRoot, ".devcontainer");
+        Directory.CreateDirectory(devcontainerDir);
+
+        var scriptPath = Path.Combine(projectRoot, PostCreateRelativePath);
+        var scriptExisted = File.Exists(scriptPath);
+        File.WriteAllText(scriptPath, PostCreateScript);
+        MakeExecutable(scriptPath);
+
         if (!jsonExisted)
         {
             File.WriteAllText(jsonPath, DevcontainerJson);
@@ -545,7 +575,9 @@ public static class DevcontainerScaffolder
         return new DevcontainerInitResult(
             ScriptPath: PostCreateRelativePath,
             ScriptOverwritten: scriptExisted,
+            WroteScript: true,
             CreatedDevcontainerJson: !jsonExisted,
+            DevcontainerDeferred: false,
             DevcontainerJsonPath: DevcontainerJsonRelativePath,
             ManualSteps: jsonExisted ? ExistingManifestInstructions : null,
             HookOutcome: hookOutcome,
@@ -770,6 +802,20 @@ public static class DevcontainerScaffolder
     }
 
     /// <summary>
+    /// What is printed when the project has no dev container and none was requested: the
+    /// hooks and guidance are wired regardless, and the user is told the single command that
+    /// scaffolds a dev container if they want one.
+    /// </summary>
+    public static string DeferredManifestInstructions =>
+        """
+        No .devcontainer/devcontainer.json found, so none was created. AgentRecall's recall
+        and capture hooks and its CLAUDE.md guidance are wired and work without a dev container.
+
+        To also scaffold a dev container that reinstalls AgentRecall on every rebuild, run:
+          agentrecall devcontainer init --create
+        """;
+
+    /// <summary>
     /// The keys a user must merge into an existing <c>devcontainer.json</c>, since
     /// AgentRecall does not rewrite a hand-maintained (JSONC) manifest.
     /// </summary>
@@ -846,9 +892,14 @@ public enum GuidanceOutcome
 /// <summary>Outcome of <see cref="DevcontainerScaffolder.Init"/>.</summary>
 /// <param name="ScriptPath">Relative path of the generated setup script.</param>
 /// <param name="ScriptOverwritten">Whether an existing script was overwritten.</param>
+/// <param name="WroteScript">Whether the post-create script was written this run.</param>
 /// <param name="CreatedDevcontainerJson">Whether a fresh manifest was written.</param>
+/// <param name="DevcontainerDeferred">
+/// True when no manifest existed and none was requested, so the dev-container scaffolding
+/// was deferred (only the hooks and guidance were wired).
+/// </param>
 /// <param name="DevcontainerJsonPath">Relative path of the manifest.</param>
-/// <param name="ManualSteps">Steps to apply to an existing manifest, or null.</param>
+/// <param name="ManualSteps">Steps to apply to an existing manifest, deferral guidance, or null.</param>
 /// <param name="HookOutcome">How the UserPromptSubmit (recall) hook was wired in.</param>
 /// <param name="CaptureHookOutcome">How the Stop (capture) hook was wired in.</param>
 /// <param name="ClaudeSettingsPath">Relative path of the Claude Code settings file.</param>
@@ -857,7 +908,9 @@ public enum GuidanceOutcome
 public sealed record DevcontainerInitResult(
     string ScriptPath,
     bool ScriptOverwritten,
+    bool WroteScript,
     bool CreatedDevcontainerJson,
+    bool DevcontainerDeferred,
     string DevcontainerJsonPath,
     string? ManualSteps,
     HookSetupOutcome HookOutcome,

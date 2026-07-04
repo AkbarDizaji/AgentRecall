@@ -160,22 +160,27 @@ public static partial class CommandRouter
         var sub = args.Length > 0 ? args[0] : string.Empty;
         if (sub != "init")
         {
-            output.WriteLine("Usage: agentrecall devcontainer init [path]");
-            output.WriteLine("(scaffolds dev container wiring so AgentRecall reinstalls on every rebuild)");
+            output.WriteLine("Usage: agentrecall devcontainer init [path] [--create]");
+            output.WriteLine("(wires AgentRecall's recall/capture hooks and CLAUDE.md guidance;");
+            output.WriteLine(" --create also scaffolds a dev container that reinstalls it on every rebuild)");
             return 1;
         }
 
-        // Optional positional path; defaults to the current directory.
-        var projectRoot = args.Length > 1 && !args[1].StartsWith("--", StringComparison.Ordinal)
-            ? args[1]
-            : Directory.GetCurrentDirectory();
+        // Optional positional path; defaults to the current directory. --create opts into
+        // scaffolding a dev container when the project has none.
+        var projectRoot = args.Skip(1).FirstOrDefault(a => !a.StartsWith("--", StringComparison.Ordinal))
+            ?? Directory.GetCurrentDirectory();
+        var createDevcontainer = args.Any(a => string.Equals(a, "--create", StringComparison.Ordinal));
 
         try
         {
-            var result = Devcontainer.DevcontainerScaffolder.Init(projectRoot);
+            var result = Devcontainer.DevcontainerScaffolder.Init(projectRoot, createDevcontainer);
 
-            var verb = result.ScriptOverwritten ? "Updated" : "Wrote";
-            output.WriteLine($"{verb} {result.ScriptPath} (installs AgentRecall from NuGet on container create/rebuild).");
+            if (result.WroteScript)
+            {
+                var verb = result.ScriptOverwritten ? "Updated" : "Wrote";
+                output.WriteLine($"{verb} {result.ScriptPath} (installs AgentRecall from NuGet on container create/rebuild).");
+            }
 
             WriteHookOutcome(output, result.HookOutcome, result.ClaudeSettingsPath,
                 "UserPromptSubmit", "automatic rule injection", Devcontainer.DevcontainerScaffolder.HookCommand);
@@ -198,7 +203,13 @@ public static partial class CommandRouter
                     break;
             }
 
-            if (result.CreatedDevcontainerJson)
+            if (result.DevcontainerDeferred)
+            {
+                // No dev container present and none requested: don't impose one.
+                output.WriteLine();
+                output.WriteLine(result.ManualSteps);
+            }
+            else if (result.CreatedDevcontainerJson)
             {
                 output.WriteLine($"Created {result.DevcontainerJsonPath} wired to run it.");
                 output.WriteLine("Rebuild the container to apply.");
@@ -2547,8 +2558,9 @@ public static partial class CommandRouter
         output.WriteLine("Commands:");
         output.WriteLine("  init                 Create the local data directory and database");
         output.WriteLine("  setup                Ensure the .NET tools directory is on your PATH");
-        output.WriteLine("  devcontainer init    Scaffold dev container wiring so AgentRecall");
-        output.WriteLine("                       reinstalls automatically on every rebuild");
+        output.WriteLine("  devcontainer init    Wire AgentRecall's hooks + CLAUDE.md guidance; pass");
+        output.WriteLine("                       --create to also scaffold a dev container that");
+        output.WriteLine("                       reinstalls it on every rebuild");
         output.WriteLine("  feedback add         Record feedback and extract a pending rule");
         output.WriteLine("  rules list           List all rules (--status <status>, e.g. Pending)");
         output.WriteLine("  rules show <id>      Show a single rule in detail");
