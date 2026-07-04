@@ -301,6 +301,9 @@ on a retrieval regression. The same check also runs as a unit test.
 | `seed install <pack>` | Install a seed pack; rules are Active by default (`--active` spells that out, `--suggested` installs them as Pending for manual approval, `--force`, `--json`). |
 | `seed remove <pack>` | Remove an installed seed pack (`--force`, `--json`). |
 | `seed status` | Show installed seed packs and rule counts by status (`--json`). |
+| `career impact --last` | Show the last turn's career-impact candidate (`--json`, `--detailed`). |
+| `career journal --last` | Generate a promotion-ready journal entry on demand (`--json`, `--file <path>`). |
+| `career status` | Show the career-impact pack/mode and the last candidate (`--json`). |
 | `mcp` | Run the MCP server over stdio (for Claude Code). |
 | `status` | Show where data is stored. |
 | `help` / `--help` / `-h` | Show usage. |
@@ -468,6 +471,71 @@ How seed rules behave:
 
 The `tidy-first` pack is paraphrased practical guidance inspired by common tidying and
 refactoring practices. It contains no copied or quoted book text.
+
+---
+
+## Career Impact Pack
+
+The `career-impact` seed pack helps you avoid losing promotion-worthy engineering work. It
+identifies Staff-level impact, evidence, metrics, stakeholders, ADRs, leadership behaviors,
+and promotion-ready achievements — as coaching guidance, not project facts.
+
+It is **opt-in** and installs **active starter guidance** (ten conditional rules), exactly
+like any other seed pack:
+
+```bash
+agentrecall seed install career-impact          # install the pack (Active starter guidance)
+agentrecall seed show career-impact             # its rules, defaults, and provenance
+agentrecall career impact --last                # the last turn's career-impact candidate
+agentrecall career impact --last --json         # deterministic JSON for the candidate
+agentrecall career journal --last               # a promotion-ready journal entry (on demand)
+agentrecall career journal --last --file ./career-journal.md   # append it to a Markdown file
+agentrecall career status                       # pack/mode and the last candidate
+```
+
+It is **low-token by design**, using a two-stage approach:
+
+1. A cheap, **deterministic** end-of-turn detector (no LLM calls, no embeddings, no network)
+   analyzes the turn's text with keyword/heuristic signals and decides whether the work was
+   significant.
+2. The full impact/journal detail is generated **only on demand** (the `career` commands) or
+   when a significant candidate already exists.
+
+How it behaves:
+
+- **`SignificantOnly` by default.** When the pack is installed, the detector runs at the end
+  of a turn and prints a **compact** summary only for significant work. For trivial turns
+  (typo fixes, renames, formatting) it says nothing. Set `AgentRecall.CareerImpactMode` to
+  `Silent` (never auto-run) or `Always` (surface lower-confidence candidates too, still
+  bounded).
+- **Never spams.** The automatic summary is at most five bullets plus a pointer; it never
+  prints a full promotion packet. The full journal is generated only when you ask.
+- **Human-visible only.** The automatic summary is not fed back into model context; the Turn
+  Memory Summary carries only a short one-line pointer.
+- **Retrieval is capped.** Career-impact rules are ordinary seed rules — ranked below learned
+  rules and capped so they never flood a prompt.
+
+Configuration:
+
+- `AgentRecall.CareerImpactMode = Silent | SignificantOnly | Always` (default
+  `SignificantOnly`)
+- `AgentRecall.CareerImpactSummaryLevel = Compact | Detailed` (default `Compact`)
+
+Example compact summary (printed automatically for significant work):
+
+```
+🧠 **AgentRecall Career Impact:** possible Staff-level impact detected.
+- Why it matters: This work involves a migration; it targets performance.
+- Evidence: PR, before/after metrics, dashboard, design doc
+- Metrics: latency, error rate, adoption
+- Stakeholders: Platform, Product
+- ADR: probably yes
+
+Run `agentrecall career journal --last` for a promotion-ready entry.
+```
+
+The `career-impact` pack is original, paraphrased career-impact coaching guidance. It copies
+no book, article, or third-party text.
 
 ---
 

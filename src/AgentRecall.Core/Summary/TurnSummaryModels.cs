@@ -46,8 +46,16 @@ public sealed record TurnSummary
     public IReadOnlyList<TurnSummaryRule> Ignored { get; init; } = [];
     public IReadOnlyList<string> Errors { get; init; } = [];
 
+    /// <summary>
+    /// A short career-impact pointer for the turn, when the optional detector flagged
+    /// significant work; null otherwise. Deliberately a one-line pointer, never the full
+    /// career summary — that stays out of model context.
+    /// </summary>
+    public string? CareerImpact { get; init; }
+
     /// <summary>True when nothing of note happened on the turn.</summary>
     public bool IsEmpty =>
         Used.Count == 0 && Captured.Count == 0 && Suggested.Count == 0 &&
-        Skipped.Count == 0 && Remembered.Count == 0 && Ignored.Count == 0 && Errors.Count == 0;
+        Skipped.Count == 0 && Remembered.Count == 0 && Ignored.Count == 0 && Errors.Count == 0 &&
+        CareerImpact is null;
 }

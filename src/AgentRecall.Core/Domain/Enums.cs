@@ -261,6 +261,72 @@ public enum ActivityType
 
     /// <summary>Seed rules gained confidence from repeated uneventful use.</summary>
     SeedReinforced = 12,
+
+    /// <summary>The end-of-turn career-impact detector flagged possible Staff-level impact.</summary>
+    CareerImpactDetected = 13,
+}
+
+/// <summary>
+/// How the optional career-impact detector behaves at the end of a turn. Only takes effect
+/// when the <c>career-impact</c> seed pack is installed; otherwise the detector never runs.
+/// </summary>
+public enum CareerImpactMode
+{
+    /// <summary>Never run the automatic summary. The <c>career</c> commands still work.</summary>
+    Silent = 0,
+
+    /// <summary>Run the cheap detector; print a compact summary only for significant work.</summary>
+    SignificantOnly = 1,
+
+    /// <summary>Run the detector and print a bounded summary even for lower-confidence candidates.</summary>
+    Always = 2,
+}
+
+/// <summary>How much of the automatic career-impact summary is printed.</summary>
+public enum CareerImpactSummaryLevel
+{
+    /// <summary>At most five bullets plus a pointer to the on-demand journal command.</summary>
+    Compact = 0,
+
+    /// <summary>Bounded impact/evidence/metrics/stakeholders/ADR/promotion sections.</summary>
+    Detailed = 1,
+}
+
+/// <summary>Review state of a persisted <see cref="CareerImpactCandidate"/>.</summary>
+public enum CareerImpactStatus
+{
+    /// <summary>Detected and awaiting the user (the default).</summary>
+    Open = 0,
+
+    /// <summary>The user dismissed it as not promotion-worthy.</summary>
+    Dismissed = 1,
+
+    /// <summary>A career journal entry was generated from it.</summary>
+    Journaled = 2,
+}
+
+/// <summary>
+/// A dimension of engineering impact a <see cref="CareerImpactCandidate"/> touches. Used to
+/// label detected work; ordering is not significant, so new values may be appended freely.
+/// </summary>
+public enum ImpactCategory
+{
+    TechnicalImpact = 0,
+    BusinessImpact = 1,
+    UserImpact = 2,
+    CrossTeamImpact = 3,
+    LongTermLeverage = 4,
+    Reliability = 5,
+    Security = 6,
+    Performance = 7,
+    DeveloperProductivity = 8,
+    Cost = 9,
+    Leadership = 10,
+    Documentation = 11,
+    Architecture = 12,
+    IncidentResponse = 13,
+    ProcessImprovement = 14,
+    PromotionEvidence = 15,
 }
 
 /// <summary>Review state of a <see cref="RuleLifecycleRecommendation"/>.</summary>

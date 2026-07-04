@@ -45,6 +45,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IRuleLifecycleRecommendationRepository, RuleLifecycleRecommendationRepository>();
         services.AddScoped<ITurnFinalizationRepository, TurnFinalizationRepository>();
         services.AddScoped<IAgentRecallActivityRepository, AgentRecallActivityRepository>();
+        services.AddScoped<ICareerImpactCandidateRepository, CareerImpactCandidateRepository>();
         services.AddScoped<IDatabaseInitializer, DatabaseInitializer>();
         // Atomic multi-step writes over the scoped DbContext.
         services.AddScoped<ITransactionRunner, EfTransactionRunner>();
@@ -117,6 +118,11 @@ public static class ServiceCollectionExtensions
         // Seed packs: opt-in curated starter rules, and their passive confidence evolution.
         services.AddScoped<Core.Seeds.ISeedPackService, Core.Seeds.SeedPackService>();
         services.AddScoped<Core.Seeds.ISeedConfidenceService, Core.Seeds.SeedConfidenceService>();
+
+        // Career impact: opt-in, deterministic end-of-turn detector and its on-demand
+        // journal. The detector is pure; the service persists significant candidates.
+        services.AddSingleton<Core.CareerImpact.CareerImpactDetector>();
+        services.AddScoped<Core.CareerImpact.ICareerImpactService, Core.CareerImpact.CareerImpactService>();
 
         return services;
     }

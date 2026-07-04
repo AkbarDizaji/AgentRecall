@@ -312,6 +312,24 @@ public static class DevcontainerScaffolder
           AgentRecall lowers its confidence, suppresses it, or archives it — do not keep
           pushing it.
 
+        ### Career Impact Pack
+
+        AgentRecall may include an optional, user-installed **career-impact** seed pack. It
+        helps detect Staff-level impact, metrics, evidence, ADRs, stakeholders, and
+        promotion-worthy work. It is opt-in and off unless the user installs it.
+
+        - It should not spam the user. A cheap, deterministic detector runs at the end of a
+          turn only when the pack is installed and `AgentRecall.CareerImpactMode` is not
+          `Silent`; it says nothing for trivial work.
+        - It should not run full journal generation unless the user asks. The promotion
+          journal is produced only on demand via `agentrecall career journal --last`.
+        - If AgentRecall reports a Career Impact candidate, present the compact summary and
+          the command pointer — do not paste a full promotion packet.
+        - Do not treat career-impact suggestions as project technical truth; they are
+          coaching/evidence guidance, not repository facts.
+        - Do not let career-impact rules override repository conventions or explicit user
+          corrections.
+
         """;
 
     /// <summary>

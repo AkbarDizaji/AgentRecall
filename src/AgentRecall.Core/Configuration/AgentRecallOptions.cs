@@ -200,6 +200,36 @@ public sealed class AgentRecallOptions
     /// </summary>
     public string TurnSummaryLevel { get; set; } = nameof(Domain.TurnSummaryLevel.Compact);
 
+    /// <summary>
+    /// How the optional end-of-turn career-impact detector behaves: <c>Silent</c>,
+    /// <c>SignificantOnly</c>, or <c>Always</c>. Only takes effect when the
+    /// <c>career-impact</c> seed pack is installed; otherwise the detector never runs.
+    /// Parsed defensively so an unrecognised value falls back to the default. Distinct from
+    /// <see cref="ActivityNoticeLevel"/>, <see cref="TurnSummaryLevel"/>, and
+    /// <see cref="InteractiveMemoryMode"/>. Defaults to <c>SignificantOnly</c>.
+    /// </summary>
+    public string CareerImpactMode { get; set; } = nameof(Domain.CareerImpactMode.SignificantOnly);
+
+    /// <summary>
+    /// How much of the automatic career-impact summary is printed: <c>Compact</c> (at most
+    /// five bullets plus a journal pointer) or <c>Detailed</c> (bounded sections). Parsed
+    /// defensively so an unrecognised value falls back to <c>Compact</c>. The full promotion
+    /// journal is never printed automatically — it is generated only on demand.
+    /// </summary>
+    public string CareerImpactSummaryLevel { get; set; } = nameof(Domain.CareerImpactSummaryLevel.Compact);
+
+    /// <summary>The parsed career-impact mode, falling back to SignificantOnly when invalid.</summary>
+    public CareerImpactMode ResolvedCareerImpactMode =>
+        Enum.TryParse<CareerImpactMode>(CareerImpactMode, ignoreCase: true, out var mode) && Enum.IsDefined(mode)
+            ? mode
+            : Domain.CareerImpactMode.SignificantOnly;
+
+    /// <summary>The parsed career-impact summary level, falling back to Compact when invalid.</summary>
+    public CareerImpactSummaryLevel ResolvedCareerImpactSummaryLevel =>
+        Enum.TryParse<CareerImpactSummaryLevel>(CareerImpactSummaryLevel, ignoreCase: true, out var level) && Enum.IsDefined(level)
+            ? level
+            : Domain.CareerImpactSummaryLevel.Compact;
+
     /// <summary>The parsed interactive-memory mode, falling back to Auto when invalid.</summary>
     public InteractiveMemoryMode ResolvedInteractiveMemoryMode =>
         InteractiveMemoryModes.Resolve(InteractiveMemoryMode);

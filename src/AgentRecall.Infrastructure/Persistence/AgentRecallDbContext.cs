@@ -22,6 +22,7 @@ public sealed class AgentRecallDbContext : DbContext
     public DbSet<RuleLifecycleRecommendation> Recommendations => Set<RuleLifecycleRecommendation>();
     public DbSet<TurnFinalization> TurnFinalizations => Set<TurnFinalization>();
     public DbSet<AgentRecallActivity> Activities => Set<AgentRecallActivity>();
+    public DbSet<CareerImpactCandidate> CareerImpactCandidates => Set<CareerImpactCandidate>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -128,6 +129,18 @@ public sealed class AgentRecallDbContext : DbContext
             entity.HasIndex(e => e.ActivityType);
             entity.HasIndex(e => e.OperationHash);
             entity.HasIndex(e => e.TurnId);
+        });
+
+        modelBuilder.Entity<CareerImpactCandidate>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Status).HasConversion<string>().HasDefaultValue(CareerImpactStatus.Open);
+            entity.Property(e => e.TurnId).HasDefaultValue(string.Empty);
+            entity.Property(e => e.OperationHash).HasDefaultValue(string.Empty);
+            entity.Property(e => e.Source).HasDefaultValue("CareerImpactDetector");
+            entity.HasIndex(e => e.CreatedAt);
+            entity.HasIndex(e => e.TurnId);
+            entity.HasIndex(e => e.OperationHash);
         });
     }
 }

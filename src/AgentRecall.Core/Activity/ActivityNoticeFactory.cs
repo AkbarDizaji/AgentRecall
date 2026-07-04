@@ -308,6 +308,52 @@ public static class ActivityNoticeFactory
         };
     }
 
+    /// <summary>
+    /// A notice for a detected career-impact candidate, or null when there is none. The
+    /// detail lines carry only short evidence/metrics pointers — never the full journal.
+    /// </summary>
+    public static ActivityNotice? ForCareerImpact(Domain.CareerImpactCandidate? candidate, string source)
+    {
+        if (candidate is null)
+        {
+            return null;
+        }
+
+        var summary = candidate.IsSignificant
+            ? "possible Staff-level impact detected."
+            : "possible engineering impact detected.";
+
+        var details = new List<string>();
+        var evidence = JoinLines(candidate.EvidenceToCollect);
+        if (!string.IsNullOrWhiteSpace(evidence))
+        {
+            details.Add($"Evidence: {evidence}");
+        }
+
+        var metrics = JoinLines(candidate.Metrics);
+        if (!string.IsNullOrWhiteSpace(metrics))
+        {
+            details.Add($"Metrics: {metrics}");
+        }
+
+        details.Add("Run `agentrecall career journal --last` for a promotion-ready entry.");
+
+        return new ActivityNotice
+        {
+            Type = ActivityType.CareerImpactDetected,
+            Summary = summary,
+            Details = details,
+            Source = source,
+            // Key on the detector's content hash so a repeated Stop hook logs once.
+            OperationHash = string.IsNullOrEmpty(candidate.OperationHash) ? null : candidate.OperationHash,
+        };
+    }
+
+    private static string JoinLines(string? value) =>
+        string.IsNullOrEmpty(value)
+            ? string.Empty
+            : string.Join(", ", value.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+
     private static string DescribeConflict(ResolvedConflict conflict)
     {
         var ignored = conflict.Resolution.IgnoredRuleIds;

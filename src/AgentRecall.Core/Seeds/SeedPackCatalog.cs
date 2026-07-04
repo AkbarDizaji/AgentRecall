@@ -11,6 +11,7 @@ public static class SeedPackCatalog
     public static IReadOnlyList<SeedPackDefinition> All { get; } =
     [
         TidyFirstSeedPack.Definition,
+        CareerImpactSeedPack.Definition,
     ];
 
     /// <summary>Finds a pack by name (case-insensitive), or null when none matches.</summary>

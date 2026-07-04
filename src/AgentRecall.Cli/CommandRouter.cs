@@ -96,6 +96,7 @@ public static partial class CommandRouter
             ["turn-summary"] = new DelegateCommand((a, s, o, _, ct) => TurnSummaryAsync(a, s, o, ct)),
             ["activity"] = new DelegateCommand((a, s, o, _, ct) => ActivityAsync(a, s, o, ct)),
             ["seed"] = new DelegateCommand((a, s, o, l, ct) => SeedAsync(a, s, o, l, ct)),
+            ["career"] = new DelegateCommand((a, s, o, l, ct) => CareerAsync(a, s, o, l, ct)),
             ["mcp"] = new DelegateCommand(async (_, s, o, _, ct) =>
             {
                 var server = new Mcp.McpServer(s);
@@ -1580,6 +1581,14 @@ public static partial class CommandRouter
                     .RecordAsync(notice with { TurnId = result.TurnId }, cancellationToken).ConfigureAwait(false);
             }
 
+            // Optional career-impact: a cheap, deterministic detector that runs only when the
+            // `career-impact` pack is installed and the mode is not Silent. It persists a
+            // candidate and records a human-visible notice; the full journal is never
+            // generated here (only on demand). The compact summary is printed on the CLI path,
+            // but the hook (model-visible) path emits only a short pointer via the turn summary.
+            var career = await AnalyzeCareerImpactAsync(scope.ServiceProvider, input, result, cancellationToken)
+                .ConfigureAwait(false);
+
             if (json)
             {
                 WriteJson(output, FinalizationJson(result));
@@ -1597,6 +1606,7 @@ public static partial class CommandRouter
                 var level = services.GetRequiredService<AgentRecallOptions>().ResolvedActivityNoticeLevel;
                 PrintNotice(output, notice, level);
                 PrintNotice(output, seedNotice, level);
+                PrintCareerImpact(output, career, services.GetRequiredService<AgentRecallOptions>());
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -2590,6 +2600,10 @@ public static partial class CommandRouter
         output.WriteLine("  seed install <pack>  Install a seed pack (--active, --suggested, --force, --json)");
         output.WriteLine("  seed remove <pack>   Remove an installed seed pack (--force, --json)");
         output.WriteLine("  seed status          Show installed seed packs and rule counts (--json)");
+        output.WriteLine("  career impact --last Show the last turn's career-impact candidate (--json, --detailed)");
+        output.WriteLine("  career journal --last");
+        output.WriteLine("                       Generate a promotion-ready journal entry (--json, --file <path>)");
+        output.WriteLine("  career status        Show career-impact pack/mode and the last candidate (--json)");
         output.WriteLine("  mcp                  Run the MCP server over stdio (for Claude Code)");
         output.WriteLine("  status               Show the memory subsystem status");
         output.WriteLine("  help                 Show this help text");

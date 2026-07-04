@@ -72,6 +72,19 @@ public interface ITurnFinalizationRepository : IRepository<TurnFinalization>
 {
 }
 
+/// <summary>Persistence for <see cref="CareerImpactCandidate"/>.</summary>
+public interface ICareerImpactCandidateRepository : IRepository<CareerImpactCandidate>
+{
+    /// <summary>The most recently detected candidate, or null when none exist.</summary>
+    Task<CareerImpactCandidate?> GetLatestAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>The candidate with the given operation hash, or null when none matches.</summary>
+    Task<CareerImpactCandidate?> FindByOperationHashAsync(string operationHash, CancellationToken cancellationToken = default);
+
+    /// <summary>The most recent candidate for a turn, or null when none matches.</summary>
+    Task<CareerImpactCandidate?> FindByTurnAsync(string turnId, CancellationToken cancellationToken = default);
+}
+
 /// <summary>Persistence for <see cref="AgentRecallActivity"/>.</summary>
 public interface IAgentRecallActivityRepository : IRepository<AgentRecallActivity>
 {

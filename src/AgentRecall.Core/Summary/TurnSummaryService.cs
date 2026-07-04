@@ -28,15 +28,18 @@ public sealed class TurnSummaryService : ITurnSummaryService
     private readonly IAgentRecallActivityRepository _activities;
     private readonly ITurnFinalizationRepository _finalizations;
     private readonly IRecallRuleRepository _rules;
+    private readonly ICareerImpactCandidateRepository _careerImpact;
 
     public TurnSummaryService(
         IAgentRecallActivityRepository activities,
         ITurnFinalizationRepository finalizations,
-        IRecallRuleRepository rules)
+        IRecallRuleRepository rules,
+        ICareerImpactCandidateRepository careerImpact)
     {
         _activities = activities ?? throw new ArgumentNullException(nameof(activities));
         _finalizations = finalizations ?? throw new ArgumentNullException(nameof(finalizations));
         _rules = rules ?? throw new ArgumentNullException(nameof(rules));
+        _careerImpact = careerImpact ?? throw new ArgumentNullException(nameof(careerImpact));
     }
 
     public async Task<TurnSummary> BuildForTurnAsync(string? turnId, CancellationToken cancellationToken = default)
@@ -160,6 +163,18 @@ public sealed class TurnSummaryService : ITurnSummaryService
             ignored.Add(await ToRuleAsync(id, withReason: false, cache, cancellationToken).ConfigureAwait(false));
         }
 
+        // A short, model-safe pointer only — never the full career summary. Present only
+        // when the optional detector flagged significant work for this turn.
+        string? careerPointer = null;
+        if (!string.IsNullOrEmpty(turnId))
+        {
+            var candidate = await _careerImpact.FindByTurnAsync(turnId, cancellationToken).ConfigureAwait(false);
+            if (candidate is { IsSignificant: true })
+            {
+                careerPointer = CareerImpact.CareerImpactRenderer.TurnSummaryPointer;
+            }
+        }
+
         return new TurnSummary
         {
             TurnId = turnId,
@@ -170,6 +185,7 @@ public sealed class TurnSummaryService : ITurnSummaryService
             Remembered = remembered,
             Ignored = ignored,
             Errors = errors,
+            CareerImpact = careerPointer,
         };
     }
 

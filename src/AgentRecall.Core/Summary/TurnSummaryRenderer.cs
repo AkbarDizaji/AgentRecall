@@ -65,6 +65,11 @@ public static class TurnSummaryRenderer
             line.Append("\n- Error: ").Append(error);
         }
 
+        if (!string.IsNullOrWhiteSpace(summary.CareerImpact))
+        {
+            line.Append("\nCareer Impact:\n- ").Append(summary.CareerImpact);
+        }
+
         return line.ToString();
     }
 
@@ -91,6 +96,12 @@ public static class TurnSummaryRenderer
         AppendRuleSection(sb, "Remembered", summary.Remembered, withApprove: false, alwaysShow: false);
         AppendRuleSection(sb, "Ignored", summary.Ignored, withApprove: false, alwaysShow: false);
         AppendErrorSection(sb, summary.Errors);
+
+        // Only a short pointer to the on-demand journal — never the full career summary.
+        if (!string.IsNullOrWhiteSpace(summary.CareerImpact))
+        {
+            sb.Append("\n\nCareer Impact:\n- ").Append(summary.CareerImpact);
+        }
 
         return sb.ToString();
     }

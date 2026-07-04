@@ -67,7 +67,25 @@ public static class ConfigurationLoader
                 $"'{options.TurnSummaryLevel}'. Falling back to the default. Valid values: Silent, Compact, Detailed.");
         }
 
+        WarnIfInvalidEnum<Core.Domain.CareerImpactMode>(
+            nameof(AgentRecallOptions.CareerImpactMode), options.CareerImpactMode, "Silent, SignificantOnly, Always");
+        WarnIfInvalidEnum<Core.Domain.CareerImpactSummaryLevel>(
+            nameof(AgentRecallOptions.CareerImpactSummaryLevel), options.CareerImpactSummaryLevel, "Compact, Detailed");
+
         return options;
+    }
+
+    private static void WarnIfInvalidEnum<TEnum>(string key, string? value, string validValues) where TEnum : struct, Enum
+    {
+        if (string.IsNullOrWhiteSpace(value) ||
+            (Enum.TryParse<TEnum>(value, ignoreCase: true, out var parsed) && Enum.IsDefined(parsed)))
+        {
+            return;
+        }
+
+        Console.Error.WriteLine(
+            $"[agentrecall] warning: invalid {AgentRecallOptions.SectionName}.{key} '{value}'. " +
+            $"Falling back to the default. Valid values: {validValues}.");
     }
 
     private static void WarnIfInvalidNoticeLevel(string key, string? value)
