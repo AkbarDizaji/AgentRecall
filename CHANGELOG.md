@@ -4,6 +4,37 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-07-05
+
+### Added
+- **Career-impact seed pack.** A new opt-in pack surfaces Staff-level engineering impact —
+  evidence, metrics, stakeholders, architectural decisions, and promotion-ready
+  achievements — from the work you already do. A cheap deterministic detector runs at
+  end-of-turn only when the pack is installed and `CareerImpactMode` is not `Silent`,
+  printing a compact summary for significant work and staying silent for trivial turns.
+  The full promotion journal is generated on demand via the career commands, while the
+  model-visible hook path emits only a short Turn Summary pointer so the detector stays
+  low-token in the loop. Like every pack, it is never installed automatically.
+
+### Changed
+- **Review-acceptance intent is matched with regexes instead of fixed phrases.** Both
+  capture paths — the Stop-hook `CaptureHook` and the turn finalizer's
+  `TurnCandidateExtractor` — now share a single `ReviewAcceptanceIntent` helper, so
+  natural phrasings with intervening words (e.g. "apply the reviewer's second comment",
+  "do exactly what the reviewer said", "per the review feedback") force a rule Active
+  consistently. The two paths previously disagreed because only one had been migrated off
+  the phrase list. Save/remember intent and verb-trails-noun phrasings stay as exact
+  matches; the broad ranking keyword lists remain substring lists.
+- **Dev container scaffolding is opt-in when a project has none.** `devcontainer init`
+  always wires the environment-agnostic pieces (the recall/capture hooks and `CLAUDE.md`
+  guidance). When a `devcontainer.json` already exists it still wires into it, but a
+  project without one is no longer handed a full dev container it did not ask for — the
+  command defers and prints the single command to generate one. A new `--create` flag
+  opts into scaffolding the manifest and post-create script.
+- The career-impact promotion note reads as natural prose ("Staff-level engineering work
+  that involves a migration and makes an architectural decision.") rather than a
+  PascalCase enum name followed by a lowercase fragment.
+
 ## [1.2.0] - 2026-07-03
 
 ### Added
