@@ -52,4 +52,16 @@
     <ExtensionsVersion>10.0.9</ExtensionsVersion>
     <DiAbstractionsVersion>10.0.9</DiAbstractionsVersion>
   </PropertyGroup>
+
+  <!--
+    Patched SQLite native bundle. EF Core 8/10 pull SQLitePCLRaw 2.1.x transitively,
+    whose e_sqlite3 native lib is flagged by CVE-2025-6965 (GHSA-2m69-gcr7-jv3q). The
+    2.1.x line never got a patched release; the fix ships in the SQLitePCLRaw 3.x line,
+    which bundles SQLite 3.50.3 (past the fix). The 3.x major bump is ABI-compatible with
+    Microsoft.Data.Sqlite here, so projects that use SQLite pin this to override the
+    transitive 2.1.x and clear the advisory. Bump alongside SQLite security releases.
+  -->
+  <PropertyGroup>
+    <SqlitePclRawVersion>3.0.3</SqlitePclRawVersion>
+  </PropertyGroup>
 </Project>
