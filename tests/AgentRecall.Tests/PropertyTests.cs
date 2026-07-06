@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using AgentRecall.Cli.Hooks;
+using AgentRecall.Core.Finalization;
 using AgentRecall.Core.Memory;
 using AgentRecall.Core.Preferences;
 using AgentRecall.Core.Services;
@@ -108,7 +109,67 @@ public class PropertyTests
         }
     }
 
+    // ---- StopHookCandidateGate — totality + safety invariants -----------------
+
+    [Property]
+    public void Gate_ScreenText_NeverThrows_ForArbitraryText(string? text)
+    {
+        // The gate runs inside the non-blocking Stop hook, so it must return a verdict for
+        // any input rather than throw.
+        StopHookCandidateGate.ScreenText(text);
+    }
+
+    [Property]
+    public void Gate_Assess_NeverThrows_ForArbitraryText(string? candidate, string? trigger)
+    {
+        StopHookCandidateGate.Assess(candidate, trigger);
+    }
+
+    [Property]
+    public void Gate_IsMalformedTrigger_NeverThrows_ForArbitraryText(string? trigger)
+    {
+        StopHookCandidateGate.IsMalformedTrigger(trigger);
+    }
+
+    [Property]
+    public Property Gate_AnyDoNotSavePhrase_IsAlwaysRejectedAsExplicitDoNotSave()
+        // Whatever junk surrounds it, text containing a do-not-save instruction must be
+        // rejected as ExplicitDoNotSave — the feature's core safety promise. The gate checks
+        // do-not-save before anything else, so the reason is deterministic.
+        => Prop.ForAll(
+            DoNotSaveWrappedGen().ToArbitrary(),
+            t => StopHookCandidateGate
+                .ScreenText($"{t.Before} {t.Phrase} {t.After}").Reason == CaptureSkipReason.ExplicitDoNotSave);
+
+    [Property]
+    public Property Extractor_TieBreak_PrefersDoNotSave_UnlessSaveIsStrictlyLater()
+        => Prop.ForAll(
+            Gen.Elements(StopHookCandidateGate.DoNotSaveSignals).ToArbitrary(),
+            dns =>
+            {
+                var extractor = new TurnCandidateExtractor(new FeedbackCandidateAnalyzer());
+
+                // Do-not-save alone (no save) → do-not-save wins.
+                var aloneWins = !extractor.SaveIntentFollowsDoNotSave($"please {dns} for now");
+                // A save request strictly after the do-not-save → save wins.
+                var laterSaveWins = extractor.SaveIntentFollowsDoNotSave($"{dns} but actually save this");
+                // A save request before the do-not-save → do-not-save still wins.
+                var earlierSaveLoses = !extractor.SaveIntentFollowsDoNotSave($"save this but {dns}");
+
+                return aloneWins && laterSaveWins && earlierSaveLoses;
+            });
+
     // ---- Generators -----------------------------------------------------------
+
+    private static Gen<(string Phrase, string Before, string After)> DoNotSaveWrappedGen()
+    {
+        var strings = ArbMap.Default.GeneratorFor<string>().Select(s => s ?? string.Empty);
+        return from phrase in Gen.Elements(StopHookCandidateGate.DoNotSaveSignals)
+               from before in strings
+               from after in strings
+               select (phrase, before, after);
+    }
+
 
     private static readonly string[] PayloadKeys =
         ["cwd", "source", "prompt", "assistant_response", "transcript", "transcript_path", "accepted"];

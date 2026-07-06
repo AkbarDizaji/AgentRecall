@@ -97,6 +97,7 @@ public static partial class CommandRouter
             ["activity"] = new DelegateCommand((a, s, o, _, ct) => ActivityAsync(a, s, o, ct)),
             ["seed"] = new DelegateCommand((a, s, o, l, ct) => SeedAsync(a, s, o, l, ct)),
             ["career"] = new DelegateCommand((a, s, o, l, ct) => CareerAsync(a, s, o, l, ct)),
+            ["cleanup"] = new DelegateCommand((a, s, o, l, ct) => CleanupAsync(a, s, o, l, ct)),
             ["mcp"] = new DelegateCommand(async (_, s, o, _, ct) =>
             {
                 var server = new Mcp.McpServer(s);
@@ -1592,6 +1593,20 @@ public static partial class CommandRouter
                     .RecordAsync(notice with { TurnId = result.TurnId }, cancellationToken).ConfigureAwait(false);
             }
 
+            // Structured skip activity for candidates the Stop-hook quality gate (or a
+            // do-not-save instruction) rejected, so capture-status and the turn summary
+            // explain the skip from actual state — never from a guess. Capped excerpt only.
+            foreach (var skip in result.Skipped.Where(s => s.SkipReason != CaptureSkipReason.None))
+            {
+                var skipNotice = ActivityNoticeFactory.ForCandidateSkipped(
+                    skip.SkipReason, skip.CandidateExcerpt, input.Source ?? "cli");
+                if (skipNotice is not null)
+                {
+                    await scope.ServiceProvider.GetRequiredService<IActivityRecorder>()
+                        .RecordAsync(skipNotice with { TurnId = result.TurnId }, cancellationToken).ConfigureAwait(false);
+                }
+            }
+
             // Optional career-impact: a cheap, deterministic detector that runs only when the
             // `career-impact` pack is installed and the mode is not Silent. It persists a
             // candidate and records a human-visible notice; the full journal is never
@@ -2616,6 +2631,8 @@ public static partial class CommandRouter
         output.WriteLine("  career journal --last");
         output.WriteLine("                       Generate a promotion-ready journal entry (--json, --file <path>)");
         output.WriteLine("  career status        Show career-impact pack/mode and the last candidate (--json)");
+        output.WriteLine("  cleanup pending-noise");
+        output.WriteLine("                       Archive noisy Pending rules from the Stop hook (--apply, --json, --tag, --status)");
         output.WriteLine("  mcp                  Run the MCP server over stdio (for Claude Code)");
         output.WriteLine("  status               Show the memory subsystem status");
         output.WriteLine("  help                 Show this help text");

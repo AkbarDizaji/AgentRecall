@@ -55,6 +55,19 @@ public sealed record SkippedLesson
 
     /// <summary>The id of the existing rule this candidate duplicated, if a duplicate.</summary>
     public int? DuplicateOfRuleId { get; init; }
+
+    /// <summary>
+    /// The structured reason this candidate was skipped, when the Stop-hook quality gate
+    /// (or a do-not-save instruction) rejected it. <see cref="CaptureSkipReason.None"/> for
+    /// ordinary policy skips and for results reconstructed from a persisted finalization.
+    /// </summary>
+    public CaptureSkipReason SkipReason { get; init; } = CaptureSkipReason.None;
+
+    /// <summary>
+    /// A short, capped excerpt of the rejected candidate for the activity record. Never a
+    /// full transcript; null when there is no candidate text (e.g. a whole-turn do-not-save).
+    /// </summary>
+    public string? CandidateExcerpt { get; init; }
 }
 
 /// <summary>

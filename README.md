@@ -316,6 +316,7 @@ on a retrieval regression. The same check also runs as a unit test.
 | `career impact --last` | Show the last turn's career-impact candidate (`--json`, `--detailed`). |
 | `career journal --last` | Generate a promotion-ready journal entry on demand (`--json`, `--file <path>`). |
 | `career status` | Show the career-impact pack/mode and the last candidate (`--json`). |
+| `cleanup pending-noise` | Find and archive noisy Pending rules the Stop hook created before capture hardening (dry run by default; `--apply`, `--json`, `--tag <tag>`, `--status <status>`). |
 | `mcp` | Run the MCP server over stdio (for Claude Code). |
 | `status` | Show where data is stored. |
 | `help` / `--help` / `-h` | Show usage. |
@@ -1184,6 +1185,57 @@ When the last turn had no memory activity:
 
 `capture-status` answers a narrower question — *what did capture decide?* — and points
 to `agentrecall turn-summary --last` for the full per-turn activity.
+
+---
+
+## Stop Hook Capture Hardening
+
+The Stop hook captures **only clean, reusable lessons, preferences, and repository
+conventions**. A deterministic quality gate (no LLM, no network) runs before any rule is
+created, so assistant chatter never becomes memory. It skips:
+
+- assistant prose and meta commentary ("one thing worth saving…", "want me to save it?",
+  "the Stop hook may have captured it", "I didn't manually call AgentRecall");
+- malformed triggers built from conversation fragments ("When working on Not much…");
+- vague candidates with no actionable guidance;
+- and any turn where the user explicitly said not to save.
+
+### Explicit do-not-save
+
+If the turn contains an explicit do-not-save instruction — in English, Persian, or
+Finglish (`don't save this`, `این رو ذخیره نکن`, `save nakon`, `capture nakon`) — the
+Stop hook hard-skips capture: no rule and no Pending candidate are created. `capture-status`
+and the Turn Memory Summary report the skip ("explicit do-not-save instruction"), and a
+structured skip activity is recorded. If a turn carries both a do-not-save and a save
+request, the most recent instruction wins; ties prefer do-not-save.
+
+### Pending rule quality gate
+
+Before a candidate becomes a Pending rule it must read as a real rule — a condition, an
+action, and (ideally) a reason — not assistant prose or a bare fragment. Rejected
+candidates are recorded with a reason (`AssistantProse`, `MalformedTrigger`, `TooVague`,
+`MissingAction`, `ExplicitDoNotSave`, …) instead of being parked for you to clean up later.
+An explicit "save this" still captures a clean lesson, but never stores raw prose.
+
+### Cleaning up existing noise
+
+For Pending rules created before hardening, `cleanup pending-noise` finds and archives the
+noisy ones using the same filters. It is a dry run by default, never hard-deletes, and never
+touches Active/Promoted, user-modified, or clean rules:
+
+```bash
+agentrecall cleanup pending-noise            # dry run: report what would be archived
+agentrecall cleanup pending-noise --apply    # archive the noisy Pending rules
+agentrecall cleanup pending-noise --json     # machine-readable counts by reason
+```
+
+```
+🧠 **AgentRecall:** found 47 noisy pending rules.
+- Assistant prose: 31
+- Malformed trigger: 11
+- Duplicate noise: 5
+Run `agentrecall cleanup pending-noise --apply` to archive them.
+```
 
 ---
 

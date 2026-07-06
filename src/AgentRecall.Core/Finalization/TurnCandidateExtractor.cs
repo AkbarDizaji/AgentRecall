@@ -106,17 +106,15 @@ public sealed class TurnCandidateExtractor : ITurnCandidateExtractor
     private static readonly string[] SelfIdentifiedLeadIns =
     [
         "one worth storing is", "worth storing is", "this is worth storing",
+        "one thing worth saving is", "one worth saving is", "worth saving is",
         "one reusable lesson is", "a reusable lesson is", "the reusable lesson is",
         "the reusable lesson here is", "reusable lesson is", "the lesson here is",
         "the lesson is", "the convention is", "one lesson worth storing is",
     ];
 
-    private static readonly string[] DoNotSaveSignals =
-    [
-        "do not save", "don't save", "dont save", "do not store", "don't store",
-        "dont store", "not worth saving", "not worth storing", "skip memory",
-        "no need to save", "don't remember", "do not remember", "nothing to save",
-    ];
+    // The canonical do-not-save vocabulary lives in the Stop-hook gate so the finalizer,
+    // the extractor, and cleanup all agree on what "do not save" means.
+    private static readonly string[] DoNotSaveSignals = StopHookCandidateGate.DoNotSaveSignals;
 
     // Explicit "keep this" intent. Review-acceptance intent is detected separately by the
     // shared regex (see ReviewAcceptanceIntent), so only save/remember phrases live here.
@@ -213,6 +211,60 @@ public sealed class TurnCandidateExtractor : ITurnCandidateExtractor
         }
 
         return ContainsAny(stripped, SaveIntentSignals) || ReviewAcceptanceIntent.Matches(stripped);
+    }
+
+    /// <summary>
+    /// When a turn carries both a do-not-save instruction and a save request, the most
+    /// recent (nearest) intent wins. Returns true only when an explicit save phrase occurs
+    /// strictly after the last do-not-save phrase — otherwise do-not-save is preferred for
+    /// safety (including exact ties). Deterministic: same text, same answer.
+    /// </summary>
+    public bool SaveIntentFollowsDoNotSave(string? userText)
+    {
+        if (string.IsNullOrWhiteSpace(userText))
+        {
+            return false;
+        }
+
+        var lower = userText.ToLowerInvariant();
+        var lastDoNotSave = LastIndexOfAny(lower, DoNotSaveSignals);
+        if (lastDoNotSave < 0)
+        {
+            // No do-not-save present: there is nothing to override.
+            return HasAcceptanceSignal(userText);
+        }
+
+        // Mask the do-not-save regions (keeping indices stable) so the "save" inside
+        // "don't save this" is not misread as a later save request.
+        var masked = lower;
+        foreach (var marker in DoNotSaveSignals)
+        {
+            var start = 0;
+            int idx;
+            while ((idx = masked.IndexOf(marker, start, StringComparison.Ordinal)) >= 0)
+            {
+                masked = masked.Remove(idx, marker.Length).Insert(idx, new string(' ', marker.Length));
+                start = idx + marker.Length;
+            }
+        }
+
+        var lastSave = LastIndexOfAny(masked, SaveIntentSignals);
+        return lastSave > lastDoNotSave;
+    }
+
+    private static int LastIndexOfAny(string haystack, string[] needles)
+    {
+        var last = -1;
+        foreach (var needle in needles)
+        {
+            var idx = haystack.LastIndexOf(needle, StringComparison.OrdinalIgnoreCase);
+            if (idx > last)
+            {
+                last = idx;
+            }
+        }
+
+        return last;
     }
 
     public IReadOnlyList<TurnLessonCandidate> Extract(string? userText, string? assistantText, int maxCandidateCharacters)

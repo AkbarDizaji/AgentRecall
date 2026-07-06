@@ -364,6 +364,35 @@ public static class ActivityNoticeFactory
         return $"chose #{conflict.Resolution.SelectedRuleId}{over}{why}";
     }
 
+    /// <summary>
+    /// A notice for a Stop-hook capture candidate the quality gate rejected (assistant
+    /// prose, a malformed trigger, a do-not-save instruction, …). The excerpt is capped and
+    /// carries no full transcript. Returns null for <see cref="CaptureSkipReason.None"/>.
+    /// </summary>
+    public static ActivityNotice? ForCandidateSkipped(CaptureSkipReason reason, string? candidateExcerpt, string source)
+    {
+        if (reason == CaptureSkipReason.None)
+        {
+            return null;
+        }
+
+        var explanation = StopHookCandidateGate.Explain(reason);
+        var details = new List<string> { explanation };
+        var excerpt = Truncate(candidateExcerpt ?? string.Empty, LabelLength);
+        if (excerpt.Length > 0)
+        {
+            details.Add($"candidate: {excerpt}");
+        }
+
+        return new ActivityNotice
+        {
+            Type = ActivityType.CandidateSkipped,
+            Summary = "skipped 1 candidate.",
+            Details = details,
+            Source = source,
+        };
+    }
+
     private static string Short(RecallRule rule)
     {
         var label = !string.IsNullOrWhiteSpace(rule.Trigger) ? rule.Trigger : rule.RuleText;

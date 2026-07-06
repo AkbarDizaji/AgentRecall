@@ -96,6 +96,21 @@ public static class DevcontainerScaffolder
         `agentrecall finalize-turn`, which extracts reusable lessons and decides — on its
         own — whether to auto-capture, suggest, or skip each one (no tool call required).
 
+        ### Capture hardening
+
+        The Stop hook captures only clean, reusable lessons, preferences, and conventions.
+        It will not turn chat into memory:
+
+        - **If the user says not to save/capture/remember something, AgentRecall must not
+          capture it.** An explicit do-not-save instruction (English, Persian, or Finglish —
+          "don't save this", "این رو ذخیره نکن", "save nakon") hard-skips the turn.
+        - **Do not turn your own explanations into rules.** Assistant prose, meta commentary
+          ("one thing worth saving…"), and status guesses are never reusable rules — the hook
+          skips them, and so should you.
+        - When the user asks what was saved, check `agentrecall capture-status --last-turn`
+          or `agentrecall turn-summary --last` and answer from the actual recorded state, not
+          from whether you called a tool.
+
         ### AgentRecall behavior contract
 
         When the user asks anything about AgentRecall's state — whether it captured,

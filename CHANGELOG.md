@@ -4,6 +4,32 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Stop hook capture hardening.** A deterministic quality gate now screens every Stop-hook
+  capture candidate before a rule is created, so assistant chatter never becomes memory. It
+  skips assistant prose and meta commentary ("one thing worth saving…", "want me to save
+  it?", "the Stop hook may have captured it"), malformed triggers built from conversation
+  fragments, and vague candidates with no actionable guidance — each recorded with a
+  structured reason (`AssistantProse`, `MalformedTrigger`, `TooVague`, `MissingAction`, …)
+  instead of being parked as noisy Pending rules for you to clean up later.
+- **Explicit do-not-save is honoured across the board.** An explicit do-not-save instruction
+  in English, Persian, or Finglish (`don't save this`, `این رو ذخیره نکن`, `save nakon`)
+  hard-skips the turn — no rule, no Pending candidate. When a turn carries both a do-not-save
+  and a save request, the most recent instruction wins and ties prefer do-not-save. The skip
+  reason is surfaced by `capture-status`, the Turn Memory Summary, and a structured activity
+  record (with a capped candidate excerpt, never the transcript).
+- **`cleanup pending-noise` command.** Finds and archives noisy Pending rules created before
+  hardening, using the same filters. Dry run by default; `--apply` archives (never
+  hard-deletes), and it never touches Active/Promoted, user-modified, or clean rules
+  (`--json`, `--tag <tag>`, `--status <status>`).
+
+### Changed
+- The Stop-hook `CLAUDE.md` scaffold now states the capture-hardening contract: if the user
+  says not to save something, AgentRecall must not capture it, and assistant explanations are
+  never turned into rules.
+
 ## [1.3.0] - 2026-07-05
 
 ### Added

@@ -181,7 +181,7 @@ public sealed class TurnSummaryService : ITurnSummaryService
             Used = used,
             Captured = captured,
             Suggested = suggested,
-            Skipped = skips,
+            Skipped = DedupSkips(skips),
             Remembered = remembered,
             Ignored = ignored,
             Errors = errors,
@@ -249,6 +249,25 @@ public sealed class TurnSummaryService : ITurnSummaryService
         }
 
         return Distinct(ids);
+    }
+
+    // The same skip can arrive from both the finalization record and a CandidateSkipped
+    // activity, worded slightly differently ("Assistant prose, …" vs "assistant prose, …").
+    // Collapse them by a normalized key so the summary shows each skip once.
+    private static IReadOnlyList<TurnSummarySkip> DedupSkips(IEnumerable<TurnSummarySkip> skips)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var ordered = new List<TurnSummarySkip>();
+        foreach (var skip in skips)
+        {
+            var key = (skip.Reason ?? string.Empty).Trim().TrimEnd('.', '!', '?').ToLowerInvariant();
+            if (seen.Add(key))
+            {
+                ordered.Add(skip);
+            }
+        }
+
+        return ordered;
     }
 
     private static string SkipReason(AgentRecallActivity activity)

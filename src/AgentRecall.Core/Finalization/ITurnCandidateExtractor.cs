@@ -19,6 +19,13 @@ public interface ITurnCandidateExtractor
     bool HasAcceptanceSignal(string? userText);
 
     /// <summary>
+    /// True when an explicit save request appears after the last do-not-save instruction in
+    /// the turn (most-recent-intent wins); false otherwise, so ties and lone do-not-save
+    /// instructions are preferred for safety.
+    /// </summary>
+    bool SaveIntentFollowsDoNotSave(string? userText);
+
+    /// <summary>
     /// Detects the outcome-aware signals in a turn (an observed failure, a user
     /// correction, an accepted review, a test that failed then passed, a repeat) so the
     /// adaptive worthiness policy can weigh what produced a candidate, not just its text.

@@ -170,12 +170,18 @@ public sealed class TurnFinalizer : ITurnFinalizer
         // adaptive policy elevate a generic lesson that names a real mistake.
         var outcome = _extractor.DetectOutcomeSignals(userText, assistantText);
 
-        // A "do not save" turn is honoured unless the user also explicitly accepted a
-        // correction this turn (a stronger, contradicting signal).
-        if (_extractor.HasDoNotSaveSignal(userText, assistantText) && !acceptance)
+        // An explicit do-not-save instruction hard-skips the turn: no rule, no Pending
+        // candidate. If the turn *also* asks to save, the most recent intent wins (a save
+        // request after the do-not-save), and a host-provided acceptance flag overrides;
+        // otherwise — including exact ties — do-not-save is preferred for safety.
+        if (_extractor.HasDoNotSaveSignal(userText, assistantText))
         {
-            skipped.Add(new SkippedLesson { Reason = "Turn contained a do-not-save signal; nothing captured." });
-            return;
+            var saveOverrides = input.Accepted == true || _extractor.SaveIntentFollowsDoNotSave(userText);
+            if (!saveOverrides)
+            {
+                skipped.Add(Skip(CaptureSkipReason.ExplicitDoNotSave));
+                return;
+            }
         }
 
         var candidates = _extractor
@@ -208,6 +214,18 @@ public sealed class TurnFinalizer : ITurnFinalizer
         List<int> duplicates,
         CancellationToken cancellationToken)
     {
+        // Quality gate: keep assistant chatter, meta commentary, and vague fragments out of
+        // memory entirely — before any auto-capture or Pending suggestion is created. We
+        // screen the candidate body (the rule text); the derived trigger is validated
+        // separately by `cleanup pending-noise`, since the trigger here is synthesized from
+        // the turn's task and a chatty task must not sink an otherwise clean lesson.
+        var gate = StopHookCandidateGate.ScreenText(candidate.Text);
+        if (!gate.IsAcceptable)
+        {
+            skipped.Add(Skip(gate.Reason, candidate.Text));
+            return;
+        }
+
         // Classify here only to decide the posture we hand the decision policy; the
         // FeedbackService classifies again and owns the actual capture decision.
         var worthiness = _classifier.Classify(candidate.Text);
@@ -416,6 +434,25 @@ public sealed class TurnFinalizer : ITurnFinalizer
             .OrderByDescending(f => f.CreatedAt)
             .ThenByDescending(f => f.Id)
             .FirstOrDefault();
+    }
+
+    /// <summary>A structured skip carrying a human reason, the machine reason code, and a capped excerpt.</summary>
+    private static SkippedLesson Skip(CaptureSkipReason reason, string? candidateText = null)
+    {
+        var excerpt = candidateText?.Trim();
+        if (!string.IsNullOrEmpty(excerpt) && excerpt.Length > 80)
+        {
+            excerpt = excerpt[..79] + "…";
+        }
+
+        var explanation = StopHookCandidateGate.Explain(reason);
+        var sentence = char.ToUpperInvariant(explanation[0]) + explanation[1..] + ".";
+        return new SkippedLesson
+        {
+            Reason = sentence,
+            SkipReason = reason,
+            CandidateExcerpt = string.IsNullOrEmpty(excerpt) ? null : excerpt,
+        };
     }
 
     private static FinalizedLesson ToLesson(RecallRule rule, CaptureDecision? decision, string? note) =>
