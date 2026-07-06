@@ -40,16 +40,18 @@ public static class TurnPayload
             return null;
         }
 
-        if (root is null)
+        // A well-formed payload is a JSON object. Anything else (an array, a bare scalar)
+        // carries no fields to read, so it is tolerated as "nothing to finalize".
+        if (root is not JsonObject obj)
         {
             return null;
         }
 
-        var cwd = NonEmpty(root["cwd"]?.GetValue<string>()) ?? SafeCurrentDirectory();
-        var source = NonEmpty(root["source"]?.GetValue<string>()) ?? "stop_hook";
-        var accepted = root["accepted"]?.GetValue<bool>();
+        var cwd = NonEmpty(AsString(obj["cwd"])) ?? SafeCurrentDirectory();
+        var source = NonEmpty(AsString(obj["source"])) ?? "stop_hook";
+        var accepted = AsBool(obj["accepted"]);
 
-        var (userText, assistantText, rawTranscript) = ResolveText(root, diagnostics);
+        var (userText, assistantText, rawTranscript) = ResolveText(obj, diagnostics);
         var repository = RepositoryName(cwd);
 
         return new TurnFinalizationInput
@@ -69,23 +71,23 @@ public static class TurnPayload
     /// Resolves the latest user and assistant text, preferring inline fields, then an
     /// inline transcript string, then the referenced transcript file.
     /// </summary>
-    private static (string? User, string? Assistant, string? Raw) ResolveText(JsonNode root, TextWriter diagnostics)
+    private static (string? User, string? Assistant, string? Raw) ResolveText(JsonObject root, TextWriter diagnostics)
     {
-        var inlinePrompt = NonEmpty(root["prompt"]?.GetValue<string>());
-        var inlineAssistant = NonEmpty(root["assistant_response"]?.GetValue<string>());
+        var inlinePrompt = NonEmpty(AsString(root["prompt"]));
+        var inlineAssistant = NonEmpty(AsString(root["assistant_response"]));
         if (inlinePrompt is not null || inlineAssistant is not null)
         {
             return (inlinePrompt, inlineAssistant, null);
         }
 
-        var inlineTranscript = NonEmpty(root["transcript"]?.GetValue<string>());
+        var inlineTranscript = NonEmpty(AsString(root["transcript"]));
         if (inlineTranscript is not null)
         {
             var (u, a) = ParseTranscriptText(inlineTranscript);
             return (u, a, inlineTranscript);
         }
 
-        var transcriptPath = NonEmpty(root["transcript_path"]?.GetValue<string>());
+        var transcriptPath = NonEmpty(AsString(root["transcript_path"]));
         if (transcriptPath is null || !File.Exists(transcriptPath))
         {
             return (null, null, null);
@@ -129,13 +131,19 @@ public static class TurnPayload
                 continue;
             }
 
-            var type = entry?["type"]?.GetValue<string>();
+            // A transcript line that isn't a JSON object carries no turn to read.
+            if (entry is not JsonObject entryObject)
+            {
+                continue;
+            }
+
+            var type = AsString(entryObject["type"]);
             if (type is not ("user" or "assistant"))
             {
                 continue;
             }
 
-            var text = ExtractMessageText(entry!["message"]);
+            var text = ExtractMessageText(entryObject["message"]);
             if (string.IsNullOrWhiteSpace(text))
             {
                 continue;
@@ -156,7 +164,12 @@ public static class TurnPayload
 
     private static string? ExtractMessageText(JsonNode? message)
     {
-        var content = message?["content"];
+        if (message is not JsonObject messageObject)
+        {
+            return null;
+        }
+
+        var content = messageObject["content"];
         if (content is null)
         {
             return null;
@@ -175,12 +188,12 @@ public static class TurnPayload
         var sb = new StringBuilder();
         foreach (var block in blocks)
         {
-            if (block?["type"]?.GetValue<string>() != "text")
+            if (block is not JsonObject blockObject || AsString(blockObject["type"]) != "text")
             {
                 continue;
             }
 
-            var blockText = block["text"]?.GetValue<string>();
+            var blockText = AsString(blockObject["text"]);
             if (!string.IsNullOrWhiteSpace(blockText))
             {
                 if (sb.Length > 0)
@@ -236,4 +249,13 @@ public static class TurnPayload
 
     private static string? NonEmpty(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value;
+
+    // Reads a field only when it is actually a JSON string / bool. A host that sends the
+    // wrong type (a number where a string is expected) is tolerated as a missing field
+    // rather than throwing — the parser must never block the hook.
+    private static string? AsString(JsonNode? node) =>
+        node is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
+
+    private static bool? AsBool(JsonNode? node) =>
+        node is JsonValue value && value.TryGetValue<bool>(out var flag) ? flag : null;
 }

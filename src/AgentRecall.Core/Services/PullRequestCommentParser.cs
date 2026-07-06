@@ -63,15 +63,15 @@ public static class PullRequestCommentParser
         {
             if (item is JsonObject node)
             {
-                var body = node["body"]?.GetValue<string>();
+                var body = AsString(node["body"]);
                 if (!string.IsNullOrWhiteSpace(body))
                 {
                     result.Add(new PullRequestComment
                     {
                         Body = body.Trim(),
-                        Author = node["user"]?["login"]?.GetValue<string>()
-                            ?? node["author"]?["login"]?.GetValue<string>(),
-                        Path = node["path"]?.GetValue<string>(),
+                        Author = AsString((node["user"] as JsonObject)?["login"])
+                            ?? AsString((node["author"] as JsonObject)?["login"]),
+                        Path = AsString(node["path"]),
                     });
                 }
             }
@@ -88,6 +88,11 @@ public static class PullRequestCommentParser
         comments = result;
         return true;
     }
+
+    // Reads a field only when it is actually a JSON string; a wrong-typed value (a number
+    // or bool where a string is expected) is treated as absent rather than throwing.
+    private static string? AsString(JsonNode? node) =>
+        node is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
 
     private static IReadOnlyList<PullRequestComment> ParseText(string text)
     {
