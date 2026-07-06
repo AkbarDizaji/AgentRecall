@@ -132,6 +132,21 @@ public class ExtractionQualityTests
     }
 
     [Fact]
+    public void Validate_BlanksProhibitiveDoNotEquivalentToDo()
+    {
+        // The do_not is genuinely prohibitive (so it survives the negativity check) but
+        // says the same thing as the do — that redundant structure is blanked.
+        var rule = Rule(
+            ruleText: "Never concatenate user input into SQL.",
+            mistake: "Do not concatenate user input into SQL.");
+
+        var result = Validator.Validate(rule);
+
+        Assert.Equal(string.Empty, result.Rule.Mistake);
+        Assert.Contains(result.Issues, i => i.Field == "do_not" && i.Message.Contains("equivalent"));
+    }
+
+    [Fact]
     public void Validate_BlanksNonProhibitiveDoNot()
     {
         // A "do not" that isn't actually negative is not real structure.
