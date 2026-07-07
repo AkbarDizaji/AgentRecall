@@ -4,7 +4,7 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.4.0] - 2026-07-07
 
 ### Added
 - **Stop hook capture hardening.** A deterministic quality gate now screens every Stop-hook
@@ -29,6 +29,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Stop-hook `CLAUDE.md` scaffold now states the capture-hardening contract: if the user
   says not to save something, AgentRecall must not capture it, and assistant explanations are
   never turned into rules.
+
+### Fixed
+- **The turn-payload and pull-request comment parsers are now genuinely tolerant of malformed
+  input.** Both honour their documented "never throws" contract even when a JSON field carries
+  the wrong type (a number where a string is expected) or the payload is an array/scalar rather
+  than an object — surfaced by property-based fuzzing. A wrong-typed field is treated as absent
+  instead of throwing into the Stop hook.
+
+### Security
+- **Bumped the transitive SQLite native bundle to the patched 3.x line.** EF Core pulls
+  `SQLitePCLRaw` 2.1.x, whose `e_sqlite3` native library is flagged by CVE-2025-6965
+  (GHSA-2m69-gcr7-jv3q) with no patched 2.1.x release. Pinned `SQLitePCLRaw.bundle_e_sqlite3`
+  to 3.0.3 (SQLite 3.50.3, past the fix) in the projects that use SQLite, clearing the advisory
+  while remaining compatible with EF Core 8 and 10.
 
 ## [1.3.0] - 2026-07-05
 
