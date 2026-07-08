@@ -210,6 +210,10 @@ public static partial class CommandRouter
         nameof(CaptureSkipReason.MissingAction) => "Missing action",
         nameof(CaptureSkipReason.ExplicitDoNotSave) => "Do-not-save",
         nameof(CaptureSkipReason.CodeFact) => "Code fact",
+        nameof(CaptureSkipReason.SourceDocument) => "Source-document instruction",
+        nameof(CaptureSkipReason.ToolOrSkillInstruction) => "Tool/skill instruction",
+        nameof(CaptureSkipReason.CommandOutput) => "Command output",
+        nameof(CaptureSkipReason.LogOutput) => "Log output",
         _ => reason,
     };
 

@@ -151,37 +151,6 @@ public class StopHookHardeningTests
         Assert.Empty(await Rules(db));
     }
 
-    // B. Persian do-not-save prevents capture.
-    [Fact]
-    public async Task B_PersianDoNotSave_CapturesNothing()
-    {
-        await using var db = new TestDatabase();
-        await Init(db);
-
-        var result = await Finalize(db, Turn(
-            prompt: "همیشه از پارامتر استفاده کن تا از تزریق جلوگیری بشه. این رو ذخیره نکن."));
-
-        AssertNothingStored(result);
-        Assert.Contains(result.Skipped, s => s.SkipReason == CaptureSkipReason.ExplicitDoNotSave);
-        Assert.Empty(await Rules(db));
-    }
-
-    // C. Finglish do-not-save prevents capture.
-    [Theory]
-    [InlineData("Use parameterized queries because injection. save nakon.")]
-    [InlineData("Use parameterized queries because injection. capture nakon.")]
-    [InlineData("Use parameterized queries because injection. too AgentRecall nazar.")]
-    public async Task C_FinglishDoNotSave_CapturesNothing(string prompt)
-    {
-        await using var db = new TestDatabase();
-        await Init(db);
-
-        var result = await Finalize(db, Turn(prompt: prompt));
-
-        AssertNothingStored(result);
-        Assert.Empty(await Rules(db));
-    }
-
     // AH. do-not-save + save: the most recent intent wins; ties prefer do-not-save.
     [Fact]
     public async Task AH_MostRecentIntentWins_AndTiesPreferDoNotSave()
@@ -296,6 +265,54 @@ public class StopHookHardeningTests
                        "apply the same tenant scope before emitting entity-specific messages."));
 
         Assert.Single(result.Captured);
+    }
+
+    // ---- source/outcome-aware skips (finalizer) -------------------------------
+
+    // A command-shaped correction is read-only source material and is skipped, not stored.
+    [Fact]
+    public async Task SourceAware_CommandShapedCorrection_IsSkipped()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        var result = await Finalize(db, Turn(
+            prompt: "Use git status --porcelain to list the changed files."));
+
+        AssertNothingStored(result);
+        Assert.Contains(result.Skipped, s => s.SkipReason == CaptureSkipReason.CommandOutput);
+        Assert.Empty(await Rules(db));
+    }
+
+    // A tool-recipe-shaped correction (ALL_CAPS placeholder, "for subsequent steps") is skipped.
+    [Fact]
+    public async Task SourceAware_ToolInstructionShapedCorrection_IsSkipped()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        var result = await Finalize(db, Turn(
+            prompt: "Use the created directory path as RESULTS_DIR for subsequent steps."));
+
+        AssertNothingStored(result);
+        Assert.Contains(result.Skipped, s => s.SkipReason == CaptureSkipReason.ToolOrSkillInstruction);
+        Assert.Empty(await Rules(db));
+    }
+
+    // User technical guidance that merely starts with "Use" is NOT treated as source material:
+    // "instead of" makes it a correction, so it is not skipped as doc/tool text.
+    [Fact]
+    public async Task SourceAware_UserGuidanceStartingWithUse_IsNotSkippedAsSource()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        var result = await Finalize(db, Turn(
+            prompt: "Use the existing payment attach path instead of writing duplicate Stripe attach logic."));
+
+        Assert.DoesNotContain(result.Skipped, s =>
+            s.SkipReason is CaptureSkipReason.SourceDocument or CaptureSkipReason.ToolOrSkillInstruction
+                or CaptureSkipReason.CommandOutput or CaptureSkipReason.LogOutput);
     }
 
     // ---- capture-status / turn-summary / activity -----------------------------

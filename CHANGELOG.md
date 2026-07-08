@@ -4,6 +4,28 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Stop-hook capture is now source/outcome-aware.** The keyword screening that gated captures
+  is replaced by a deterministic classifier that labels each candidate's source and outcome
+  before capture. Documentation, tool/skill instructions, command output, and logs are no
+  longer captured merely because they were read — they become memory only when paired with an
+  observed agent failure, an explicit save, or a confirmed repository convention. Classification
+  reads structured activity metadata first (skill-doc / tool-doc / command-output / log-output)
+  and falls back to a small set of compiled, timeout-guarded regex pattern groups
+  (`SourceDocumentInstructionPattern`, `ToolOrSkillInstructionPattern`, `CommandOutputPattern`,
+  `LogOutputPattern`, `AssistantMetaProsePattern`, `ExplicitSaveIntentPattern`,
+  `ExplicitDoNotSaveIntentPattern`, `ObservedFailureOrCorrectionPattern`,
+  `RepositoryConfirmationPattern`). New structured skip reasons `SourceDocument`,
+  `ToolOrSkillInstruction`, `CommandOutput`, and `LogOutput` are surfaced alongside the existing
+  ones. Because corrections ("use X instead of Y") and explicit saves ("save this: …") are
+  recognised before any source shape, user guidance that merely starts with "Use" is never
+  mistaken for documentation.
+- **Do-not-save detection is now English-only.** The first release of source/outcome-aware
+  capture drops the Persian/Finglish do-not-save and meta-prose vocabulary from the Stop-hook
+  gate; the classifier and the scaffolded guidance are English-only and deterministic.
+
 ## [1.4.0] - 2026-07-07
 
 ### Added

@@ -214,11 +214,33 @@ public sealed class TurnFinalizer : ITurnFinalizer
         List<int> duplicates,
         CancellationToken cancellationToken)
     {
-        // Quality gate: keep assistant chatter, meta commentary, and vague fragments out of
-        // memory entirely — before any auto-capture or Pending suggestion is created. We
-        // screen the candidate body (the rule text); the derived trigger is validated
-        // separately by `cleanup pending-noise`, since the trigger here is synthesized from
-        // the turn's task and a chatty task must not sink an otherwise clean lesson.
+        // Source/outcome-aware gate (runs first): documentation, tool/skill instructions,
+        // command output, and log lines are read-only source material — they become memory
+        // only when the turn pairs them with an observed failure, an explicit save, or a
+        // confirmed repository convention. Structured origin metadata is trusted before the
+        // regex classifier; here the origin is what the extractor found the candidate in.
+        var origin = candidate.Source == TurnCandidateSource.UserCorrection
+            ? CandidateOrigin.UserMessage
+            : CandidateOrigin.AssistantMessage;
+        var classification = CandidateSourceClassifier.Classify(candidate.Text, origin);
+        var pairedWithObservedFailure = outcome.ObservedFailure || outcome.UserCorrection ||
+            outcome.ReviewAccepted || outcome.TestFailedThenFixed || outcome.RepeatedCorrectionCount >= 2;
+        var pairedWithRepositoryConfirmation =
+            CandidateSourceClassifier.MatchesRepositoryConfirmation(input.Prompt) ||
+            CandidateSourceClassifier.MatchesRepositoryConfirmation(candidate.Text);
+        var sourceVerdict = SourceAwareCaptureDecision.Decide(
+            classification, pairedWithObservedFailure, acceptance, pairedWithRepositoryConfirmation);
+        if (sourceVerdict.ShouldSkip)
+        {
+            skipped.Add(Skip(sourceVerdict.SkipReason, candidate.Text));
+            return;
+        }
+
+        // Structure/quality gate: keep vague fragments and any residual chatter out of memory
+        // — before any auto-capture or Pending suggestion is created. We screen the candidate
+        // body (the rule text); the derived trigger is validated separately by
+        // `cleanup pending-noise`, since the trigger here is synthesized from the turn's task
+        // and a chatty task must not sink an otherwise clean lesson.
         var gate = StopHookCandidateGate.ScreenText(candidate.Text);
         if (!gate.IsAcceptable)
         {

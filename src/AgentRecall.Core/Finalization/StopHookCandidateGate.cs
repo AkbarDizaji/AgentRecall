@@ -36,6 +36,18 @@ public enum CaptureSkipReason
 
     /// <summary>The candidate is not a reusable lesson, preference, or convention.</summary>
     NotReusable,
+
+    /// <summary>The candidate is an instruction read from a source document, not a lesson.</summary>
+    SourceDocument,
+
+    /// <summary>The candidate is part of a tool's or skill's operational instructions.</summary>
+    ToolOrSkillInstruction,
+
+    /// <summary>The candidate reads as the output of running a command.</summary>
+    CommandOutput,
+
+    /// <summary>The candidate reads as a log or console line.</summary>
+    LogOutput,
 }
 
 /// <summary>The outcome of screening a Stop-hook capture candidate.</summary>
@@ -65,30 +77,21 @@ public static class StopHookCandidateGate
     // fragment rather than a rule. Above it, a detailed lesson is trusted to carry guidance.
     private const int ShortCandidateWords = 8;
 
-    // Explicit "do not persist this" instructions — English, Persian, and Finglish. Shared
-    // with the turn extractor so the do-not-save vocabulary stays defined in one place.
+    // Explicit "do not persist this" instructions (English only). Shared with the turn
+    // extractor so the do-not-save vocabulary stays defined in one place.
     public static readonly string[] DoNotSaveSignals =
     [
-        // English
         "do not save", "don't save", "dont save", "do not store", "don't store", "dont store",
         "do not capture", "don't capture", "dont capture", "do not remember", "don't remember",
         "dont remember", "not worth saving", "not worth storing", "don't add this to agentrecall",
         "do not add this to agentrecall", "ignore this for memory", "skip memory", "no need to save",
         "no need to store", "nothing to save", "don't save anything", "do not save anything",
-        // Persian
-        "ذخیره نکن", "سیو نکن", "یادت نگه ندار", "به خاطر نسپار", "کپچر نکن",
-        "لازم نیست ذخیره", "ارزش ذخیره ندار", "این رو ذخیره نکن", "اینو ذخیره نکن",
-        // Finglish
-        "save nakon", "store nakon", "capture nakon", "zakhire nakon", "sio nakon",
-        "yadet nabashe", "too agentrecall nazar", "tu agentrecall nazar", "lazem nist zakhire",
     ];
 
-    // Assistant chatter / meta commentary that must never become a rule — English then
-    // Persian/Finglish. These are statements *about* memory or the assistant's own actions,
-    // not reusable guidance.
+    // Assistant chatter / meta commentary that must never become a rule (English only). These
+    // are statements *about* memory or the assistant's own actions, not reusable guidance.
     private static readonly string[] AssistantProseSignals =
     [
-        // English
         "one thing is worth saving", "one thing worth saving", "this is worth saving",
         "this might be worth capturing", "this may be worth capturing", "i would save",
         "here's what i would save", "here is what i would save", "want me to", "i'll check",
@@ -99,11 +102,6 @@ public static class StopHookCandidateGate
         "i cannot stop it", "not properly", "here's what's actually there", "here is what's actually there",
         "same story", "leave it", "archive it", "add it properly", "worth capturing but",
         "i'll add it", "i will add it",
-        // Persian / Finglish
-        "به نظرم ذخیره کن", "می‌تونم ذخیره کنم", "میتونم ذخیره کنم", "میخوای ذخیره کنم",
-        "می‌خوای ذخیره کنم", "من دستی ذخیره نکردم", "دستی ذخیره نکردم", "هوک ممکنه کپچر",
-        "ممکنه کپچر کرده", "بذار چک کنم", "بزار چک کنم", "این خوبه ذخیره بشه",
-        "mikhay zakhire", "man dasti", "bezar chek", "hook mumkene",
     ];
 
     // Conversation fragments that mark a trigger built from assistant prose rather than a
@@ -248,6 +246,10 @@ public static class StopHookCandidateGate
         CaptureSkipReason.DuplicateNoise => "duplicate noisy candidate",
         CaptureSkipReason.CodeFact => "code fact, recoverable from the repository",
         CaptureSkipReason.NotReusable => "not a reusable lesson",
+        CaptureSkipReason.SourceDocument => "source-document instruction, not a reusable rule",
+        CaptureSkipReason.ToolOrSkillInstruction => "tool or skill instruction, not a reusable rule",
+        CaptureSkipReason.CommandOutput => "command output, not a reusable rule",
+        CaptureSkipReason.LogOutput => "log output, not a reusable rule",
         _ => "not stored",
     };
 
