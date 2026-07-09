@@ -40,6 +40,7 @@ public class McpTests
         Assert.Contains("suggest_feedback_candidate", names);
         Assert.Contains("capture_feedback", names);
         Assert.Contains("get_reminders", names);
+        Assert.Contains("get_rule", names);
 
         // Every tool exposes a name, description and an object input schema.
         Assert.All(tools, t =>
@@ -218,6 +219,60 @@ public class McpTests
 
         Assert.Equal(1, result["count"]!.GetValue<int>());
         Assert.Equal("Repo rule.", result["rules"]!.AsArray()[0]!["rule"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task GetRuleTool_ReturnsExactRuleById()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        int id;
+        await using (var scope = db.CreateScope())
+        {
+            var repo = scope.ServiceProvider.GetRequiredService<IRecallRuleRepository>();
+            // A second rule exists so a wrong lookup would surface the other one.
+            await repo.AddAsync(new RecallRule
+            {
+                Trigger = "chatting", RuleText = "Reply in Persian by default with this user.",
+                Mistake = "", TechnicalContext = "", Tags = "", Confidence = 0.9,
+                Status = RuleStatus.Active, ScopeLevel = ScopeLevel.Global, ScopeValue = "",
+            });
+            var target = await repo.AddAsync(new RecallRule
+            {
+                Trigger = "summarizing a branch", RuleText = "Summarize the branch as a business-facing changelog.",
+                Mistake = "", TechnicalContext = "", Tags = "", Confidence = 0.7,
+                Status = RuleStatus.Active, ScopeLevel = ScopeLevel.Global, ScopeValue = "",
+            });
+            id = target.Id;
+        }
+
+        var tool = new Cli.Mcp.Tools.GetRuleTool();
+        await using var s = db.CreateScope();
+
+        var result = await tool.InvokeAsync(new JsonObject { ["id"] = id }, s.ServiceProvider, CancellationToken.None);
+
+        Assert.True(result["found"]!.GetValue<bool>());
+        var guidance = result["rule"]!;
+        Assert.Equal(id, guidance["id"]!.GetValue<int>());
+        // The exact rule under the id — never the other one that happens to exist.
+        Assert.Contains("changelog", guidance["rule"]!.GetValue<string>(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetRuleTool_ReturnsNotFound_ForUnknownId()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        var tool = new Cli.Mcp.Tools.GetRuleTool();
+        await using var s = db.CreateScope();
+
+        var result = await tool.InvokeAsync(new JsonObject { ["id"] = 999 }, s.ServiceProvider, CancellationToken.None);
+
+        Assert.False(result["found"]!.GetValue<bool>());
+        Assert.Equal(999, result["id"]!.GetValue<int>());
+        Assert.Null(result["rule"]);
     }
 
     [Fact]

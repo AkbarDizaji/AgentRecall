@@ -32,6 +32,7 @@ public sealed class McpServer
     public static IReadOnlyList<IMcpTool> DefaultTools() =>
     [
         new SearchRulesTool(),
+        new GetRuleTool(),
         new AddFeedbackTool(),
         new GetProjectRulesTool(),
         new GetRelevantContextTool(),
