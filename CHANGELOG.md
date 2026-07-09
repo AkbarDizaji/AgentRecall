@@ -4,7 +4,15 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.6.0] - 2026-07-09
+## [2.0.0] - 2026-07-09
+
+### Breaking
+- Automatic Stop-hook capture no longer works from turn text alone. Because the semantic judge
+  decides capture and there is no keyword fallback, a Stop hook that does not carry a host-supplied
+  `judgment` now captures nothing (earlier versions auto-captured from the turn's text). Wiring the
+  host verdict — or enabling a live judge provider — is required to restore automatic capture; set
+  `AgentRecall.CaptureJudgeMode = Off` to disable the path deliberately. Existing rules are
+  unaffected.
 
 ### Changed
 - **Stop-hook capture is now decided by a semantic capture judge, not keyword heuristics.**
@@ -38,6 +46,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the decision, the judge's exact capture reason, and the confidence, on the CLI (text and JSON)
   and the `capture_status` MCP tool. The judge decision metadata is persisted on the turn
   finalization (backfilled on existing databases by the additive schema reconciler).
+- `get_rule` MCP tool: fetch a single stored rule by id (exact lookup, any lifecycle status) to
+  verify a rule's stored content without a ranked `search_rules` query.
 
 ### Retained
 - `cleanup pending-noise` and the `StopHookCandidateGate` quality screen are kept: they still
