@@ -4,6 +4,46 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-07-09
+
+### Changed
+- **Stop-hook capture is now decided by a semantic capture judge, not keyword heuristics.**
+  The keyword/regex pipeline that extracted candidates and decided capture
+  (`MemoryWorthinessClassifier` → `CaptureDecisionPolicy`/`AdaptiveWorthinessPolicy`, fed by
+  `TurnCandidateExtractor` and the source/outcome classifier) no longer drives the finalize-turn
+  path. The model decides whether a turn holds memory-worthy content; AgentRecall validates the
+  verdict and persists it. Incidental keywords ("validation", "scope", "auth", …) can never
+  cause a capture, and there is **no keyword fallback** — when the judge is unavailable the turn
+  is skipped. This fixes off-topic sentences, assistant prose, tool/skill docs, and stale chat
+  fragments being captured as rules.
+- The judge's verdict is supplied by the host on the `finalize-turn` payload as a `judgment`
+  object (AgentRecall makes no network or LLM calls). A new `ICaptureJudge` seam obtains it;
+  `CaptureJudgeValidator` enforces the strict-JSON contract (required fields per decision,
+  confidence range, bounded lengths, no raw prose) and `CaptureJudgeDecisionMapper` applies the
+  confidence thresholds (`≥ 0.80` capture, `0.55–0.79` suggest, `< 0.55` skip; explicit save
+  always captures; explicit do-not-save always skips; duplicates reinforce; explicit supersede
+  replaces).
+- Explicit user saves are honored even when the rule is narrow, project-local, stylistic, or a
+  preference; the rule is normalized into clean, bounded form. Reviewer corrections, observed
+  agent failures, repeated mistakes, confirmed conventions, and documentation-backed corrections
+  are captured; documentation/tool instructions/command output/logs read during a turn are not
+  memory on their own.
+
+### Added
+- `AgentRecall.CaptureJudgeMode` configuration option (`Semantic` default, or `Off` to disable
+  automatic Stop-hook capture). `IFeedbackService.AddJudgedAsync`, which persists a judged rule
+  (with deduplication and event recording) without re-running the keyword classifier or decision
+  policy.
+- `capture-status` and `turn-summary` now report the decision source (`SemanticCaptureJudge`),
+  the decision, the judge's exact capture reason, and the confidence, on the CLI (text and JSON)
+  and the `capture_status` MCP tool. The judge decision metadata is persisted on the turn
+  finalization (backfilled on existing databases by the additive schema reconciler).
+
+### Retained
+- `cleanup pending-noise` and the `StopHookCandidateGate` quality screen are kept: they still
+  find and archive noisy Pending rules created before the judge existed. Manual
+  `agentrecall feedback add` continues to work through the existing explicit flow.
+
 ## [1.5.0] - 2026-07-08
 
 ### Changed

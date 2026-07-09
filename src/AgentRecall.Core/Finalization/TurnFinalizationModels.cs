@@ -33,6 +33,13 @@ public sealed record TurnFinalizationInput
 
     /// <summary>The raw transcript, stored only when transcript persistence is enabled.</summary>
     public string? RawTranscript { get; init; }
+
+    /// <summary>
+    /// The semantic judge's verdict for the turn, when the host supplied it on the payload. The
+    /// default host-supplied judge returns exactly this; a <c>null</c> verdict means the judge is
+    /// unavailable and the turn is skipped (never keyword-captured).
+    /// </summary>
+    public Capture.Judge.CaptureJudgeVerdict? SuppliedJudgment { get; init; }
 }
 
 /// <summary>A lesson AgentRecall captured or suggested for the turn.</summary>
@@ -101,6 +108,25 @@ public sealed record TurnFinalizationResult
 
     /// <summary>True when this result was returned from a prior identical finalization.</summary>
     public bool FromCache { get; init; }
+
+    /// <summary>
+    /// What decided this turn's capture: <c>"SemanticCaptureJudge"</c> when the judge produced a
+    /// verdict, <c>"None"</c> when the judge was unavailable, or <c>null</c> for results with no
+    /// judged decision (e.g. an empty turn).
+    /// </summary>
+    public string? DecisionSource { get; init; }
+
+    /// <summary>The judge's decision name (Capture/SuggestCapture/Skip/ReinforceExisting/SupersedeExisting).</summary>
+    public string? Decision { get; init; }
+
+    /// <summary>The judge's exact capture reason name, for status reporting.</summary>
+    public string? JudgeReason { get; init; }
+
+    /// <summary>The judge's confidence for the decision, when one was made.</summary>
+    public double? JudgeConfidence { get; init; }
+
+    /// <summary>The existing rule reinforced or superseded, when applicable.</summary>
+    public int? TargetRuleId { get; init; }
 
     /// <summary>True when nothing of note happened (no captures, suggestions, or skips).</summary>
     public bool IsEmpty =>

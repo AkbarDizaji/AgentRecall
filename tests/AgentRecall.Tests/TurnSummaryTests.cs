@@ -528,7 +528,27 @@ public class TurnSummaryTests
         var output = new StringWriter();
         try
         {
-            Console.SetIn(new StringReader(new JsonObject { ["prompt"] = prompt, ["cwd"] = cwd }.ToJsonString()));
+            var payload = new JsonObject
+            {
+                ["prompt"] = prompt,
+                ["cwd"] = cwd,
+                ["judgment"] = new JsonObject
+                {
+                    ["decision"] = "Capture",
+                    ["memory_type"] = "RepositoryConvention",
+                    ["confidence"] = 0.9,
+                    ["capture_reason"] = "RepositoryConvention",
+                    ["normalized_rule"] = new JsonObject
+                    {
+                        ["title"] = "Do not mock DbContext",
+                        ["condition"] = "when writing tests that touch the database",
+                        ["action"] = "use a real SQLite context instead of mocking DbContext",
+                        ["because"] = "mocking DbContext hides query bugs",
+                        ["scope"] = "project",
+                    },
+                },
+            };
+            Console.SetIn(new StringReader(payload.ToJsonString()));
             var code = await CommandRouter.RunAsync(["finalize-turn", "--hook"], db.Services, output);
             Assert.Equal(0, code); // H. never blocks
         }

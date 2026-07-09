@@ -53,4 +53,13 @@ public sealed record FeedbackResult(RecallEvent? Event, RecallRule? Rule)
 public interface IFeedbackService
 {
     Task<FeedbackResult> AddAsync(FeedbackInput input, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Persists a rule the semantic capture judge already decided to keep. It reuses the same
+    /// deduplication and event plumbing as <see cref="AddAsync"/> but bypasses the worthiness
+    /// classifier and the capture decision policy — the judge, not keyword heuristics, owns the
+    /// decision. When an equivalent rule already exists it is reinforced (event recorded, no
+    /// duplicate) and <see cref="FeedbackResult.ReusedExistingRule"/> is set.
+    /// </summary>
+    Task<FeedbackResult> AddJudgedAsync(JudgedCaptureRequest request, CancellationToken cancellationToken = default);
 }

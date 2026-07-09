@@ -63,6 +63,11 @@ public sealed class CaptureStatusTool : IMcpTool
             ["errors"] = Strings(result.Errors),
             ["created_at"] = result.CreatedAt?.ToString("O", CultureInfo.InvariantCulture),
             ["source"] = result.Source,
+            ["decision_source"] = result.DecisionSource,
+            ["decision"] = result.Decision,
+            ["capture_reason"] = result.JudgeReason,
+            ["confidence"] = result.JudgeConfidence,
+            ["target_rule_id"] = result.TargetRuleId,
         };
     }
 

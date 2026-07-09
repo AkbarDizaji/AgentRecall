@@ -735,17 +735,18 @@ User prompt
 
 ## Turn Finalizer
 
-Recall is deterministic through the UserPromptSubmit hook — and so is **capture**.
-After a turn finishes, AgentRecall finalizes it through a single command:
+Recall is deterministic through the UserPromptSubmit hook. **Capture** is decided by a
+**semantic capture judge**: after a turn finishes, AgentRecall finalizes it through a
+single command, and the model — not keyword heuristics — decides what is worth remembering.
 
 ```
 Stop hook
   → agentrecall finalize-turn
-  → extract candidate lessons   (user corrections, lessons the agent flagged)
-  → classify worthiness         ("lessons, not facts")
-  → detect duplicates & conflicts
-  → decide AutoCapture / SuggestCapture / Skip   (the same decision policy every flow uses)
-  → store / suggest / skip, then report a structured summary
+  → build a bounded judge input   (user + assistant text, scope, retrieved rules)
+  → the semantic judge returns a strict-JSON verdict
+  → validate the verdict          (schema, enums, lengths, required fields)
+  → map by confidence thresholds  (Capture / SuggestCapture / Skip / Reinforce / Supersede)
+  → store / suggest / skip / reinforce, then report a structured summary
 ```
 
 This makes AgentRecall — not the agent — the owner of the capture decision. The
@@ -756,9 +757,52 @@ agent should **not** guess whether the Stop hook captured something, and should
 agentrecall finalize-turn status      # the last finalization result
 ```
 
-It reuses the existing pipeline end-to-end (the worthiness classifier, the rule
-extractor, duplicate detection, the conflict detector, and `FeedbackService`), so
-behaviour is identical to every other capture path — there is no parallel logic.
+### Semantic Capture Judge
+
+AgentRecall no longer promotes memories from incidental keywords. A word like
+"validation", "scope", or "auth" appearing in a sentence is never enough to capture
+anything. Instead the semantic judge decides whether the turn contains memory-worthy
+content, and the system only validates the judge's structured output and persists it.
+
+- **Explicit save requests are respected.** If the user asks to save/capture/remember a
+  rule, it is saved — even when it is narrow, project-local, stylistic, or a preference.
+  The rule is normalized into clean, bounded form; specific is fine.
+- **Explicit do-not-save requests are respected.** Nothing is stored, active or pending.
+- **Model-discovered lessons are judged for durable value.** Reviewer corrections, observed
+  agent failures, repeated mistakes, confirmed conventions, and stated preferences are strong
+  signals. Rules may be narrow — they do not have to be universal.
+- **Source docs and tool/skill instructions are not saved merely because they were read.**
+  A documentation-backed correction (a documented instruction the agent failed to apply and
+  was corrected on) can be captured.
+- **Uncertain decisions become suggestions.** Confidence `≥ 0.80` captures, `0.55–0.79`
+  suggests a Pending rule, and below `0.55` skips. An explicit save always captures.
+- **Duplicates are reinforced, not duplicated**, and an explicit supersede replaces the
+  prior rule.
+- **If the semantic judge is unavailable, automatic capture is skipped** for the turn.
+  AgentRecall never falls back to keyword capture.
+
+`AgentRecall.CaptureJudgeMode` selects the behavior: `Semantic` (default) or `Off`
+(disable automatic Stop-hook capture entirely). Manual `agentrecall feedback add`
+continues to work through the existing explicit flow.
+
+The verdict is supplied by the host on the `finalize-turn` payload as a `judgment`
+object (AgentRecall itself makes no network or LLM calls). Its strict-JSON shape is:
+
+```json
+{
+  "decision": "Capture | SuggestCapture | Skip | ReinforceExisting | SupersedeExisting",
+  "memory_type": "EngineeringLesson | RepositoryConvention | UserPreference | CommunicationPreference | DocBackedCorrection | ToolWorkflowConvention | ReviewLesson | CodeFact | NotMemory",
+  "confidence": 0.0,
+  "capture_reason": "ExplicitUserSave | ExplicitUserDoNotSave | ObservedAgentFailure | ReviewerCorrection | UserCorrection | RepositoryConvention | UserPreference | RepeatedMistake | DocBackedCorrection | DuplicateExisting | AssistantProse | SourceDocumentOnly | CommandOutputOnly | LogOutputOnly | CodeFact | NotReusable | Ambiguous | NotMemory",
+  "target_existing_rule_id": null,
+  "normalized_rule": { "title": "", "condition": "", "action": "", "avoid": "", "because": "", "scope": "", "tags": [] },
+  "evidence": "", "why_not_saved": "", "dedupe_notes": ""
+}
+```
+
+`capture-status` and `turn-summary` report the decision source, decision, reason, and
+confidence, so the agent answers "did AgentRecall capture anything?" from the recorded
+verdict — never a guess.
 
 **Use it.** `finalize-turn` reads a Claude Code Stop-hook payload on stdin
 (tolerant of missing fields — `cwd`, `prompt`, `assistant_response`,
@@ -777,15 +821,11 @@ A captured turn reads:
 ```
 AgentRecall finalized turn.
 
+Decision source: Semantic capture judge
+Decision: Capture (reason: ReviewerCorrection, confidence: 0.86)
+
 Captured:
 - #14 Repository rule: When emitting validator messages, apply the same tenant scope…
-
-Skipped:
-- Duplicate of rule #12.
-- Looks like a bare method recommendation, which is recoverable from the repository with search.
-
-Suggested:
-- #15 Pending rule: Don't re-query what you already loaded.
 ```
 
 When nothing reusable was said, it prints `No lessons found.`

@@ -114,6 +114,12 @@ public sealed class AgentRecallDbContext : DbContext
             // Stored with a default so the additive reconciler can backfill the column on
             // databases created before turn correlation existed.
             entity.Property(e => e.TurnId).HasDefaultValue(string.Empty);
+            // Judge decision metadata; defaulted so the additive reconciler backfills these
+            // columns on databases created before the semantic capture judge existed.
+            entity.Property(e => e.DecisionSource).HasDefaultValue(string.Empty);
+            entity.Property(e => e.JudgeDecision).HasDefaultValue(string.Empty);
+            entity.Property(e => e.JudgeCaptureReason).HasDefaultValue(string.Empty);
+            entity.Property(e => e.JudgeConfidence).HasDefaultValue(0d);
             entity.HasIndex(e => e.CreatedAt);
             entity.HasIndex(e => e.RawHash);
             entity.HasIndex(e => e.Cwd);

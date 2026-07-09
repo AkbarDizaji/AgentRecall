@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using AgentRecall.Core.Capture.Judge;
 using AgentRecall.Core.Domain;
 using AgentRecall.Core.Finalization;
 
@@ -64,7 +65,114 @@ public static class TurnPayload
             ScopeLevel = repository is null ? ScopeLevel.Global : ScopeLevel.Repository,
             ScopeValue = repository,
             RawTranscript = rawTranscript,
+            SuppliedJudgment = ParseJudgment(obj["judgment"], diagnostics),
         };
+    }
+
+    // The semantic judge's verdict is produced by the host and arrives as a `judgment` object on
+    // the payload. Parsing is tolerant: a missing/oversized/malformed judgment (including an
+    // unrecognised enum value) yields null — the finalizer then treats the judge as unavailable
+    // and skips, never falling back to keyword capture.
+    private const int JudgmentMaxLength = 20000;
+
+    private static CaptureJudgeVerdict? ParseJudgment(JsonNode? node, TextWriter diagnostics)
+    {
+        if (node is not JsonObject judgment)
+        {
+            return null;
+        }
+
+        // Bound the supplied judgment so a hostile payload cannot blow up memory.
+        if (judgment.ToJsonString().Length > JudgmentMaxLength)
+        {
+            diagnostics.WriteLine("[agentrecall] finalize-turn: ignoring oversized judgment.");
+            return null;
+        }
+
+        // Enums are required and must be recognised; an unknown value is a malformed verdict.
+        if (!TryParseEnum<JudgeDecision>(AsString(judgment["decision"]), out var decision) ||
+            !TryParseEnum<JudgeCaptureReason>(AsString(judgment["capture_reason"]), out var reason))
+        {
+            return null;
+        }
+
+        // memory_type is only meaningful when a rule is stored; default it when absent so a
+        // Skip verdict need not carry one.
+        if (!TryParseEnum<JudgeMemoryType>(AsString(judgment["memory_type"]), out var memoryType, JudgeMemoryType.NotMemory))
+        {
+            return null;
+        }
+
+        return new CaptureJudgeVerdict
+        {
+            Decision = decision,
+            MemoryType = memoryType,
+            Confidence = AsDouble(judgment["confidence"]) ?? 0.0,
+            CaptureReason = reason,
+            TargetExistingRuleId = AsInt(judgment["target_existing_rule_id"]),
+            NormalizedRule = ParseNormalizedRule(judgment["normalized_rule"]),
+            Evidence = AsString(judgment["evidence"]),
+            WhyNotSaved = AsString(judgment["why_not_saved"]),
+            DedupeNotes = AsString(judgment["dedupe_notes"]),
+        };
+    }
+
+    private static NormalizedRule? ParseNormalizedRule(JsonNode? node)
+    {
+        if (node is not JsonObject rule)
+        {
+            return null;
+        }
+
+        var tags = new List<string>();
+        if (rule["tags"] is JsonArray tagArray)
+        {
+            foreach (var tag in tagArray)
+            {
+                var text = AsString(tag);
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    tags.Add(text!);
+                }
+            }
+        }
+
+        return new NormalizedRule
+        {
+            Title = AsString(rule["title"]),
+            Condition = AsString(rule["condition"]),
+            Action = AsString(rule["action"]),
+            Avoid = AsString(rule["avoid"]),
+            Because = AsString(rule["because"]),
+            Scope = AsString(rule["scope"]),
+            Tags = tags,
+        };
+    }
+
+    // Parses a required enum. Returns false when the value is missing or unrecognised, unless a
+    // fallback is supplied (used for the optional memory_type on a Skip verdict).
+    private static bool TryParseEnum<TEnum>(string? value, out TEnum result, TEnum? fallback = null)
+        where TEnum : struct, Enum
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            if (fallback is { } f)
+            {
+                result = f;
+                return true;
+            }
+
+            result = default;
+            return false;
+        }
+
+        if (Enum.TryParse(value, ignoreCase: true, out result) && Enum.IsDefined(result))
+        {
+            return true;
+        }
+
+        result = default;
+        return false;
     }
 
     /// <summary>
@@ -258,4 +366,10 @@ public static class TurnPayload
 
     private static bool? AsBool(JsonNode? node) =>
         node is JsonValue value && value.TryGetValue<bool>(out var flag) ? flag : null;
+
+    private static int? AsInt(JsonNode? node) =>
+        node is JsonValue value && value.TryGetValue<int>(out var number) ? number : null;
+
+    private static double? AsDouble(JsonNode? node) =>
+        node is JsonValue value && value.TryGetValue<double>(out var number) ? number : null;
 }

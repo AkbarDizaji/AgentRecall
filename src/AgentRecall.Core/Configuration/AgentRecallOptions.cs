@@ -218,6 +218,21 @@ public sealed class AgentRecallOptions
     /// </summary>
     public string CareerImpactSummaryLevel { get; set; } = nameof(Domain.CareerImpactSummaryLevel.Compact);
 
+    /// <summary>
+    /// How the Stop/finalize-turn path decides what to remember: <c>Semantic</c> (default; a
+    /// semantic judge decides and AgentRecall only validates + persists its verdict) or
+    /// <c>Off</c> (automatic capture disabled). Parsed defensively so an unrecognised value
+    /// falls back to <c>Semantic</c>. There is never a keyword-driven capture fallback: when
+    /// the judge is unavailable the turn is skipped.
+    /// </summary>
+    public string CaptureJudgeMode { get; set; } = nameof(Capture.CaptureJudgeMode.Semantic);
+
+    /// <summary>The parsed capture-judge mode, falling back to Semantic when invalid.</summary>
+    public CaptureJudgeMode ResolvedCaptureJudgeMode =>
+        Enum.TryParse<CaptureJudgeMode>(CaptureJudgeMode, ignoreCase: true, out var mode) && Enum.IsDefined(mode)
+            ? mode
+            : Capture.CaptureJudgeMode.Semantic;
+
     /// <summary>The parsed career-impact mode, falling back to SignificantOnly when invalid.</summary>
     public CareerImpactMode ResolvedCareerImpactMode =>
         Enum.TryParse<CareerImpactMode>(CareerImpactMode, ignoreCase: true, out var mode) && Enum.IsDefined(mode)

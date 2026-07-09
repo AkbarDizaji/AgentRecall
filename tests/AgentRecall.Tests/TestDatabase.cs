@@ -17,6 +17,16 @@ public sealed class TestDatabase : IAsyncDisposable
     public AgentRecallOptions Options { get; }
 
     public TestDatabase(Action<AgentRecallOptions>? configure = null)
+        : this(configure, configureServices: null)
+    {
+    }
+
+    /// <summary>
+    /// Builds the provider with an extra service-registration callback, run after
+    /// <c>AddAgentRecallPersistence()</c> so a test can shadow a production registration
+    /// (last-registration-wins) — e.g. inject a fake <see cref="Core.Abstractions.ICaptureJudge"/>.
+    /// </summary>
+    public TestDatabase(Action<AgentRecallOptions>? configure, Action<IServiceCollection>? configureServices)
     {
         _directory = Path.Combine(Path.GetTempPath(), "agentrecall-tests", Guid.NewGuid().ToString("N"));
 
@@ -32,6 +42,7 @@ public sealed class TestDatabase : IAsyncDisposable
         services.AddSingleton(Options);
         services.AddLogging(b => b.SetMinimumLevel(LogLevel.Warning));
         services.AddAgentRecallPersistence();
+        configureServices?.Invoke(services);
 
         Services = services.BuildServiceProvider();
     }

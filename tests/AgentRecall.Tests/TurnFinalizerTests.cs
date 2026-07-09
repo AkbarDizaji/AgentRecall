@@ -1,8 +1,8 @@
-using System.Text.Json;
 using System.Text.Json.Nodes;
 using AgentRecall.Cli;
 using AgentRecall.Cli.Devcontainer;
 using AgentRecall.Core.Abstractions;
+using AgentRecall.Core.Capture.Judge;
 using AgentRecall.Core.Domain;
 using AgentRecall.Core.Feedback;
 using AgentRecall.Core.Finalization;
@@ -12,9 +12,11 @@ using Xunit;
 namespace AgentRecall.Tests;
 
 /// <summary>
-/// Tests for the Turn Finalizer: the canonical, deterministic capture path for a
-/// completed turn. They drive <see cref="ITurnFinalizer"/> directly with a resolved
-/// turn, and the CLI command via stdin, exactly as the Stop hook does.
+/// Tests for the Turn Finalizer under the semantic capture judge: the model supplies a verdict
+/// and AgentRecall validates + persists it. They drive <see cref="ITurnFinalizer"/> directly
+/// (with the verdict supplied on the turn input) and the CLI command via stdin (with a
+/// <c>judgment</c> object on the payload), exactly as the host does. No keyword heuristics
+/// decide capture, and there is never a keyword fallback.
 /// </summary>
 [Collection("ConsoleStdin")]
 public class TurnFinalizerTests
@@ -25,7 +27,46 @@ public class TurnFinalizerTests
         await scope.ServiceProvider.GetRequiredService<IDatabaseInitializer>().InitializeAsync();
     }
 
+    private static NormalizedRule Rule(
+        string action = "consume or persist the payment token before claiming the card is saved",
+        string condition = "when a validator requires a payment method token",
+        string because = "a validate-and-drop flow creates false guarantees for later charging",
+        string title = "Consume the payment token",
+        string scope = "project",
+        string? avoid = "validate-and-drop flows",
+        string[]? tags = null) => new()
+    {
+        Title = title,
+        Condition = condition,
+        Action = action,
+        Avoid = avoid,
+        Because = because,
+        Scope = scope,
+        Tags = tags ?? [],
+    };
+
+    private static CaptureJudgeVerdict Verdict(
+        JudgeDecision decision = JudgeDecision.Capture,
+        double confidence = 0.9,
+        JudgeCaptureReason reason = JudgeCaptureReason.ObservedAgentFailure,
+        JudgeMemoryType memoryType = JudgeMemoryType.EngineeringLesson,
+        NormalizedRule? rule = null,
+        int? target = null,
+        string? whyNotSaved = null,
+        string? dedupeNotes = null) => new()
+    {
+        Decision = decision,
+        Confidence = confidence,
+        CaptureReason = reason,
+        MemoryType = memoryType,
+        NormalizedRule = rule ?? (decision is JudgeDecision.Skip or JudgeDecision.ReinforceExisting ? null : Rule()),
+        TargetExistingRuleId = target,
+        WhyNotSaved = whyNotSaved,
+        DedupeNotes = dedupeNotes,
+    };
+
     private static TurnFinalizationInput Turn(
+        CaptureJudgeVerdict? judgment = null,
         string? prompt = null,
         string? assistant = null,
         bool? accepted = null,
@@ -39,6 +80,7 @@ public class TurnFinalizerTests
             Cwd = cwd,
             ScopeLevel = cwd is null ? ScopeLevel.Global : ScopeLevel.Repository,
             ScopeValue = cwd is null ? null : "project",
+            SuppliedJudgment = judgment,
         };
 
     private static async Task<TurnFinalizationResult> Finalize(TestDatabase db, TurnFinalizationInput input)
@@ -54,180 +96,137 @@ public class TurnFinalizerTests
         return await scope.ServiceProvider.GetRequiredService<IRecallRuleRepository>().ListAsync();
     }
 
-    // A. A strong self-identified lesson auto-captures without asking.
+    // A. A high-confidence Capture verdict auto-captures an active rule.
     [Fact]
-    public async Task StrongSelfIdentifiedLesson_AutoCaptures()
+    public async Task CaptureVerdict_AutoCapturesActive()
     {
         await using var db = new TestDatabase();
         await Init(db);
 
-        var result = await Finalize(db, Turn(
-            assistant: "One worth storing is: when validators load entities before controller execution, " +
-                       "apply the same tenant scope before emitting entity-specific messages."));
+        var result = await Finalize(db, Turn(Verdict(confidence: 0.9)));
 
         var lesson = Assert.Single(result.Captured);
         Assert.Equal(RuleStatus.Active, (await Rules(db)).Single(r => r.Id == lesson.RuleId).Status);
         Assert.Empty(result.Suggested);
     }
 
-    // B. Agent asks "Want me to save it?" but the finalizer auto-captures when worthy.
+    // C. A Skip verdict stores nothing.
     [Fact]
-    public async Task AgentAsksToSave_FinalizerDecidesAndCaptures()
+    public async Task SkipVerdict_ProducesNoRule()
     {
         await using var db = new TestDatabase();
         await Init(db);
 
-        var result = await Finalize(db, Turn(
-            assistant: "This is worth storing: when FluentValidation validators load entities, apply the same " +
-                       "tenant scope and authorization before returning messages. Want me to save it?"));
-
-        Assert.Single(result.Captured);
-    }
-
-    // C. No lesson in the turn produces no mutation.
-    [Fact]
-    public async Task NoLesson_ProducesNoMutation()
-    {
-        await using var db = new TestDatabase();
-        await Init(db);
-
-        var result = await Finalize(db, Turn(
-            prompt: "Add a new endpoint for users.",
-            assistant: "Done. I added the endpoint and a test."));
+        var result = await Finalize(db, Turn(Verdict(
+            decision: JudgeDecision.Skip, reason: JudgeCaptureReason.NotMemory, whyNotSaved: "no memory-worthy content")));
 
         Assert.Empty(result.Captured);
         Assert.Empty(result.Suggested);
         Assert.Empty(await Rules(db));
     }
 
-    // D. A duplicate of an already-captured rule is skipped, referencing the existing id.
+    // D. A later turn repeating the same rule reinforces the existing one, not a duplicate.
     [Fact]
-    public async Task DuplicateRule_IsSkippedReferencingExisting()
+    public async Task DuplicateRule_ReinforcesExisting()
     {
         await using var db = new TestDatabase();
         await Init(db);
 
-        var first = await Finalize(db, Turn(prompt: "We do not mock DbContext directly.", assistant: "Okay."));
+        var first = await Finalize(db, Turn(Verdict(), prompt: "first turn"));
         var firstRuleId = Assert.Single(first.Captured).RuleId;
 
-        // A later turn (distinct content, so a distinct hash) repeats the same lesson.
-        var second = await Finalize(db, Turn(prompt: "We do not mock DbContext directly.", assistant: "Understood."));
+        // A distinct turn (distinct hash) with the same normalized rule.
+        var second = await Finalize(db, Turn(Verdict(), prompt: "second turn"));
 
         Assert.Empty(second.Captured);
         Assert.Contains(firstRuleId, second.Duplicates);
         Assert.Single(await Rules(db));
     }
 
-    // E. A manual capture earlier in the same turn prevents a duplicate finalizer capture.
+    // E. A manual capture earlier in the same turn prevents a duplicate judged capture.
     [Fact]
     public async Task ManualCaptureEarlierInTurn_PreventsDuplicate()
     {
         await using var db = new TestDatabase();
         await Init(db);
 
-        // Simulate the agent having manually captured the lesson mid-turn.
+        string manualText;
         await using (var scope = db.CreateScope())
         {
             var feedback = scope.ServiceProvider.GetRequiredService<IFeedbackService>();
-            await feedback.AddAsync(new FeedbackInput
+            var manual = await feedback.AddAsync(new FeedbackInput
             {
                 Task = "work",
                 Feedback = "We do not mock DbContext directly.",
                 ScopeLevel = ScopeLevel.Repository,
                 ScopeValue = "project",
+                AutoApprove = true,
             });
+            manualText = manual.Rule!.RuleText;
         }
 
-        var result = await Finalize(db, Turn(prompt: "We do not mock DbContext directly."));
+        // The judge captures the same guidance the manual path already stored.
+        var result = await Finalize(db, Turn(Verdict(rule: Rule(action: manualText))));
 
         Assert.Empty(result.Captured);
         Assert.NotEmpty(result.Duplicates);
         Assert.Single(await Rules(db));
     }
 
-    // F. A code fact is skipped, not stored.
+    // F. A CodeFact verdict is skipped, not stored.
     [Fact]
-    public async Task CodeFact_IsSkipped()
+    public async Task CodeFactVerdict_IsSkipped()
     {
         await using var db = new TestDatabase();
         await Init(db);
 
-        var result = await Finalize(db, Turn(prompt: "Use IsEventsFeatureEnabled."));
+        var result = await Finalize(db, Turn(Verdict(memoryType: JudgeMemoryType.CodeFact, confidence: 0.95)));
 
         Assert.Empty(result.Captured);
         Assert.NotEmpty(result.Skipped);
         Assert.Empty(await Rules(db));
     }
 
-    // G. A repository convention is captured (or suggested) — never skipped.
+    // G. A repository-convention Capture verdict stores a repository rule.
     [Fact]
-    public async Task RepositoryConvention_IsCapturedOrSuggested()
+    public async Task RepositoryConventionVerdict_IsCaptured()
     {
         await using var db = new TestDatabase();
         await Init(db);
 
-        var result = await Finalize(db, Turn(
-            prompt: "When implementing Events backend gates, use IsEventsFeatureEnabled instead of IsVenueMigratedFor."));
+        var result = await Finalize(db, Turn(Verdict(memoryType: JudgeMemoryType.RepositoryConvention)));
 
-        Assert.Equal(1, result.Captured.Count + result.Suggested.Count);
+        var lesson = Assert.Single(result.Captured);
+        Assert.Equal(RuleCategory.RepositoryConvention, lesson.Category);
         Assert.Single(await Rules(db));
     }
 
-    // H. A security lesson auto-captures.
+    // I. A mid-band confidence verdict is suggested (Pending), not auto-captured.
     [Fact]
-    public async Task SecurityLesson_AutoCaptures()
+    public async Task MidConfidenceVerdict_IsSuggestedNotAutoCaptured()
     {
         await using var db = new TestDatabase();
         await Init(db);
 
-        var result = await Finalize(db, Turn(
-            prompt: "When FluentValidation validators load entities before controller execution, apply the " +
-                    "same tenant scope and authorization before emitting entity-specific messages."));
-
-        Assert.Single(result.Captured);
-    }
-
-    // I. A generic textbook rule is suggested, not auto-captured.
-    [Fact]
-    public async Task GenericTextbookRule_IsSuggestedNotAutoCaptured()
-    {
-        await using var db = new TestDatabase();
-        await Init(db);
-
-        var result = await Finalize(db, Turn(prompt: "Don't re-query what you already loaded."));
+        var result = await Finalize(db, Turn(Verdict(confidence: 0.65)));
 
         Assert.Empty(result.Captured);
         Assert.Single(result.Suggested);
         Assert.Equal(RuleStatus.Pending, (await Rules(db)).Single().Status);
     }
 
-    // J. A conditional performance rule is suggested or captured, never skipped.
+    // K. A SupersedeExisting verdict marks the old rule superseded and stores the replacement.
     [Fact]
-    public async Task ConditionalPerformanceRule_IsKept()
+    public async Task SupersedeVerdict_ReplacesExistingRule()
     {
         await using var db = new TestDatabase();
         await Init(db);
 
-        var result = await Finalize(db, Turn(
-            prompt: "When a controller has already loaded, authorized, and tracked an entity in the same " +
-                    "request, pass it to downstream logic instead of re-querying the same id, unless fresh " +
-                    "data or independent authorization is required."));
-
-        Assert.Equal(1, result.Captured.Count + result.Suggested.Count);
-    }
-
-    // K. A conflicting rule prevents auto-capture and is suggested with a conflict note.
-    [Fact]
-    public async Task ConflictingRule_IsSuggestedWithNote()
-    {
-        await using var db = new TestDatabase();
-        await Init(db);
-
-        // Seed an active rule, then finalize the opposite guidance on the same subject.
+        int oldId;
         await using (var scope = db.CreateScope())
         {
             var feedback = scope.ServiceProvider.GetRequiredService<IFeedbackService>();
-            await feedback.AddAsync(new FeedbackInput
+            var seeded = await feedback.AddAsync(new FeedbackInput
             {
                 Task = "work",
                 Feedback = "Always use feature flags for new endpoints.",
@@ -235,50 +234,37 @@ public class TurnFinalizerTests
                 ScopeValue = "project",
                 AutoApprove = true,
             });
+            oldId = seeded.Rule!.Id;
         }
 
-        var result = await Finalize(db, Turn(prompt: "Never use feature flags for new endpoints."));
+        var result = await Finalize(db, Turn(Verdict(
+            decision: JudgeDecision.SupersedeExisting, target: oldId,
+            rule: Rule(action: "gate new endpoints behind IsEventsFeatureEnabled, not a raw feature flag"))));
 
-        Assert.Empty(result.Captured);
-        var suggested = Assert.Single(result.Suggested);
-        Assert.Contains("Conflicts with rule", suggested.Note ?? string.Empty, StringComparison.Ordinal);
-    }
-
-    // L. Multiple candidates respect MaxCandidatesPerTurn and priority.
-    [Fact]
-    public async Task MultipleCandidates_RespectMaxAndPriority()
-    {
-        await using var db = new TestDatabase(o => o.MaxCandidatesPerTurn = 1);
-        await Init(db);
-
-        // A generic correction plus a security correction: only the highest-priority
-        // (security) candidate survives the cap.
-        var result = await Finalize(db, Turn(
-            prompt: "Always add a comment. When emitting validator messages, apply the same tenant scope to " +
-                    "avoid cross-tenant information disclosure."));
-
-        var total = result.Captured.Count + result.Suggested.Count + result.Skipped.Count;
-        Assert.Equal(1, total);
-        // The surviving candidate is the security one (captured), not the generic comment rule.
         Assert.Single(result.Captured);
+        await using var check = db.CreateScope();
+        var rules = check.ServiceProvider.GetRequiredService<IRecallRuleRepository>();
+        Assert.Equal(RuleStatus.Superseded, (await rules.GetAsync(oldId))!.Status);
     }
 
-    // M. A huge transcript does not crash and truncates the candidate safely.
+    // Judge input is bounded: a huge assistant response is truncated before the judge sees it.
     [Fact]
-    public async Task HugeTranscript_TruncatesSafely()
+    public async Task HugeAssistantResponse_JudgeInputIsBounded()
     {
-        await using var db = new TestDatabase(o => o.MaxCandidateCharacters = 80);
+        var fake = new FakeCaptureJudge(Verdict());
+        await using var db = new TestDatabase(
+            o => o.MaxCandidateCharacters = 80,
+            s => s.AddSingleton<ICaptureJudge>(fake));
         await Init(db);
 
-        var huge = "When emitting messages, always validate scope " + new string('x', 5000) + ".";
-        var result = await Finalize(db, Turn(prompt: huge));
+        var huge = "We changed a lot of behaviour. " + new string('x', 5000);
+        await Finalize(db, Turn(assistant: huge, prompt: "big turn"));
 
-        var stored = await Rules(db);
-        Assert.All(stored, r => Assert.True(r.RuleText.Length <= 200));
-        Assert.Equal(1, result.Captured.Count + result.Suggested.Count);
+        Assert.NotNull(fake.LastInput);
+        Assert.True((fake.LastInput!.AssistantSummary ?? string.Empty).Length <= 81);
     }
 
-    // N. Malformed JSON (via the CLI) exits 0 and mutates nothing.
+    // N. Malformed or empty payload (via the CLI) exits 0 and mutates nothing.
     [Theory]
     [InlineData("{ not json")]
     [InlineData("")]
@@ -311,78 +297,51 @@ public class TurnFinalizerTests
         await using var db = new TestDatabase();
         await Init(db);
 
-        var result = await Finalize(db, Turn(prompt: "We do not mock DbContext directly.", cwd: null));
+        // cwd is null, so the turn resolves to Global scope regardless of the rule's scope hint.
+        var result = await Finalize(db, Turn(Verdict(), prompt: "x", cwd: null));
 
         var lesson = Assert.Single(result.Captured);
         Assert.Equal("Global", lesson.ScopeLabel);
     }
 
-    // P. A "do not save" signal skips and persists the reason.
+    // P. An explicit do-not-save verdict skips and records the reason.
     [Fact]
-    public async Task DoNotSaveSignal_Skips()
+    public async Task DoNotSaveVerdict_Skips()
     {
         await using var db = new TestDatabase();
         await Init(db);
 
-        var result = await Finalize(db, Turn(
-            prompt: "We do not mock DbContext directly, but do not save this."));
+        var result = await Finalize(db, Turn(Verdict(
+            decision: JudgeDecision.Skip, reason: JudgeCaptureReason.ExplicitUserDoNotSave,
+            whyNotSaved: "the user asked not to save this")));
 
         Assert.Empty(result.Captured);
         Assert.Empty(await Rules(db));
-        Assert.Contains(result.Skipped, s => s.Reason.Contains("do-not-save", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Skipped, s => s.Reason.Contains("not to save", StringComparison.OrdinalIgnoreCase));
     }
 
-    // Q. An explicit "save this" signal captures a worthy lesson.
+    // Q. An explicit user-save verdict captures even at low confidence.
     [Fact]
-    public async Task SaveThisSignal_CapturesWorthyLesson()
+    public async Task ExplicitSaveVerdict_CapturesActive()
     {
-        // Auto-approve off so only the acceptance signal can force the capture.
         await using var db = new TestDatabase(o => o.AutoApproveFeedback = false);
         await Init(db);
 
-        var result = await Finalize(db, Turn(
-            prompt: "We do not mock DbContext directly. Please save this."));
+        var result = await Finalize(db, Turn(Verdict(
+            reason: JudgeCaptureReason.ExplicitUserSave, confidence: 0.3)));
 
         Assert.Single(result.Captured);
         Assert.Equal(RuleStatus.Active, (await Rules(db)).Single().Status);
     }
 
-    // R. An agent "not worth storing" signal is respected.
-    [Fact]
-    public async Task NotWorthStoringSignal_IsRespected()
-    {
-        await using var db = new TestDatabase();
-        await Init(db);
-
-        var result = await Finalize(db, Turn(
-            assistant: "When emitting messages, apply tenant scope. This is not worth storing though."));
-
-        Assert.Empty(result.Captured);
-        Assert.Empty(await Rules(db));
-    }
-
-    // S. Near-duplicates in the same turn create a single rule.
-    [Fact]
-    public async Task NearDuplicatesInSameTurn_CreateOneRule()
-    {
-        await using var db = new TestDatabase();
-        await Init(db);
-
-        var result = await Finalize(db, Turn(
-            prompt: "We do not mock DbContext directly. We do not mock DbContext directly."));
-
-        Assert.Single(result.Captured);
-        Assert.Single(await Rules(db));
-    }
-
-    // T. Running the finalizer twice is idempotent.
+    // T. Running the finalizer twice on the same turn is idempotent.
     [Fact]
     public async Task RunningTwice_IsIdempotent()
     {
         await using var db = new TestDatabase();
         await Init(db);
 
-        var input = Turn(prompt: "We do not mock DbContext directly.");
+        var input = Turn(Verdict(), prompt: "one turn");
         var first = await Finalize(db, input);
         var second = await Finalize(db, input);
 
@@ -398,7 +357,7 @@ public class TurnFinalizerTests
         await using var db = new TestDatabase();
         await Init(db);
 
-        await Finalize(db, Turn(prompt: "We do not mock DbContext directly."));
+        await Finalize(db, Turn(Verdict(), prompt: "one turn"));
 
         await using var scope = db.CreateScope();
         var finalizer = scope.ServiceProvider.GetRequiredService<ITurnFinalizer>();
@@ -406,9 +365,10 @@ public class TurnFinalizerTests
 
         Assert.NotNull(last);
         Assert.Single(last!.Captured);
+        Assert.Equal(TurnFinalizer.JudgeDecisionSource, last.DecisionSource);
     }
 
-    // V. JSON output is valid and carries the documented shape.
+    // V. JSON output is valid and carries the documented shape plus the judge decision fields.
     [Fact]
     public async Task JsonOutput_IsValidAndShaped()
     {
@@ -416,12 +376,7 @@ public class TurnFinalizerTests
         await Init(db);
 
         var originalIn = Console.In;
-        Console.SetIn(new StringReader(new JsonObject
-        {
-            ["prompt"] = "We do not mock DbContext directly.",
-            ["cwd"] = "/repo/project",
-            ["source"] = "stop_hook",
-        }.ToJsonString()));
+        Console.SetIn(new StringReader(PayloadWithJudgment().ToJsonString()));
         try
         {
             var output = new StringWriter();
@@ -432,9 +387,9 @@ public class TurnFinalizerTests
             Assert.NotNull(node["captured"]!.AsArray());
             Assert.NotNull(node["suggested"]!.AsArray());
             Assert.NotNull(node["skipped"]!.AsArray());
-            Assert.NotNull(node["duplicates"]!.AsArray());
-            Assert.NotNull(node["errors"]!.AsArray());
             Assert.Single(node["captured"]!.AsArray());
+            Assert.Equal("SemanticCaptureJudge", node["decisionSource"]!.GetValue<string>());
+            Assert.Equal("Capture", node["decision"]!.GetValue<string>());
         }
         finally
         {
@@ -450,11 +405,7 @@ public class TurnFinalizerTests
         await Init(db);
 
         var originalIn = Console.In;
-        Console.SetIn(new StringReader(new JsonObject
-        {
-            ["prompt"] = "We do not mock DbContext directly.",
-            ["cwd"] = "/repo/project",
-        }.ToJsonString()));
+        Console.SetIn(new StringReader(PayloadWithJudgment().ToJsonString()));
         try
         {
             var output = new StringWriter();
@@ -463,7 +414,6 @@ public class TurnFinalizerTests
             Assert.Equal(0, code);
             var node = JsonNode.Parse(output.ToString().Trim())!;
             var message = node["systemMessage"]!.GetValue<string>();
-            // The hook now carries the aggregated Turn Memory Summary, not a per-event line.
             Assert.Contains("🧠 **AgentRecall:**", message, StringComparison.Ordinal);
             Assert.Contains("captured 1", message, StringComparison.Ordinal);
         }
@@ -480,7 +430,7 @@ public class TurnFinalizerTests
         await using var db = new TestDatabase();
         await Init(db);
 
-        await Finalize(db, Turn(prompt: "We do not mock DbContext directly."));
+        await Finalize(db, Turn(Verdict(), prompt: "one turn"));
 
         var output = new StringWriter();
         var code = await CommandRouter.RunAsync(["capture-status", "--last-turn"], db.Services, output);
@@ -518,7 +468,6 @@ public class TurnFinalizerTests
         Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
         try
         {
-            // A project wired with the old capture command.
             File.WriteAllText(settingsPath, new JsonObject
             {
                 ["hooks"] = new JsonObject
@@ -564,4 +513,29 @@ public class TurnFinalizerTests
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".agentrecall");
         Assert.DoesNotContain(home, db.Options.DataDirectory, StringComparison.Ordinal);
     }
+
+    /// <summary>A Stop-hook payload carrying a Capture judgment, as the host would supply.</summary>
+    internal static JsonObject PayloadWithJudgment() => new()
+    {
+        ["prompt"] = "one turn",
+        ["cwd"] = "/repo/project",
+        ["source"] = "stop_hook",
+        ["judgment"] = new JsonObject
+        {
+            ["decision"] = "Capture",
+            ["memory_type"] = "EngineeringLesson",
+            ["confidence"] = 0.9,
+            ["capture_reason"] = "ObservedAgentFailure",
+            ["normalized_rule"] = new JsonObject
+            {
+                ["title"] = "Consume the payment token",
+                ["condition"] = "when a validator requires a payment method token",
+                ["action"] = "consume or persist the payment token before claiming the card is saved",
+                ["avoid"] = "validate-and-drop flows",
+                ["because"] = "a validate-and-drop flow creates false guarantees for later charging",
+                ["scope"] = "project",
+                ["tags"] = new JsonArray { "payments" },
+            },
+        },
+    };
 }

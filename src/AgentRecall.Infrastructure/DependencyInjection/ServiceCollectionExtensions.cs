@@ -85,9 +85,12 @@ public static class ServiceCollectionExtensions
         // Proactive memory helpers.
         services.AddSingleton<IFeedbackCandidateAnalyzer, FeedbackCandidateAnalyzer>();
 
-        // Turn finalizer: the canonical capture path for a completed turn. It reuses the
-        // feedback pipeline (worthiness, dedup, decision policy) rather than duplicating it.
+        // Turn finalizer: the canonical capture path for a completed turn. The semantic capture
+        // judge decides what to remember; AgentRecall validates the verdict and persists it. The
+        // default judge is host-supplied (the session model produces the verdict on the payload);
+        // when unavailable the turn is skipped — never a keyword-driven fallback.
         services.AddSingleton<ITurnCandidateExtractor, TurnCandidateExtractor>();
+        services.AddSingleton<ICaptureJudge, HostSuppliedCaptureJudge>();
         services.AddScoped<ITurnFinalizer, TurnFinalizer>();
 
         // Conflict detection and explainable, deterministic resolution.

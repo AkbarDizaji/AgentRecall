@@ -241,6 +241,96 @@ public sealed class FeedbackService : IFeedbackService
         };
     }
 
+    public async Task<FeedbackResult> AddJudgedAsync(
+        JudgedCaptureRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.Rule);
+
+        var rule = request.Rule;
+
+        // Deduplicate against an equivalent same-scope rule, exactly as the manual path does —
+        // a repeat reinforces the existing rule rather than creating a duplicate. No worthiness
+        // classification or decision policy runs: the judge already decided this is memory.
+        var existing = await FindEquivalentAsync(rule, cancellationToken).ConfigureAwait(false);
+        if (existing is not null)
+        {
+            return await ReinforceJudgedAsync(existing, request, cancellationToken).ConfigureAwait(false);
+        }
+
+        rule.Status = request.Status;
+        rule.CaptureReason = request.DomainReason;
+        rule.EvidenceSummary = request.EvidenceSummary?.Trim() ?? string.Empty;
+
+        rule = await _rules.AddAsync(rule, cancellationToken).ConfigureAwait(false);
+
+        var recallEvent = await _events.AddAsync(new RecallEvent
+        {
+            Type = RecallEventType.MistakeObserved,
+            RuleId = rule.Id,
+            Trigger = request.TaskContext ?? string.Empty,
+            Details = BuildJudgedDetails(request),
+        }, cancellationToken).ConfigureAwait(false);
+
+        return new FeedbackResult(recallEvent, rule)
+        {
+            ReusedExistingRule = false,
+            CaptureReason = request.DomainReason,
+            EvidenceSummary = request.EvidenceSummary,
+        };
+    }
+
+    /// <summary>
+    /// Reinforces an existing rule for a judged capture: records a fresh observation event and,
+    /// when the existing rule carried no reason yet, backfills the judge's reason/evidence.
+    /// </summary>
+    private async Task<FeedbackResult> ReinforceJudgedAsync(
+        RecallRule existing, JudgedCaptureRequest request, CancellationToken cancellationToken)
+    {
+        var recallEvent = await _events.AddAsync(new RecallEvent
+        {
+            Type = RecallEventType.MistakeObserved,
+            RuleId = existing.Id,
+            Trigger = request.TaskContext ?? string.Empty,
+            Details = BuildJudgedDetails(request),
+        }, cancellationToken).ConfigureAwait(false);
+
+        if (request.DomainReason != CaptureReason.None && existing.CaptureReason == CaptureReason.None)
+        {
+            existing.CaptureReason = request.DomainReason;
+            if (string.IsNullOrWhiteSpace(existing.EvidenceSummary) && !string.IsNullOrWhiteSpace(request.EvidenceSummary))
+            {
+                existing.EvidenceSummary = request.EvidenceSummary!.Trim();
+            }
+
+            existing = await _rules.UpdateAsync(existing, cancellationToken).ConfigureAwait(false);
+        }
+
+        return new FeedbackResult(recallEvent, existing)
+        {
+            ReusedExistingRule = true,
+            CaptureReason = request.DomainReason,
+            EvidenceSummary = request.EvidenceSummary,
+        };
+    }
+
+    private static string BuildJudgedDetails(JudgedCaptureRequest request)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"Rule: {request.Rule.RuleText}");
+        if (request.DomainReason != CaptureReason.None)
+        {
+            sb.AppendLine($"Capture reason: {request.DomainReason}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.EvidenceSummary))
+        {
+            sb.AppendLine($"Evidence: {request.EvidenceSummary}");
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
     /// <summary>
     /// Validates the feedback intake: feedback text is required (non-empty after trim), and
     /// both feedback and task stay within sane length caps. The task may be empty (some

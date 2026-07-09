@@ -60,6 +60,31 @@ public class SchemaReconcilerTests
         Assert.Equal(1L, ScalarLong(db.Options.DatabasePath, "SELECT COUNT(*) FROM Rules WHERE Trigger = 'legacy';"));
     }
 
+    /// <summary>
+    /// A TurnFinalizations table created before the semantic capture judge lacks the judge
+    /// decision columns; the additive reconciler must backfill them so status queries work.
+    /// </summary>
+    [Fact]
+    public async Task Initialize_AddsJudgeDecisionColumns_ToLegacyTurnFinalizations()
+    {
+        await using var db = new TestDatabase();
+        Directory.CreateDirectory(db.Options.DataDirectory);
+        WriteLegacyTurnFinalizations(db.Options.DatabasePath);
+
+        await using (var scope = db.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<IDatabaseInitializer>().InitializeAsync();
+        }
+
+        var columns = ReadColumns(db.Options.DatabasePath, "TurnFinalizations");
+        Assert.Contains("DecisionSource", columns);
+        Assert.Contains("JudgeDecision", columns);
+        Assert.Contains("JudgeCaptureReason", columns);
+        Assert.Contains("JudgeConfidence", columns);
+        // The pre-existing row survives — reconciliation is additive.
+        Assert.Equal(1L, ScalarLong(db.Options.DatabasePath, "SELECT COUNT(*) FROM TurnFinalizations;"));
+    }
+
     [Fact]
     public async Task Initialize_IsIdempotent_OnAlreadyCurrentSchema()
     {
@@ -106,6 +131,34 @@ public class SchemaReconcilerTests
                 ("Version","Status","Trigger","Mistake","RuleText","TechnicalContext","Tags","Confidence","ScopeLevel","ScopeValue","CreatedAt","UpdatedAt")
             VALUES
                 (1,'Active','legacy','m','r','t','','0.5','Global','','2026-06-13T00:00:00+00:00','2026-06-13T00:00:00+00:00');
+            """;
+        command.ExecuteNonQuery();
+    }
+
+    private static void WriteLegacyTurnFinalizations(string path)
+    {
+        using var connection = new SqliteConnection($"Data Source={path}");
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            CREATE TABLE "TurnFinalizations" (
+                "Id" INTEGER NOT NULL CONSTRAINT "PK_TurnFinalizations" PRIMARY KEY AUTOINCREMENT,
+                "CreatedAt" TEXT NOT NULL,
+                "Cwd" TEXT NOT NULL,
+                "Source" TEXT NOT NULL,
+                "CapturedRuleIds" TEXT NOT NULL,
+                "SuggestedRuleIds" TEXT NOT NULL,
+                "SkippedReasons" TEXT NOT NULL,
+                "DuplicateRuleIds" TEXT NOT NULL,
+                "ErrorSummary" TEXT NOT NULL,
+                "RawHash" TEXT NOT NULL,
+                "TurnId" TEXT NOT NULL,
+                "Transcript" TEXT NOT NULL
+            );
+            INSERT INTO "TurnFinalizations"
+                ("CreatedAt","Cwd","Source","CapturedRuleIds","SuggestedRuleIds","SkippedReasons","DuplicateRuleIds","ErrorSummary","RawHash","TurnId","Transcript")
+            VALUES
+                ('2026-06-13T00:00:00+00:00','/repo/project','stop_hook','','','','','','legacyhash','','');
             """;
         command.ExecuteNonQuery();
     }

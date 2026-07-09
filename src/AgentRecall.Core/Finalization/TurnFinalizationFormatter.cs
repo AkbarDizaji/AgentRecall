@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using AgentRecall.Core.Domain;
 
@@ -15,6 +16,9 @@ public static class TurnFinalizationFormatter
     public const string NoFinalization =
         "No finalized AgentRecall capture is recorded for the last turn.";
 
+    /// <summary>Decision-source label recorded when the semantic judge produced a verdict.</summary>
+    public const string JudgeDecisionSource = TurnFinalizer.JudgeDecisionSource;
+
     /// <summary>The multi-line, sectioned summary used by `finalize-turn` and `status`.</summary>
     public static string RenderText(TurnFinalizationResult result)
     {
@@ -27,6 +31,19 @@ public static class TurnFinalizationFormatter
 
         var sb = new StringBuilder();
         sb.Append("AgentRecall finalized turn.");
+
+        if (result.DecisionSource == JudgeDecisionSource && !string.IsNullOrEmpty(result.Decision))
+        {
+            sb.Append("\n\nDecision source: Semantic capture judge");
+            sb.Append($"\nDecision: {result.Decision}");
+            if (!string.IsNullOrEmpty(result.JudgeReason))
+            {
+                var confidence = result.JudgeConfidence is { } c
+                    ? $", confidence: {c.ToString("0.00", CultureInfo.InvariantCulture)}"
+                    : string.Empty;
+                sb.Append($" (reason: {result.JudgeReason}{confidence})");
+            }
+        }
 
         if (result.Captured.Count > 0)
         {
@@ -95,10 +112,10 @@ public static class TurnFinalizationFormatter
                    $"Run `agentrecall rules approve {lesson.RuleId}` to remember it.";
         }
 
-        var duplicate = result.Skipped.FirstOrDefault(s => s.DuplicateOfRuleId is not null);
-        if (duplicate is not null)
+        var reinforced = result.Skipped.FirstOrDefault(s => s.DuplicateOfRuleId is not null);
+        if (reinforced is not null)
         {
-            return $"AgentRecall skipped capture: duplicate of rule #{duplicate.DuplicateOfRuleId}.";
+            return $"AgentRecall reinforced existing rule #{reinforced.DuplicateOfRuleId} (no new rule).";
         }
 
         if (result.Skipped.Count > 0)

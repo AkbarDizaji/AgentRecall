@@ -288,57 +288,9 @@ public class AdaptiveWorthinessTests
         Assert.Equal(CaptureReason.None, result.Rule!.CaptureReason);
     }
 
-    // ---- Integration: Turn Finalizer (M) --------------------------------------
-
-    // M. The turn finalizer detects an observed-failure signal and passes it into
-    //    adaptive worthiness, so the captured rule carries the observed-failure reason.
-    [Fact]
-    public async Task M_TurnFinalizer_PassesObservedFailureSignal()
-    {
-        await using var db = new TestDatabase();
-        await Init(db);
-
-        await using var scope = db.CreateScope();
-        var finalizer = scope.ServiceProvider.GetRequiredService<ITurnFinalizer>();
-
-        var result = await finalizer.FinalizeAsync(new TurnFinalizationInput
-        {
-            Prompt = "That broke behavior. When emitting validator messages, apply the same tenant scope to avoid cross-tenant disclosure.",
-            Source = "stop_hook",
-            Cwd = "/repo/project",
-            ScopeLevel = ScopeLevel.Repository,
-            ScopeValue = "project",
-        });
-
-        var lesson = Assert.Single(result.Captured);
-        var rules = scope.ServiceProvider.GetRequiredService<IRecallRuleRepository>();
-        var rule = await rules.GetAsync(lesson.RuleId);
-        Assert.Equal(CaptureReason.ObservedAgentFailure, rule!.CaptureReason);
-    }
-
-    // A finalized turn with no outcome signal keeps the prior behaviour (generic →
-    // suggested), proving the adaptive layer is additive and does not downgrade.
-    [Fact]
-    public async Task TurnFinalizer_NoOutcomeSignal_KeepsExistingBehaviour()
-    {
-        await using var db = new TestDatabase();
-        await Init(db);
-
-        await using var scope = db.CreateScope();
-        var finalizer = scope.ServiceProvider.GetRequiredService<ITurnFinalizer>();
-
-        var result = await finalizer.FinalizeAsync(new TurnFinalizationInput
-        {
-            Prompt = "Don't re-query what you already loaded.",
-            Source = "stop_hook",
-            Cwd = "/repo/project",
-            ScopeLevel = ScopeLevel.Repository,
-            ScopeValue = "project",
-        });
-
-        Assert.Empty(result.Captured);
-        Assert.Single(result.Suggested);
-    }
+    // The turn finalizer's capture decision now comes from the semantic capture judge, not the
+    // adaptive worthiness policy; its integration is covered by CaptureJudgeFinalizerTests. The
+    // adaptive policy is still unit-tested directly above.
 
     // ---- Integration: Lesson Mining (N) ---------------------------------------
 

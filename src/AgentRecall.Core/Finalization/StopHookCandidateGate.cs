@@ -48,6 +48,9 @@ public enum CaptureSkipReason
 
     /// <summary>The candidate reads as a log or console line.</summary>
     LogOutput,
+
+    /// <summary>The candidate is a conversational aside the user flagged as off topic.</summary>
+    OffTopic,
 }
 
 /// <summary>The outcome of screening a Stop-hook capture candidate.</summary>
@@ -104,6 +107,19 @@ public static class StopHookCandidateGate
         "i'll add it", "i will add it",
     ];
 
+    // Tangent markers by which the user flags a digression away from the task ("Off topic: …",
+    // "unrelated, but …", "side note …"). A candidate opening with one of these is a
+    // conversational aside, not a reusable rule — so it never becomes memory even when it
+    // happens to contain a keyword (a stray "validation", "scope", "auth") that would
+    // otherwise read as guidance. English only, matched at the start where they carry meaning.
+    private static readonly string[] OffTopicSignals =
+    [
+        "off topic", "off-topic", "offtopic", "off subject", "unrelated", "side note", "sidenote",
+        "on a different note", "on another note", "different topic", "changing the subject",
+        "change of subject", "random question", "random q", "quick aside", "as an aside",
+        "tangent", "by the way", "different subject", "not related to",
+    ];
+
     // Conversation fragments that mark a trigger built from assistant prose rather than a
     // real condition. A trigger containing any of these did not come from a usable lesson.
     private static readonly string[] MalformedTriggerFragments =
@@ -155,6 +171,11 @@ public static class StopHookCandidateGate
         if (ContainsAny(lower, AssistantProseSignals))
         {
             return CandidateAssessment.Reject(CaptureSkipReason.AssistantProse);
+        }
+
+        if (IsOffTopicAside(lower))
+        {
+            return CandidateAssessment.Reject(CaptureSkipReason.OffTopic);
         }
 
         if (IsVague(text, lower))
@@ -250,8 +271,24 @@ public static class StopHookCandidateGate
         CaptureSkipReason.ToolOrSkillInstruction => "tool or skill instruction, not a reusable rule",
         CaptureSkipReason.CommandOutput => "command output, not a reusable rule",
         CaptureSkipReason.LogOutput => "log output, not a reusable rule",
+        CaptureSkipReason.OffTopic => "off-topic aside, not a reusable rule",
         _ => "not stored",
     };
+
+    // A tangent marker only means "aside" when it opens the candidate ("Off topic: …") — the
+    // same words can appear harmlessly deep inside a real rule, so we anchor to the start to
+    // keep this high-precision and never over-reject a genuine lesson. The two strongest
+    // markers ("off topic"/"off-topic") are rejected anywhere, since no real rule contains them.
+    private static bool IsOffTopicAside(string lower)
+    {
+        if (lower.Contains("off topic", StringComparison.Ordinal) ||
+            lower.Contains("off-topic", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return OffTopicSignals.Any(marker => lower.StartsWith(marker, StringComparison.Ordinal));
+    }
 
     private static bool IsVague(string text, string lower)
     {

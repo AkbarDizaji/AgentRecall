@@ -456,19 +456,23 @@ public class BehaviorContractTests
         await using var db = new TestDatabase();
         await Init(db);
 
+        string manualText;
         await using (var scope = db.CreateScope())
         {
             var feedback = scope.ServiceProvider.GetRequiredService<IFeedbackService>();
-            await feedback.AddAsync(new FeedbackInput
+            var manual = await feedback.AddAsync(new FeedbackInput
             {
                 Task = "work",
                 Feedback = "We do not mock DbContext directly.",
                 ScopeLevel = ScopeLevel.Repository,
                 ScopeValue = "project",
+                AutoApprove = true,
             });
+            manualText = manual.Rule!.RuleText;
         }
 
-        var result = await FinalizeTurnResult(db, "We do not mock DbContext directly.");
+        // The judge captures the same guidance already stored → reinforced, not duplicated.
+        var result = await FinalizeTurnResult(db, manualText);
 
         Assert.Empty(result.Captured);
         Assert.NotEmpty(result.Duplicates);
@@ -476,7 +480,7 @@ public class BehaviorContractTests
 
         await using var read = db.CreateScope();
         var status = await new CaptureStatusTool().InvokeAsync(null, read.ServiceProvider, CancellationToken.None);
-        Assert.Contains("skipped capture: duplicate", status["summary"]!.GetValue<string>(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("reinforced existing rule", status["summary"]!.GetValue<string>(), StringComparison.OrdinalIgnoreCase);
     }
 
     // ----- helpers -----
@@ -546,6 +550,9 @@ public class BehaviorContractTests
             Cwd = "/repo/project",
             ScopeLevel = ScopeLevel.Repository,
             ScopeValue = "project",
+            // The host model judged the turn worthy; the rule text is the prompt verbatim so the
+            // golden assertions can match it.
+            SuppliedJudgment = JudgeVerdicts.Capture(rule: JudgeVerdicts.Rule(action: prompt)),
         });
     }
 

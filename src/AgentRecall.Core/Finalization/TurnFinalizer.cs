@@ -3,57 +3,61 @@ using System.Security.Cryptography;
 using System.Text;
 using AgentRecall.Core.Abstractions;
 using AgentRecall.Core.Capture;
+using AgentRecall.Core.Capture.Judge;
 using AgentRecall.Core.Configuration;
-using AgentRecall.Core.Conflicts;
 using AgentRecall.Core.Domain;
 using AgentRecall.Core.Feedback;
-using AgentRecall.Core.Memory;
+using AgentRecall.Core.Policy;
+using AgentRecall.Core.Services;
 
 namespace AgentRecall.Core.Finalization;
 
 /// <summary>
-/// Default <see cref="ITurnFinalizer"/>. It is the canonical capture path for a
-/// completed turn: it extracts candidate lessons, ranks them, and routes each through
-/// the same <see cref="IFeedbackService"/> every other capture flow uses — so the
-/// auto-capture / suggest / skip decision, duplicate detection, and "lessons, not
-/// facts" screening are all reused, never re-implemented. It records the outcome so it
-/// can be queried, and is idempotent: re-finalizing the same turn creates no duplicates.
+/// Default <see cref="ITurnFinalizer"/>. It is the canonical capture path for a completed turn.
+/// The decision of whether the turn holds memory-worthy content belongs to the semantic capture
+/// judge (<see cref="ICaptureJudge"/>); this class only builds the bounded judge input, validates
+/// the returned verdict, maps it through deterministic thresholds, and persists the result. It
+/// never decides capture from keywords, and it never falls back to keyword capture: when the
+/// judge is unavailable the turn is skipped and that is recorded.
+///
+/// It records the outcome so it can be queried, and is idempotent: re-finalizing the same turn
+/// creates no duplicates.
 /// </summary>
 public sealed class TurnFinalizer : ITurnFinalizer
 {
     /// <summary>Tag applied to every rule captured by the turn finalizer.</summary>
     public const string SourceTag = "turn-finalizer";
 
-    // Conflict kinds strong enough to hold a capture back for review.
-    private static readonly HashSet<RuleConflictType> BlockingConflicts =
-        [RuleConflictType.DirectOpposition, RuleConflictType.PreferredVsAvoided];
+    /// <summary>Recorded as the decision source when the judge produced a verdict.</summary>
+    public const string JudgeDecisionSource = "SemanticCaptureJudge";
 
-    private static readonly HashSet<RuleStatus> ActiveStatuses =
-        [RuleStatus.Active, RuleStatus.Promoted];
+    /// <summary>The skip reason recorded when no semantic judge verdict was available.</summary>
+    public const string JudgeUnavailableMessage =
+        "Semantic capture judge unavailable; no automatic capture performed.";
 
-    private readonly ITurnCandidateExtractor _extractor;
-    private readonly IMemoryWorthinessClassifier _classifier;
-    private readonly IRecallExtractor _ruleExtractor;
-    private readonly IRuleConflictDetector _conflictDetector;
+    // How many relevant existing rules to surface to the judge for dedupe/reinforce.
+    private const int MaxRelevantRules = 12;
+
+    private readonly ICaptureJudge _judge;
+    private readonly IPolicyEngine _policy;
+    private readonly IRuleLifecycleService _lifecycle;
     private readonly IFeedbackService _feedback;
     private readonly IRecallRuleRepository _rules;
     private readonly ITurnFinalizationRepository _finalizations;
     private readonly AgentRecallOptions _options;
 
     public TurnFinalizer(
-        ITurnCandidateExtractor extractor,
-        IMemoryWorthinessClassifier classifier,
-        IRecallExtractor ruleExtractor,
-        IRuleConflictDetector conflictDetector,
+        ICaptureJudge judge,
+        IPolicyEngine policy,
+        IRuleLifecycleService lifecycle,
         IFeedbackService feedback,
         IRecallRuleRepository rules,
         ITurnFinalizationRepository finalizations,
         AgentRecallOptions options)
     {
-        _extractor = extractor ?? throw new ArgumentNullException(nameof(extractor));
-        _classifier = classifier ?? throw new ArgumentNullException(nameof(classifier));
-        _ruleExtractor = ruleExtractor ?? throw new ArgumentNullException(nameof(ruleExtractor));
-        _conflictDetector = conflictDetector ?? throw new ArgumentNullException(nameof(conflictDetector));
+        _judge = judge ?? throw new ArgumentNullException(nameof(judge));
+        _policy = policy ?? throw new ArgumentNullException(nameof(policy));
+        _lifecycle = lifecycle ?? throw new ArgumentNullException(nameof(lifecycle));
         _feedback = feedback ?? throw new ArgumentNullException(nameof(feedback));
         _rules = rules ?? throw new ArgumentNullException(nameof(rules));
         _finalizations = finalizations ?? throw new ArgumentNullException(nameof(finalizations));
@@ -66,7 +70,7 @@ public sealed class TurnFinalizer : ITurnFinalizer
     {
         ArgumentNullException.ThrowIfNull(input);
 
-        if (!_options.TurnFinalizerEnabled)
+        if (!_options.TurnFinalizerEnabled || _options.ResolvedCaptureJudgeMode == CaptureJudgeMode.Off)
         {
             return new TurnFinalizationResult();
         }
@@ -92,10 +96,11 @@ public sealed class TurnFinalizer : ITurnFinalizer
         var skipped = new List<SkippedLesson>();
         var duplicates = new List<int>();
         var errors = new List<string>();
+        var decision = TurnJudgeDecision.None;
 
         try
         {
-            await ProcessAsync(input, captured, suggested, skipped, duplicates, cancellationToken)
+            decision = await JudgeTurnAsync(input, captured, suggested, skipped, duplicates, cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -105,8 +110,7 @@ public sealed class TurnFinalizer : ITurnFinalizer
         }
 
         // A turn with no lesson at all (ordinary coding work) is not persisted, so the
-        // last finalization stays the last one that actually decided something — a more
-        // useful answer to "did this turn produce a lesson?" than an empty record.
+        // last finalization stays the last one that actually decided something.
         var producedSomething =
             captured.Count > 0 || suggested.Count > 0 || skipped.Count > 0 ||
             duplicates.Count > 0 || errors.Count > 0;
@@ -126,6 +130,10 @@ public sealed class TurnFinalizer : ITurnFinalizer
                 RawHash = hash,
                 TurnId = turnId ?? string.Empty,
                 Transcript = _options.StoreTurnTranscript ? input.RawTranscript ?? string.Empty : string.Empty,
+                DecisionSource = decision.Source,
+                JudgeDecision = decision.Decision,
+                JudgeCaptureReason = decision.JudgeReason,
+                JudgeConfidence = decision.Confidence ?? 0d,
             };
 
             try
@@ -149,10 +157,19 @@ public sealed class TurnFinalizer : ITurnFinalizer
             Id = id,
             Source = input.Source,
             TurnId = turnId,
+            DecisionSource = decision.Source,
+            Decision = string.IsNullOrEmpty(decision.Decision) ? null : decision.Decision,
+            JudgeReason = string.IsNullOrEmpty(decision.JudgeReason) ? null : decision.JudgeReason,
+            JudgeConfidence = decision.Confidence,
+            TargetRuleId = decision.TargetRuleId,
         };
     }
 
-    private async Task ProcessAsync(
+    /// <summary>
+    /// Runs the semantic judge over the whole turn and applies its verdict. The judge decides;
+    /// this method only builds the bounded input, validates + maps the verdict, and persists.
+    /// </summary>
+    private async Task<TurnJudgeDecision> JudgeTurnAsync(
         TurnFinalizationInput input,
         List<FinalizedLesson> captured,
         List<FinalizedLesson> suggested,
@@ -160,224 +177,253 @@ public sealed class TurnFinalizer : ITurnFinalizer
         List<int> duplicates,
         CancellationToken cancellationToken)
     {
-        var userText = input.Prompt;
-        var assistantText = input.AssistantResponse;
+        var relevant = await BuildRelevantRulesAsync(input, cancellationToken).ConfigureAwait(false);
 
-        var acceptance = _extractor.HasAcceptanceSignal(userText) || input.Accepted == true;
-
-        // Outcome-aware evidence for the turn: an observed failure, a user correction, an
-        // accepted review, a test that failed then passed, or a repeat. These let the
-        // adaptive policy elevate a generic lesson that names a real mistake.
-        var outcome = _extractor.DetectOutcomeSignals(userText, assistantText);
-
-        // An explicit do-not-save instruction hard-skips the turn: no rule, no Pending
-        // candidate. If the turn *also* asks to save, the most recent intent wins (a save
-        // request after the do-not-save), and a host-provided acceptance flag overrides;
-        // otherwise — including exact ties — do-not-save is preferred for safety.
-        if (_extractor.HasDoNotSaveSignal(userText, assistantText))
+        var judgeInput = new CaptureJudgeInput
         {
-            var saveOverrides = input.Accepted == true || _extractor.SaveIntentFollowsDoNotSave(userText);
-            if (!saveOverrides)
-            {
-                skipped.Add(Skip(CaptureSkipReason.ExplicitDoNotSave));
-                return;
-            }
-        }
-
-        var candidates = _extractor
-            .Extract(userText, assistantText, _options.MaxCandidateCharacters)
-            .OrderByDescending(c => c.Priority)
-            .Take(Math.Max(0, _options.MaxCandidatesPerTurn))
-            .ToList();
-
-        if (candidates.Count == 0)
-        {
-            return;
-        }
-
-        foreach (var candidate in candidates)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            await RouteAsync(candidate, input, acceptance, outcome, captured, suggested, skipped, duplicates, cancellationToken)
-                .ConfigureAwait(false);
-        }
-    }
-
-    private async Task RouteAsync(
-        TurnLessonCandidate candidate,
-        TurnFinalizationInput input,
-        bool acceptance,
-        TurnOutcomeSignals outcome,
-        List<FinalizedLesson> captured,
-        List<FinalizedLesson> suggested,
-        List<SkippedLesson> skipped,
-        List<int> duplicates,
-        CancellationToken cancellationToken)
-    {
-        // Source/outcome-aware gate (runs first): documentation, tool/skill instructions,
-        // command output, and log lines are read-only source material — they become memory
-        // only when the turn pairs them with an observed failure, an explicit save, or a
-        // confirmed repository convention. Structured origin metadata is trusted before the
-        // regex classifier; here the origin is what the extractor found the candidate in.
-        var origin = candidate.Source == TurnCandidateSource.UserCorrection
-            ? CandidateOrigin.UserMessage
-            : CandidateOrigin.AssistantMessage;
-        var classification = CandidateSourceClassifier.Classify(candidate.Text, origin);
-        var pairedWithObservedFailure = outcome.ObservedFailure || outcome.UserCorrection ||
-            outcome.ReviewAccepted || outcome.TestFailedThenFixed || outcome.RepeatedCorrectionCount >= 2;
-        var pairedWithRepositoryConfirmation =
-            CandidateSourceClassifier.MatchesRepositoryConfirmation(input.Prompt) ||
-            CandidateSourceClassifier.MatchesRepositoryConfirmation(candidate.Text);
-        var sourceVerdict = SourceAwareCaptureDecision.Decide(
-            classification, pairedWithObservedFailure, acceptance, pairedWithRepositoryConfirmation);
-        if (sourceVerdict.ShouldSkip)
-        {
-            skipped.Add(Skip(sourceVerdict.SkipReason, candidate.Text));
-            return;
-        }
-
-        // Structure/quality gate: keep vague fragments and any residual chatter out of memory
-        // — before any auto-capture or Pending suggestion is created. We screen the candidate
-        // body (the rule text); the derived trigger is validated separately by
-        // `cleanup pending-noise`, since the trigger here is synthesized from the turn's task
-        // and a chatty task must not sink an otherwise clean lesson.
-        var gate = StopHookCandidateGate.ScreenText(candidate.Text);
-        if (!gate.IsAcceptable)
-        {
-            skipped.Add(Skip(gate.Reason, candidate.Text));
-            return;
-        }
-
-        // Classify here only to decide the posture we hand the decision policy; the
-        // FeedbackService classifies again and owns the actual capture decision.
-        var worthiness = _classifier.Classify(candidate.Text);
-
-        // A generic textbook rule (worthy but unremarkable: low confidence, not
-        // conditional, no security angle, and naming no concrete repository symbol) is
-        // parked for review rather than activated unilaterally.
-        var generic = worthiness.Verdict == MemoryWorthiness.WorthStoring &&
-                      worthiness.Confidence <= _options.CaptureAutoConfidence &&
-                      !candidate.Security &&
-                      !candidate.Conditional &&
-                      !candidate.HasSymbol;
-
-        // Hold a capture back when it directly contradicts an existing active rule.
-        var conflict = await DetectConflictAsync(candidate, input, worthiness.Category, cancellationToken)
-            .ConfigureAwait(false);
-
-        bool? autoApprove =
-            acceptance ? true
-            : conflict is not null ? false
-            : generic ? false
-            : null;
-
-        // When the turn carries outcome-aware evidence, hand it to the adaptive policy so
-        // an observed mistake can elevate a generic lesson and a code fact is still never
-        // auto-captured. With no such evidence, the context is null and capture behaves
-        // exactly as before (text worthiness alone), preserving the existing decisions.
-        var context = outcome.HasAny
-            ? new CaptureContext
-            {
-                Source = SourceTag,
-                AcceptanceSignal = acceptance,
-                ExplicitSaveRequest = acceptance,
-                ObservedFailure = outcome.ObservedFailure,
-                UserCorrection = outcome.UserCorrection,
-                ReviewAccepted = outcome.ReviewAccepted,
-                TestFailedThenFixed = outcome.TestFailedThenFixed,
-                RepeatedCorrectionCount = outcome.RepeatedCorrectionCount,
-                ConflictExists = conflict is not null,
-                EvidenceSummary = BuildEvidenceSummary(outcome, candidate.Text),
-            }
-            : null;
-
-        var input2 = new FeedbackInput
-        {
-            Task = BuildTask(input),
-            Feedback = candidate.Text,
+            UserPrompt = input.Prompt,
+            AssistantSummary = BuildAssistantSummary(input),
+            Source = input.Source,
+            AcceptanceSignal = input.Accepted == true,
             ScopeLevel = input.ScopeLevel,
             ScopeValue = input.ScopeValue,
-            Tags = SourceTag,
-            AutoApprove = autoApprove,
-            Context = context,
+            RelevantRules = relevant,
+            SuppliedVerdict = input.SuppliedJudgment,
         };
 
-        var result = await _feedback.AddAsync(input2, cancellationToken).ConfigureAwait(false);
-        var decision = result.Decision;
-        var note = conflict is not null
-            ? $"Conflicts with rule #{OtherRuleId(conflict)}: {conflict.Summary}"
-            : null;
-
-        switch (decision?.Outcome)
+        var verdict = await _judge.JudgeAsync(judgeInput, cancellationToken).ConfigureAwait(false);
+        if (verdict is null)
         {
-            case CaptureOutcome.AutoCapture when result.Rule is { } rule:
-                captured.Add(ToLesson(rule, decision, note));
-                break;
+            // No verdict: the judge is unavailable. Skip — never a keyword-driven fallback.
+            skipped.Add(new SkippedLesson { Reason = JudgeUnavailableMessage });
+            return TurnJudgeDecision.Unavailable;
+        }
 
-            case CaptureOutcome.SuggestCapture when result.Rule is { } rule:
-                suggested.Add(ToLesson(rule, decision, note ?? decision.Notice));
-                break;
+        var validation = CaptureJudgeValidator.Validate(verdict, judgeInput);
+        var outcome = CaptureJudgeDecisionMapper.Map(verdict, validation);
 
-            case CaptureOutcome.Skip:
-                if (result.ReusedExistingRule && result.Rule is { } existing)
-                {
-                    duplicates.Add(existing.Id);
-                    skipped.Add(new SkippedLesson
-                    {
-                        Reason = $"Duplicate of rule #{existing.Id}.",
-                        DuplicateOfRuleId = existing.Id,
-                    });
-                }
-                else
-                {
-                    skipped.Add(new SkippedLesson { Reason = decision?.Reason ?? "Not stored." });
-                }
+        var summary = new TurnJudgeDecision
+        {
+            Source = JudgeDecisionSource,
+            Decision = outcome.JudgeDecision,
+            JudgeReason = outcome.JudgeReason,
+            Confidence = outcome.Confidence,
+        };
 
-                break;
+        switch (outcome.Action)
+        {
+            case JudgePersistAction.AutoCapture:
+            case JudgePersistAction.Suggest:
+                return await PersistCaptureAsync(input, outcome, captured, suggested, duplicates, skipped, summary, cancellationToken)
+                    .ConfigureAwait(false);
+
+            case JudgePersistAction.Supersede:
+                return await SupersedeAsync(input, outcome, captured, duplicates, summary, cancellationToken)
+                    .ConfigureAwait(false);
+
+            case JudgePersistAction.Reinforce:
+                return await ReinforceAsync(outcome, skipped, duplicates, summary, cancellationToken)
+                    .ConfigureAwait(false);
 
             default:
-                // No decision (legacy path) or no rule — record a generic skip.
-                skipped.Add(new SkippedLesson { Reason = decision?.Reason ?? "Nothing stored." });
-                break;
+                skipped.Add(new SkippedLesson { Reason = outcome.Reason });
+                return summary;
         }
     }
 
-    private async Task<RuleConflict?> DetectConflictAsync(
-        TurnLessonCandidate candidate,
+    private async Task<TurnJudgeDecision> PersistCaptureAsync(
         TurnFinalizationInput input,
-        RuleCategory category,
+        CaptureJudgeOutcome outcome,
+        List<FinalizedLesson> captured,
+        List<FinalizedLesson> suggested,
+        List<int> duplicates,
+        List<SkippedLesson> skipped,
+        TurnJudgeDecision summary,
         CancellationToken cancellationToken)
     {
-        var all = await _rules.ListAsync(cancellationToken).ConfigureAwait(false);
-        var active = all
-            .Where(r => ActiveStatuses.Contains(r.Status) && !r.Deprecated)
-            .ToList();
-        if (active.Count == 0)
+        var request = BuildRequest(input, outcome);
+        var result = await _feedback.AddJudgedAsync(request, cancellationToken).ConfigureAwait(false);
+
+        if (result.ReusedExistingRule && result.Rule is { } existing)
+        {
+            // The judge asked to capture, but the rule already exists: reinforce, don't duplicate.
+            duplicates.Add(existing.Id);
+            skipped.Add(new SkippedLesson
+            {
+                Reason = $"Reinforced existing rule #{existing.Id}.",
+                DuplicateOfRuleId = existing.Id,
+            });
+            return summary with { TargetRuleId = existing.Id };
+        }
+
+        if (result.Rule is { } rule)
+        {
+            var lesson = ToLesson(rule, outcome.Reason);
+            if (outcome.Action == JudgePersistAction.AutoCapture)
+            {
+                captured.Add(lesson);
+            }
+            else
+            {
+                suggested.Add(lesson);
+            }
+        }
+
+        return summary;
+    }
+
+    private async Task<TurnJudgeDecision> SupersedeAsync(
+        TurnFinalizationInput input,
+        CaptureJudgeOutcome outcome,
+        List<FinalizedLesson> captured,
+        List<int> duplicates,
+        TurnJudgeDecision summary,
+        CancellationToken cancellationToken)
+    {
+        var request = BuildRequest(input, outcome);
+        var result = await _feedback.AddJudgedAsync(request, cancellationToken).ConfigureAwait(false);
+
+        if (result.Rule is not { } rule)
+        {
+            return summary;
+        }
+
+        if (result.ReusedExistingRule)
+        {
+            duplicates.Add(rule.Id);
+            return summary with { TargetRuleId = rule.Id };
+        }
+
+        var target = outcome.TargetRuleId;
+        var note = outcome.Reason;
+        if (target is { } targetId && targetId != rule.Id &&
+            await _rules.GetAsync(targetId, cancellationToken).ConfigureAwait(false) is not null)
+        {
+            await _lifecycle.SupersedeAsync(targetId, rule.Id, cancellationToken).ConfigureAwait(false);
+            note = $"Supersedes rule #{targetId}.";
+        }
+
+        captured.Add(ToLesson(rule, note));
+        return summary with { TargetRuleId = target };
+    }
+
+    private async Task<TurnJudgeDecision> ReinforceAsync(
+        CaptureJudgeOutcome outcome,
+        List<SkippedLesson> skipped,
+        List<int> duplicates,
+        TurnJudgeDecision summary,
+        CancellationToken cancellationToken)
+    {
+        if (outcome.TargetRuleId is not { } targetId ||
+            await _rules.GetAsync(targetId, cancellationToken).ConfigureAwait(false) is null)
+        {
+            skipped.Add(new SkippedLesson { Reason = "Reinforcement target no longer exists; nothing stored." });
+            return summary;
+        }
+
+        await _lifecycle.ReinforceAsync(targetId, RuleLifecycleService.ReinforcementDelta, cancellationToken)
+            .ConfigureAwait(false);
+        duplicates.Add(targetId);
+        skipped.Add(new SkippedLesson
+        {
+            Reason = $"Reinforced existing rule #{targetId}.",
+            DuplicateOfRuleId = targetId,
+        });
+        return summary with { TargetRuleId = targetId };
+    }
+
+    private JudgedCaptureRequest BuildRequest(TurnFinalizationInput input, CaptureJudgeOutcome outcome)
+    {
+        var rule = BuildRule(input, outcome);
+        return new JudgedCaptureRequest
+        {
+            Rule = rule,
+            Status = outcome.Status,
+            DomainReason = outcome.DomainReason,
+            EvidenceSummary = string.IsNullOrWhiteSpace(rule.TechnicalContext) ? null : rule.TechnicalContext,
+            TaskContext = BuildTask(input),
+        };
+    }
+
+    /// <summary>Builds a <see cref="RecallRule"/> from the judge's normalized rule.</summary>
+    private RecallRule BuildRule(TurnFinalizationInput input, CaptureJudgeOutcome outcome)
+    {
+        var normalized = outcome.Rule ?? new NormalizedRule();
+
+        // A preference applies to the user everywhere, so it is stored at Global scope; every
+        // other rule keeps the turn's derived repository scope.
+        var isPreference = outcome.Category is RuleCategory.UserPreference or RuleCategory.CommunicationPreference;
+        var scopeLevel = isPreference ? ScopeLevel.Global : input.ScopeLevel;
+        var scopeValue = isPreference ? string.Empty : input.ScopeValue ?? string.Empty;
+
+        return new RecallRule
+        {
+            Version = 1,
+            Status = RuleStatus.Pending,
+            Category = outcome.Category,
+            Trigger = Trim(normalized.Condition),
+            RuleText = Trim(normalized.Action),
+            Mistake = Trim(normalized.Avoid),
+            TechnicalContext = Trim(normalized.Because),
+            Tags = BuildTags(normalized.Tags),
+            Confidence = outcome.Confidence,
+            ScopeLevel = scopeLevel,
+            ScopeValue = scopeValue,
+        };
+    }
+
+    private static string BuildTags(IReadOnlyList<string> tags)
+    {
+        var parts = new List<string> { SourceTag };
+        parts.AddRange(tags.Select(t => t.Trim()).Where(t => t.Length > 0));
+        return string.Join(",", parts.Distinct(StringComparer.OrdinalIgnoreCase));
+    }
+
+    private async Task<IReadOnlyList<JudgeRelevantRule>> BuildRelevantRulesAsync(
+        TurnFinalizationInput input, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var resolution = await _policy.ResolveForTaskAsync(
+                BuildTask(input),
+                new PolicyContext { ScopeLevel = input.ScopeLevel, ScopeValue = input.ScopeValue },
+                cancellationToken).ConfigureAwait(false);
+
+            return resolution.Effective
+                .Take(MaxRelevantRules)
+                .Select(v => new JudgeRelevantRule
+                {
+                    Id = v.Rule.Id,
+                    Title = ShortTitle(v.Rule),
+                    Category = v.Rule.Category.ToString(),
+                })
+                .ToList();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Relevant-rule context is best-effort; the judge can still decide without it.
+            return [];
+        }
+    }
+
+    private static string ShortTitle(RecallRule rule)
+    {
+        var text = !string.IsNullOrWhiteSpace(rule.RuleText) ? rule.RuleText : rule.Trigger;
+        text = (text ?? string.Empty).Trim();
+        return text.Length <= 100 ? text : text[..99] + "…";
+    }
+
+    private string? BuildAssistantSummary(TurnFinalizationInput input)
+    {
+        if (string.IsNullOrWhiteSpace(input.AssistantResponse))
         {
             return null;
         }
 
-        var candidateRule = _ruleExtractor.Extract(new FeedbackInput
-        {
-            Task = BuildTask(input),
-            Feedback = candidate.Text,
-            ScopeLevel = input.ScopeLevel,
-            ScopeValue = input.ScopeValue,
-        });
-
-        // A sentinel id no real rule can hold, so the candidate is identifiable in the
-        // detector's pairwise output without colliding with a stored rule.
-        candidateRule.Id = int.MaxValue;
-        candidateRule.Category = category;
-
-        var pool = new List<RecallRule>(active) { candidateRule };
-        return _conflictDetector
-            .Detect(pool)
-            .FirstOrDefault(c => c.RuleIds.Contains(int.MaxValue) && BlockingConflicts.Contains(c.ConflictType));
+        var trimmed = input.AssistantResponse.Trim();
+        var max = Math.Max(0, _options.MaxCandidateCharacters);
+        return max > 0 && trimmed.Length > max ? trimmed[..max] + "…" : trimmed;
     }
-
-    private static int OtherRuleId(RuleConflict conflict) =>
-        conflict.RuleIds.FirstOrDefault(id => id != int.MaxValue);
 
     public async Task<TurnFinalizationResult?> GetLastAsync(
         string? cwd = null,
@@ -407,7 +453,7 @@ public sealed class TurnFinalizer : ITurnFinalizer
         {
             if (await _rules.GetAsync(id, cancellationToken).ConfigureAwait(false) is { } rule)
             {
-                captured.Add(ToLesson(rule, decision: null, note: null));
+                captured.Add(ToLesson(rule, note: null));
             }
         }
 
@@ -416,7 +462,7 @@ public sealed class TurnFinalizer : ITurnFinalizer
         {
             if (await _rules.GetAsync(id, cancellationToken).ConfigureAwait(false) is { } rule)
             {
-                suggested.Add(ToLesson(rule, decision: null, note: null));
+                suggested.Add(ToLesson(rule, note: null));
             }
         }
 
@@ -429,17 +475,24 @@ public sealed class TurnFinalizer : ITurnFinalizer
             ? Array.Empty<string>()
             : finalization.ErrorSummary.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
+        var duplicateIds = ParseIds(finalization.DuplicateRuleIds).ToList();
+
         return new TurnFinalizationResult
         {
             Captured = captured,
             Suggested = suggested,
             Skipped = skipped,
-            Duplicates = ParseIds(finalization.DuplicateRuleIds).ToList(),
+            Duplicates = duplicateIds,
             Errors = errors,
             Id = finalization.Id,
             CreatedAt = finalization.CreatedAt,
             Source = finalization.Source,
             TurnId = string.IsNullOrEmpty(finalization.TurnId) ? null : finalization.TurnId,
+            DecisionSource = string.IsNullOrEmpty(finalization.DecisionSource) ? null : finalization.DecisionSource,
+            Decision = string.IsNullOrEmpty(finalization.JudgeDecision) ? null : finalization.JudgeDecision,
+            JudgeReason = string.IsNullOrEmpty(finalization.JudgeCaptureReason) ? null : finalization.JudgeCaptureReason,
+            JudgeConfidence = finalization.DecisionSource == JudgeDecisionSource ? finalization.JudgeConfidence : null,
+            TargetRuleId = duplicateIds.Count > 0 ? duplicateIds[0] : null,
         };
     }
 
@@ -458,32 +511,13 @@ public sealed class TurnFinalizer : ITurnFinalizer
             .FirstOrDefault();
     }
 
-    /// <summary>A structured skip carrying a human reason, the machine reason code, and a capped excerpt.</summary>
-    private static SkippedLesson Skip(CaptureSkipReason reason, string? candidateText = null)
-    {
-        var excerpt = candidateText?.Trim();
-        if (!string.IsNullOrEmpty(excerpt) && excerpt.Length > 80)
-        {
-            excerpt = excerpt[..79] + "…";
-        }
-
-        var explanation = StopHookCandidateGate.Explain(reason);
-        var sentence = char.ToUpperInvariant(explanation[0]) + explanation[1..] + ".";
-        return new SkippedLesson
-        {
-            Reason = sentence,
-            SkipReason = reason,
-            CandidateExcerpt = string.IsNullOrEmpty(excerpt) ? null : excerpt,
-        };
-    }
-
-    private static FinalizedLesson ToLesson(RecallRule rule, CaptureDecision? decision, string? note) =>
+    private static FinalizedLesson ToLesson(RecallRule rule, string? note) =>
         new()
         {
             RuleId = rule.Id,
             Category = rule.Category,
             Text = rule.RuleText,
-            ScopeLabel = decision?.ScopeLabel ?? ScopeLabel(rule.ScopeLevel, rule.ScopeValue),
+            ScopeLabel = ScopeLabel(rule.ScopeLevel, rule.ScopeValue),
             Confidence = rule.Confidence,
             Note = note,
         };
@@ -492,25 +526,6 @@ public sealed class TurnFinalizer : ITurnFinalizer
         level == ScopeLevel.Global
             ? "Global"
             : string.IsNullOrWhiteSpace(value) ? level.ToString() : $"{level}:{value}";
-
-    private static string BuildEvidenceSummary(TurnOutcomeSignals outcome, string candidateText)
-    {
-        var parts = new List<string>();
-        if (outcome.ObservedFailure) parts.Add("the agent's output broke or changed behaviour");
-        if (outcome.UserCorrection) parts.Add("the user corrected it");
-        if (outcome.ReviewAccepted) parts.Add("a review comment was applied");
-        if (outcome.TestFailedThenFixed) parts.Add("a test failed then passed");
-        if (outcome.RepeatedCorrectionCount >= 2) parts.Add("the same correction recurred");
-
-        var evidence = parts.Count > 0 ? string.Join("; ", parts) : "an observed outcome";
-        var snippet = candidateText.Trim();
-        if (snippet.Length > 120)
-        {
-            snippet = snippet[..119] + "…";
-        }
-
-        return $"Observed in turn: {evidence}. Lesson: {snippet}";
-    }
 
     private static string BuildTask(TurnFinalizationInput input)
     {
@@ -545,4 +560,22 @@ public sealed class TurnFinalizer : ITurnFinalizer
             .Select(s => int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id) ? id : (int?)null)
             .Where(id => id is not null)
             .Select(id => id!.Value);
+
+    private static string Trim(string? value) => value?.Trim() ?? string.Empty;
+
+    /// <summary>The judge decision metadata threaded through to persistence and status output.</summary>
+    private readonly record struct TurnJudgeDecision
+    {
+        public string Source { get; init; }
+        public string Decision { get; init; }
+        public string JudgeReason { get; init; }
+        public double? Confidence { get; init; }
+        public int? TargetRuleId { get; init; }
+
+        /// <summary>No judged decision (empty turn / disabled).</summary>
+        public static TurnJudgeDecision None => new() { Source = "None", Decision = string.Empty, JudgeReason = string.Empty };
+
+        /// <summary>The judge was unavailable for the turn.</summary>
+        public static TurnJudgeDecision Unavailable => new() { Source = "None", Decision = string.Empty, JudgeReason = string.Empty };
+    }
 }

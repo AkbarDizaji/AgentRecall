@@ -199,4 +199,80 @@ public class TurnPayloadTests
             Directory.Delete(dir, recursive: true);
         }
     }
+
+    // ---- Judgment parsing -----------------------------------------------------
+
+    [Fact]
+    public void Parse_ValidJudgment_IsRead()
+    {
+        var payload = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            prompt = "a turn",
+            cwd = "/repo/project",
+            judgment = new
+            {
+                decision = "Capture",
+                memory_type = "EngineeringLesson",
+                confidence = 0.9,
+                capture_reason = "ObservedAgentFailure",
+                normalized_rule = new
+                {
+                    title = "t",
+                    condition = "when x",
+                    action = "do y",
+                    because = "z",
+                    scope = "project",
+                    tags = new[] { "a", "b" },
+                },
+            },
+        });
+
+        var verdict = TurnPayload.Parse(payload, Discard)!.SuppliedJudgment;
+
+        Assert.NotNull(verdict);
+        Assert.Equal(Core.Capture.Judge.JudgeDecision.Capture, verdict!.Decision);
+        Assert.Equal(0.9, verdict.Confidence);
+        Assert.Equal("do y", verdict.NormalizedRule!.Action);
+        Assert.Equal(2, verdict.NormalizedRule.Tags.Count);
+    }
+
+    [Fact]
+    public void Parse_NoJudgment_LeavesVerdictNull()
+    {
+        var payload = System.Text.Json.JsonSerializer.Serialize(new { prompt = "a turn", cwd = "/repo/project" });
+        Assert.Null(TurnPayload.Parse(payload, Discard)!.SuppliedJudgment);
+    }
+
+    [Fact]
+    public void Parse_UnknownDecisionEnum_LeavesVerdictNull()
+    {
+        var payload = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            prompt = "a turn",
+            cwd = "/repo/project",
+            judgment = new { decision = "Bogus", capture_reason = "ObservedAgentFailure", confidence = 0.9 },
+        });
+
+        // A malformed verdict parses to null (judge unavailable → skip), never throwing.
+        Assert.Null(TurnPayload.Parse(payload, Discard)!.SuppliedJudgment);
+    }
+
+    [Fact]
+    public void Parse_OversizedJudgment_IsIgnored()
+    {
+        var payload = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            prompt = "a turn",
+            cwd = "/repo/project",
+            judgment = new
+            {
+                decision = "Capture",
+                capture_reason = "ObservedAgentFailure",
+                confidence = 0.9,
+                evidence = new string('x', 30000),
+            },
+        });
+
+        Assert.Null(TurnPayload.Parse(payload, Discard)!.SuppliedJudgment);
+    }
 }

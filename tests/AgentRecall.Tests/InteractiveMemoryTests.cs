@@ -194,7 +194,7 @@ public class InteractiveMemoryTests
         await using var scope = db.CreateScope();
         var finalizer = scope.ServiceProvider.GetRequiredService<ITurnFinalizer>();
 
-        // A generic textbook rule with no outcome evidence → SuggestCapture (Pending).
+        // A mid-confidence judge verdict → SuggestCapture (Pending).
         var result = await finalizer.FinalizeAsync(new TurnFinalizationInput
         {
             Prompt = "Don't re-query what you already loaded.",
@@ -202,6 +202,7 @@ public class InteractiveMemoryTests
             Cwd = "/repo/project",
             ScopeLevel = ScopeLevel.Repository,
             ScopeValue = "project",
+            SuppliedJudgment = JudgeVerdicts.Suggest(),
         });
 
         var lesson = Assert.Single(result.Suggested);
@@ -422,6 +423,7 @@ public class InteractiveMemoryTests
                 Cwd = "/repo/project",
                 ScopeLevel = ScopeLevel.Repository,
                 ScopeValue = "project",
+                SuppliedJudgment = JudgeVerdicts.Suggest(),
             });
         }
 

@@ -93,26 +93,30 @@ public static class DevcontainerScaffolder
         The `agentrecall` MCP server holds rules learned from past feedback. Recall and
         capture are both wired as deterministic hooks: the UserPromptSubmit hook injects
         the relevant rules automatically, and the Stop hook finalizes each turn through
-        `agentrecall finalize-turn`, which extracts reusable lessons and decides — on its
-        own — whether to auto-capture, suggest, or skip each one (no tool call required).
+        `agentrecall finalize-turn`. AgentRecall's memory decisions come from a **semantic
+        capture judge**, not from keyword heuristics: the judge decides whether the turn
+        holds memory-worthy content, and AgentRecall only validates that decision and
+        persists it.
 
-        ### Source/outcome-aware capture
+        ### Semantic capture judge
 
-        The Stop hook classifies each candidate's source and outcome before capture.
-        Documentation, tool instructions, command output, and logs are not captured merely
-        because they were read — they become memory only when paired with an observed agent
-        failure, an explicit save, or a confirmed repository convention:
+        Incidental keywords never cause a capture. The judge decides; the system validates
+        and stores. Practical consequences for you:
 
-        - **If the user says not to save/capture/remember something, AgentRecall must not
-          capture it.** An explicit do-not-save instruction ("don't save this", "no need to
-          save") hard-skips the turn.
-        - **Do not turn your own explanations, docs, or command output into rules.** Assistant
-          prose, meta commentary ("one thing worth saving…"), documentation and tool
-          instructions you read, and command/log output are never reusable rules on their own —
-          the hook skips them, and so should you.
-        - When the user asks what was saved, check `agentrecall capture-status --last-turn`
-          or `agentrecall turn-summary --last` and answer from the actual recorded state, not
-          from whether you called a tool.
+        - **If the user explicitly asks to save/capture/remember a rule, it is saved** — even
+          when it is narrow, project-local, stylistic, or a preference. The judge normalizes
+          it into a clean rule.
+        - **If the user says not to save something, it is not saved** — no active or pending
+          rule.
+        - **Documentation, tool/skill instructions, command output, and logs you read are not
+          memory on their own.** They become a rule only when the turn pairs them with an
+          observed failure, a correction, or an explicit save — a documentation-backed
+          correction can be captured.
+        - **Do not narrate the mechanism.** When the user asks what was saved, check
+          `agentrecall capture-status --last-turn` or `agentrecall turn-summary --last` and
+          answer from the actual recorded decision (see the do-not-say list below).
+        - If the semantic judge is unavailable, automatic capture is skipped for the turn —
+          AgentRecall never falls back to keyword capture.
 
         ### AgentRecall behavior contract
 

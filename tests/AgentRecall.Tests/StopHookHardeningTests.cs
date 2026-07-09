@@ -1,4 +1,3 @@
-using System.Text.Json.Nodes;
 using AgentRecall.Cli;
 using AgentRecall.Core.Abstractions;
 using AgentRecall.Core.Domain;
@@ -9,11 +8,11 @@ using Xunit;
 namespace AgentRecall.Tests;
 
 /// <summary>
-/// Tests for Stop-hook capture hardening: the deterministic quality gate that keeps
-/// assistant prose, meta commentary, malformed conversation fragments, and any
-/// do-not-save turn out of memory, plus the structured skip reasons surfaced by
-/// capture-status / turn-summary / activity, and the `cleanup pending-noise` command.
-/// Everything is offline and deterministic; each test uses a throwaway database.
+/// Tests for the deterministic Stop-hook quality gate (<see cref="StopHookCandidateGate"/>) and
+/// the <c>cleanup pending-noise</c> command. The gate no longer decides live capture — the
+/// semantic capture judge does (see <see cref="CaptureJudgeFinalizerTests"/>) — but it is still
+/// the shared screen behind <c>cleanup pending-noise</c>, which finds and archives noisy rules
+/// created before the judge existed. Everything here is offline and deterministic.
 /// </summary>
 [Collection("ConsoleStdin")]
 public class StopHookHardeningTests
@@ -24,39 +23,14 @@ public class StopHookHardeningTests
         await scope.ServiceProvider.GetRequiredService<IDatabaseInitializer>().InitializeAsync();
     }
 
-    private static TurnFinalizationInput Turn(string? prompt = null, string? assistant = null, bool? accepted = null) =>
-        new()
-        {
-            Prompt = prompt,
-            AssistantResponse = assistant,
-            Accepted = accepted,
-            Source = "stop_hook",
-            Cwd = "/repo/project",
-            ScopeLevel = ScopeLevel.Repository,
-            ScopeValue = "project",
-        };
-
-    private static async Task<TurnFinalizationResult> Finalize(TestDatabase db, TurnFinalizationInput input)
-    {
-        await using var scope = db.CreateScope();
-        return await scope.ServiceProvider.GetRequiredService<ITurnFinalizer>().FinalizeAsync(input);
-    }
-
     private static async Task<IReadOnlyList<RecallRule>> Rules(TestDatabase db)
     {
         await using var scope = db.CreateScope();
         return await scope.ServiceProvider.GetRequiredService<IRecallRuleRepository>().ListAsync();
     }
 
-    private static void AssertNothingStored(TurnFinalizationResult result)
-    {
-        Assert.Empty(result.Captured);
-        Assert.Empty(result.Suggested);
-    }
-
     // ---- Gate unit checks (deterministic, no DB) ------------------------------
 
-    // D. Assistant prose "One thing is worth saving..." without a real rule is skipped.
     [Fact]
     public void Gate_OneThingWorthSavingProse_IsAssistantProse()
     {
@@ -66,7 +40,6 @@ public class StopHookHardeningTests
         Assert.Equal(CaptureSkipReason.AssistantProse, result.Reason);
     }
 
-    // E. "Want me to save it?" is skipped.
     [Fact]
     public void Gate_WantMeToSaveIt_IsAssistantProse()
     {
@@ -74,7 +47,6 @@ public class StopHookHardeningTests
             StopHookCandidateGate.ScreenText("Want me to save it?").Reason);
     }
 
-    // F. "I didn't manually call AgentRecall" is skipped.
     [Fact]
     public void Gate_IDidntManuallyCall_IsAssistantProse()
     {
@@ -82,7 +54,6 @@ public class StopHookHardeningTests
             StopHookCandidateGate.ScreenText("I didn't manually call AgentRecall, the hook fires on its own.").Reason);
     }
 
-    // G. "The Stop hook may have captured it" is skipped.
     [Fact]
     public void Gate_StopHookMayHaveCaptured_IsAssistantProse()
     {
@@ -90,7 +61,6 @@ public class StopHookHardeningTests
             StopHookCandidateGate.ScreenText("The Stop hook may have captured it.").Reason);
     }
 
-    // H. Malformed trigger "When working on Not much..." is rejected.
     [Fact]
     public void Gate_MalformedConversationTrigger_IsRejected()
     {
@@ -103,7 +73,6 @@ public class StopHookHardeningTests
         Assert.Equal(CaptureSkipReason.MalformedTrigger, assessed.Reason);
     }
 
-    // I. Candidate missing action is rejected.
     [Fact]
     public void Gate_ConditionWithNoAction_IsMissingAction()
     {
@@ -111,7 +80,6 @@ public class StopHookHardeningTests
             StopHookCandidateGate.ScreenText("When reporting the state to the user.").Reason);
     }
 
-    // J. Candidate missing condition/trigger is rejected.
     [Fact]
     public void Gate_MissingTrigger_IsMalformed()
     {
@@ -119,14 +87,12 @@ public class StopHookHardeningTests
             StopHookCandidateGate.Assess("Keep resources tidy and dispose them.", triggerText: null).Reason);
     }
 
-    // K. Candidate with condition + action but no reason is not hard-rejected (policy downgrades).
     [Fact]
     public void Gate_ConditionActionNoReason_IsAccepted()
     {
         Assert.True(StopHookCandidateGate.ScreenText("When writing SQL, use parameterized queries.").IsAcceptable);
     }
 
-    // A clean AgentRecall behaviour convention passes the gate (contrast with prose about it).
     [Fact]
     public void Gate_CleanAgentRecallConvention_IsAccepted()
     {
@@ -134,278 +100,32 @@ public class StopHookHardeningTests
             "When reporting AgentRecall memory state, check capture-status or turn-summary and answer from actual state instead of guessing.").IsAcceptable);
     }
 
-    // ---- Explicit do-not-save (finalizer) -------------------------------------
-
-    // A. English do-not-save prevents capture and Pending creation.
+    // An off-topic aside is rejected even when it contains a keyword ("validation") that would
+    // otherwise read as a security concern — the "Off topic:" opener marks it a digression.
     [Fact]
-    public async Task A_EnglishDoNotSave_CapturesNothing()
+    public void Gate_OffTopicAsideWithKeyword_IsOffTopic()
     {
-        await using var db = new TestDatabase();
-        await Init(db);
-
-        var result = await Finalize(db, Turn(
-            prompt: "Use parameterized queries to avoid SQL injection. Don't save this."));
-
-        AssertNothingStored(result);
-        Assert.Contains(result.Skipped, s => s.SkipReason == CaptureSkipReason.ExplicitDoNotSave);
-        Assert.Empty(await Rules(db));
+        Assert.Equal(CaptureSkipReason.OffTopic,
+            StopHookCandidateGate.ScreenText(
+                "Off topic: in the registration modal we change the button according to validation " +
+                "and say the event is full and you can join the waitlist.").Reason);
     }
 
-    // AH. do-not-save + save: the most recent intent wins; ties prefer do-not-save.
-    [Fact]
-    public async Task AH_MostRecentIntentWins_AndTiesPreferDoNotSave()
+    [Theory]
+    [InlineData("Unrelated, but the dashboard loads slowly on Safari.")]
+    [InlineData("Side note: the marketing site uses a different colour palette.")]
+    [InlineData("By the way, the staging URL changed last week.")]
+    public void Gate_TangentOpeners_AreOffTopic(string text)
     {
-        // Save last → capture allowed.
-        await using (var db = new TestDatabase())
-        {
-            await Init(db);
-            var result = await Finalize(db, Turn(
-                prompt: "Don't save this. Actually, save this: when writing SQL, use parameterized queries because injection."));
-            Assert.NotEmpty(result.Captured.Concat(result.Suggested));
-        }
-
-        // Do-not-save last → nothing captured.
-        await using (var db = new TestDatabase())
-        {
-            await Init(db);
-            var result = await Finalize(db, Turn(
-                prompt: "Save this: when writing SQL use parameterized queries because injection. Actually don't save this."));
-            AssertNothingStored(result);
-        }
+        Assert.Equal(CaptureSkipReason.OffTopic, StopHookCandidateGate.ScreenText(text).Reason);
     }
 
-    // ---- Assistant prose / vague candidates (finalizer) -----------------------
-
-    // The reported bug: assistant prose becomes no rule (captured or Pending).
     [Fact]
-    public async Task ReportedBug_AssistantProse_ProducesNoRule()
+    public void Gate_TangentWordMidRule_IsAccepted()
     {
-        await using var db = new TestDatabase();
-        await Init(db);
-
-        var result = await Finalize(db, Turn(
-            assistant: "Not much. Most of this chat lives here. " +
-                       "One thing is worth saving — a workflow gotcha not in any doc."));
-
-        AssertNothingStored(result);
-        Assert.Contains(result.Skipped, s => s.SkipReason == CaptureSkipReason.AssistantProse);
-        Assert.Empty(await Rules(db));
-    }
-
-    // O. The quality gate prevents a vague Pending rule.
-    [Fact]
-    public async Task O_VagueSelfIdentified_IsNotSuggestedAsPending()
-    {
-        await using var db = new TestDatabase();
-        await Init(db);
-
-        var result = await Finalize(db, Turn(
-            assistant: "This is worth storing: this is important."));
-
-        Assert.Empty(result.Suggested);
-        Assert.Empty(result.Captured);
-    }
-
-    // ---- Explicit save still works, but never stores garbage ------------------
-
-    // L. Clean explicit save request still captures with condition/action/reason.
-    [Fact]
-    public async Task L_CleanExplicitSave_Captures()
-    {
-        await using var db = new TestDatabase();
-        await Init(db);
-
-        var result = await Finalize(db, Turn(
-            prompt: "Save this: When writing Claude Code hooks, keep JSON on stdout and status/debug " +
-                    "messages on stderr because stdout is consumed by protocol readers."));
-
-        Assert.NotEmpty(result.Captured.Concat(result.Suggested));
-        var stored = (await Rules(db)).Single();
-        Assert.Contains("stdout", stored.RuleText, StringComparison.OrdinalIgnoreCase);
-    }
-
-    // M. Explicit save with garbage text does not store raw prose.
-    [Fact]
-    public async Task M_ExplicitSaveWithGarbage_StoresNoRawProse()
-    {
-        await using var db = new TestDatabase();
-        await Init(db);
-
-        var result = await Finalize(db, Turn(
-            prompt: "Save this: one thing is worth saving, not much really."));
-
-        AssertNothingStored(result);
-        Assert.DoesNotContain(await Rules(db), r =>
-            r.RuleText.Contains("not much", StringComparison.OrdinalIgnoreCase));
-    }
-
-    // N. A clean AgentRecall behaviour convention can still be captured.
-    [Fact]
-    public async Task N_CleanAgentRecallConvention_IsCaptured()
-    {
-        await using var db = new TestDatabase();
-        await Init(db);
-
-        var result = await Finalize(db, Turn(
-            prompt: "Save this: When reporting AgentRecall memory state, check capture-status or " +
-                    "turn-summary and answer from actual state instead of guessing."));
-
-        Assert.NotEmpty(result.Captured.Concat(result.Suggested));
-    }
-
-    // Z. Existing good capture behaviour does not regress.
-    [Fact]
-    public async Task Z_StrongSelfIdentifiedLesson_StillCaptures()
-    {
-        await using var db = new TestDatabase();
-        await Init(db);
-
-        var result = await Finalize(db, Turn(
-            assistant: "One worth storing is: when validators load entities before controller execution, " +
-                       "apply the same tenant scope before emitting entity-specific messages."));
-
-        Assert.Single(result.Captured);
-    }
-
-    // ---- source/outcome-aware skips (finalizer) -------------------------------
-
-    // A command-shaped correction is read-only source material and is skipped, not stored.
-    [Fact]
-    public async Task SourceAware_CommandShapedCorrection_IsSkipped()
-    {
-        await using var db = new TestDatabase();
-        await Init(db);
-
-        var result = await Finalize(db, Turn(
-            prompt: "Use git status --porcelain to list the changed files."));
-
-        AssertNothingStored(result);
-        Assert.Contains(result.Skipped, s => s.SkipReason == CaptureSkipReason.CommandOutput);
-        Assert.Empty(await Rules(db));
-    }
-
-    // A tool-recipe-shaped correction (ALL_CAPS placeholder, "for subsequent steps") is skipped.
-    [Fact]
-    public async Task SourceAware_ToolInstructionShapedCorrection_IsSkipped()
-    {
-        await using var db = new TestDatabase();
-        await Init(db);
-
-        var result = await Finalize(db, Turn(
-            prompt: "Use the created directory path as RESULTS_DIR for subsequent steps."));
-
-        AssertNothingStored(result);
-        Assert.Contains(result.Skipped, s => s.SkipReason == CaptureSkipReason.ToolOrSkillInstruction);
-        Assert.Empty(await Rules(db));
-    }
-
-    // User technical guidance that merely starts with "Use" is NOT treated as source material:
-    // "instead of" makes it a correction, so it is not skipped as doc/tool text.
-    [Fact]
-    public async Task SourceAware_UserGuidanceStartingWithUse_IsNotSkippedAsSource()
-    {
-        await using var db = new TestDatabase();
-        await Init(db);
-
-        var result = await Finalize(db, Turn(
-            prompt: "Use the existing payment attach path instead of writing duplicate Stripe attach logic."));
-
-        Assert.DoesNotContain(result.Skipped, s =>
-            s.SkipReason is CaptureSkipReason.SourceDocument or CaptureSkipReason.ToolOrSkillInstruction
-                or CaptureSkipReason.CommandOutput or CaptureSkipReason.LogOutput);
-    }
-
-    // ---- capture-status / turn-summary / activity -----------------------------
-
-    // R. capture-status shows the skip reason clearly.
-    [Fact]
-    public async Task R_CaptureStatus_ShowsSkipReason()
-    {
-        await using var db = new TestDatabase();
-        await Init(db);
-        await Finalize(db, Turn(prompt: "Use parameterized queries. Don't save this."));
-
-        var output = new StringWriter();
-        var code = await CommandRouter.RunAsync(["capture-status", "--last-turn"], db.Services, output);
-
-        Assert.Equal(0, code);
-        Assert.Contains("do-not-save", output.ToString(), StringComparison.OrdinalIgnoreCase);
-    }
-
-    // Q. Turn Summary shows the skip reason compactly.
-    [Fact]
-    public async Task Q_TurnSummary_ShowsSkipReason()
-    {
-        await using var db = new TestDatabase();
-        await Init(db);
-        await Finalize(db, Turn(
-            assistant: "One thing is worth saving — a workflow gotcha not in any doc."));
-
-        var output = new StringWriter();
-        var code = await CommandRouter.RunAsync(["turn-summary", "--last", "--detailed"], db.Services, output);
-
-        Assert.Equal(0, code);
-        var text = output.ToString();
-        Assert.Contains("Skipped", text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("assistant prose", text, StringComparison.OrdinalIgnoreCase);
-    }
-
-    // P + AF. A skipped candidate is recorded as structured activity with a capped excerpt.
-    [Fact]
-    public async Task P_SkippedCandidate_IsRecordedAsActivity_WithCappedExcerpt()
-    {
-        await using var db = new TestDatabase();
-        await Init(db);
-
-        var originalIn = Console.In;
-        Console.SetIn(new StringReader(new JsonObject
-        {
-            ["assistant_response"] = "One thing is worth saving — a workflow gotcha not in any doc.",
-            ["cwd"] = "/repo/project",
-            ["source"] = "stop_hook",
-        }.ToJsonString()));
-        try
-        {
-            var sink = new StringWriter();
-            await CommandRouter.RunAsync(["finalize-turn", "--hook"], db.Services, sink);
-        }
-        finally
-        {
-            Console.SetIn(originalIn);
-        }
-
-        await using var scope = db.CreateScope();
-        var activities = await scope.ServiceProvider
-            .GetRequiredService<IAgentRecallActivityRepository>().ListAsync();
-        var skip = Assert.Single(activities, a => a.ActivityType == ActivityType.CandidateSkipped);
-        Assert.Contains("assistant prose", skip.Details ?? string.Empty, StringComparison.OrdinalIgnoreCase);
-        // Excerpt is capped — never a full transcript.
-        Assert.True((skip.Details ?? string.Empty).Length < 400);
-    }
-
-    // S. The Stop hook remains non-blocking (exit 0) even on a skipped turn.
-    [Fact]
-    public async Task S_StopHook_RemainsNonBlocking()
-    {
-        await using var db = new TestDatabase();
-        await Init(db);
-
-        var originalIn = Console.In;
-        Console.SetIn(new StringReader(new JsonObject
-        {
-            ["prompt"] = "Don't save this.",
-            ["cwd"] = "/repo/project",
-        }.ToJsonString()));
-        try
-        {
-            var output = new StringWriter();
-            var code = await CommandRouter.RunAsync(["finalize-turn", "--hook"], db.Services, output);
-            Assert.Equal(0, code);
-        }
-        finally
-        {
-            Console.SetIn(originalIn);
-        }
+        Assert.True(StopHookCandidateGate.ScreenText(
+            "When validating input, run every check on the same code path to avoid going off on a tangent.")
+            .IsAcceptable);
     }
 
     // ---- cleanup pending-noise ------------------------------------------------
@@ -461,7 +181,6 @@ public class StopHookHardeningTests
         Assert.Equal(0, code);
         Assert.Contains("found", output, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("--apply", output, StringComparison.Ordinal);
-        // Nothing archived on a dry run.
         Assert.DoesNotContain(await Rules(db), r => r.Status == RuleStatus.Archived);
     }
 
@@ -482,9 +201,7 @@ public class StopHookHardeningTests
         Assert.All(archived, r => Assert.Contains("turn-finalizer", r.Tags, StringComparison.Ordinal));
     }
 
-    // V. Cleanup does not archive Active rules.
-    // W. Cleanup does not archive clean Pending rules.
-    // X. Cleanup does not archive user-modified rules.
+    // V/W/X. Cleanup preserves Active, clean Pending, and user-modified rules.
     [Fact]
     public async Task VWX_Cleanup_PreservesActiveCleanAndUserModified()
     {
@@ -495,12 +212,9 @@ public class StopHookHardeningTests
         await RunAsync(db, "cleanup", "pending-noise", "--apply");
 
         var rules = await Rules(db);
-        // V: the Active rule survives.
         Assert.Contains(rules, r => r.Status == RuleStatus.Active);
-        // W: the clean Pending rule survives.
         Assert.Contains(rules, r =>
             r.Status == RuleStatus.Pending && r.RuleText.Contains("parameterized queries", StringComparison.OrdinalIgnoreCase));
-        // X: the user-modified (versioned) rule survives.
         Assert.Contains(rules, r => r.Version > 1 && r.Status != RuleStatus.Archived);
     }
 
@@ -515,25 +229,10 @@ public class StopHookHardeningTests
         var (code, output) = await RunAsync(db, "cleanup", "pending-noise", "--json");
 
         Assert.Equal(0, code);
-        var node = JsonNode.Parse(output)!;
+        var node = System.Text.Json.Nodes.JsonNode.Parse(output)!;
         Assert.True(node["matched"]!.GetValue<int>() >= 1);
         Assert.Equal(0, node["archived"]!.GetValue<int>());
         Assert.True(node["dryRun"]!.GetValue<bool>());
         Assert.NotNull(node["reasons"]);
-    }
-
-    // AG. Duplicate noise is not repeatedly created across turns.
-    [Fact]
-    public async Task AG_DuplicateNoise_IsNotRecreatedAcrossTurns()
-    {
-        await using var db = new TestDatabase();
-        await Init(db);
-
-        var turn = Turn(assistant: "One thing is worth saving — a workflow gotcha not in any doc.");
-        await Finalize(db, turn);
-        await Finalize(db, turn);
-
-        // The prose never became a rule on either turn.
-        Assert.Empty(await Rules(db));
     }
 }

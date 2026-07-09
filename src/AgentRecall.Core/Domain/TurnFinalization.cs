@@ -54,4 +54,24 @@ public sealed class TurnFinalization
     /// otherwise empty.
     /// </summary>
     public string Transcript { get; set; } = string.Empty;
+
+    /// <summary>
+    /// What decided this turn's capture — <c>SemanticCaptureJudge</c> when the judge produced a
+    /// verdict, or empty when the judge was unavailable. Persisted so <c>capture-status</c> and
+    /// <c>turn-summary</c> can report the decision source after the turn.
+    /// </summary>
+    public string DecisionSource { get; set; } = string.Empty;
+
+    /// <summary>The judge's decision name (Capture/SuggestCapture/Skip/…), or empty.</summary>
+    public string JudgeDecision { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The judge's exact capture reason name (e.g. <c>ReviewerCorrection</c>,
+    /// <c>SourceDocumentOnly</c>). Stored as a string because the judge's reason vocabulary is
+    /// richer than the domain <see cref="Capture.CaptureReason"/>.
+    /// </summary>
+    public string JudgeCaptureReason { get; set; } = string.Empty;
+
+    /// <summary>The judge's confidence for the decision.</summary>
+    public double JudgeConfidence { get; set; }
 }

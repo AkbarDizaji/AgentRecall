@@ -1838,6 +1838,11 @@ public static partial class CommandRouter
     private static object FinalizationJson(TurnFinalizationResult? result) =>
         new
         {
+            decisionSource = result?.DecisionSource,
+            decision = result?.Decision,
+            reason = result?.JudgeReason,
+            confidence = result?.JudgeConfidence,
+            targetRuleId = result?.TargetRuleId,
             captured = (result?.Captured ?? []).Select(l => new
             {
                 ruleId = l.RuleId,
