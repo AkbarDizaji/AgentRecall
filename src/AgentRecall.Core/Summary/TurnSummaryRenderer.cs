@@ -37,7 +37,7 @@ public static class TurnSummaryRenderer
         };
     }
 
-    /// <summary>The one-line aggregate: used / captured / suggested / skipped counts.</summary>
+    /// <summary>The one-line aggregate: used / auto-captured / suggested / skipped counts.</summary>
     public static string RenderCompact(TurnSummary summary, string emptyScope = "this turn")
     {
         ArgumentNullException.ThrowIfNull(summary);
@@ -49,7 +49,7 @@ public static class TurnSummaryRenderer
         var line = new StringBuilder();
         line.Append(Badge)
             .Append(" used ").Append(summary.Used.Count).Append(summary.Used.Count == 1 ? " rule" : " rules")
-            .Append(", captured ").Append(summary.Captured.Count)
+            .Append("; auto-captured ").Append(summary.Captured.Count)
             .Append(", suggested ").Append(summary.Suggested.Count)
             .Append(", skipped ").Append(summary.Skipped.Count);
 
@@ -86,9 +86,9 @@ public static class TurnSummaryRenderer
         sb.Append(DetailedHeader);
 
         // The core four are always shown (with "- none" when empty) so the summary
-        // proactively answers "did it use / capture / suggest / skip anything?".
+        // proactively answers "did it use / auto-capture / suggest / skip anything?".
         AppendRuleSection(sb, "Used", summary.Used, withApprove: false, alwaysShow: true);
-        AppendRuleSection(sb, "Captured", summary.Captured, withApprove: false, alwaysShow: true);
+        AppendRuleSection(sb, "Auto-captured", summary.Captured, withApprove: false, alwaysShow: true);
         AppendRuleSection(sb, "Suggested", summary.Suggested, withApprove: true, alwaysShow: true);
         AppendSkipSection(sb, summary.Skipped);
 

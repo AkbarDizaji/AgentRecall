@@ -167,7 +167,7 @@ public class TurnSummaryTests
         };
 
         var line = TurnSummaryRenderer.RenderCompact(summary);
-        Assert.Equal($"{Badge} used 5 rules, captured 1, suggested 0, skipped 1.", line);
+        Assert.Equal($"{Badge} used 5 rules; auto-captured 1, suggested 0, skipped 1.", line);
         Assert.DoesNotContain('\n', line); // genuinely one line when there are no errors
     }
 
@@ -188,7 +188,7 @@ public class TurnSummaryTests
         var text = TurnSummaryRenderer.RenderDetailed(summary);
         Assert.Contains(TurnSummaryRenderer.DetailedHeader, text, StringComparison.Ordinal);
         Assert.Contains("Used:", text, StringComparison.Ordinal);
-        Assert.Contains("Captured:", text, StringComparison.Ordinal);
+        Assert.Contains("Auto-captured:", text, StringComparison.Ordinal);
         Assert.Contains("Suggested:", text, StringComparison.Ordinal);
         Assert.Contains("Skipped:", text, StringComparison.Ordinal);
         Assert.Contains("Remembered:", text, StringComparison.Ordinal);
@@ -239,7 +239,7 @@ public class TurnSummaryTests
         };
 
         var line = TurnSummaryRenderer.RenderCompact(summary);
-        Assert.Contains("used 3 rules, captured 0, suggested 1, skipped 0, errors 1.", line, StringComparison.Ordinal);
+        Assert.Contains("used 3 rules; auto-captured 0, suggested 1, skipped 0, errors 1.", line, StringComparison.Ordinal);
         Assert.Contains("- Error: finalize-turn could not record capture status. See logs.", line, StringComparison.Ordinal);
     }
 
@@ -441,7 +441,7 @@ public class TurnSummaryTests
         Assert.Equal(0, code);
         Assert.Contains(TurnSummaryRenderer.DetailedHeader, output.ToString(), StringComparison.Ordinal);
         Assert.Contains("Used:", output.ToString(), StringComparison.Ordinal);
-        Assert.Contains("Captured:", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Auto-captured:", output.ToString(), StringComparison.Ordinal);
     }
 
     [Fact] // U. An empty last turn prints "no memory activity recorded".
