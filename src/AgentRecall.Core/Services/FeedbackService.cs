@@ -295,12 +295,25 @@ public sealed class FeedbackService : IFeedbackService
             Details = BuildJudgedDetails(request),
         }, cancellationToken).ConfigureAwait(false);
 
-        if (request.DomainReason != CaptureReason.None && existing.CaptureReason == CaptureReason.None)
+        var backfillReason = request.DomainReason != CaptureReason.None && existing.CaptureReason == CaptureReason.None;
+        // A judged capture that is universal promotes an equivalent existing rule to always-apply,
+        // so telling the model "always X" lands even when a matching contextual rule already exists.
+        var promoteAlwaysApply = request.Rule.AlwaysApply && !existing.AlwaysApply;
+
+        if (backfillReason || promoteAlwaysApply)
         {
-            existing.CaptureReason = request.DomainReason;
-            if (string.IsNullOrWhiteSpace(existing.EvidenceSummary) && !string.IsNullOrWhiteSpace(request.EvidenceSummary))
+            if (backfillReason)
             {
-                existing.EvidenceSummary = request.EvidenceSummary!.Trim();
+                existing.CaptureReason = request.DomainReason;
+                if (string.IsNullOrWhiteSpace(existing.EvidenceSummary) && !string.IsNullOrWhiteSpace(request.EvidenceSummary))
+                {
+                    existing.EvidenceSummary = request.EvidenceSummary!.Trim();
+                }
+            }
+
+            if (promoteAlwaysApply)
+            {
+                existing.AlwaysApply = true;
             }
 
             existing = await _rules.UpdateAsync(existing, cancellationToken).ConfigureAwait(false);

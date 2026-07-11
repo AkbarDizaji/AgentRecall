@@ -50,7 +50,8 @@ public static class TurnFinalizationFormatter
             sb.Append("\n\nCaptured:");
             foreach (var lesson in result.Captured)
             {
-                sb.Append($"\n- #{lesson.RuleId} {CategoryLabel(lesson.Category)}: {lesson.Text}");
+                var standing = lesson.AlwaysApply ? " [standing — applies every turn]" : string.Empty;
+                sb.Append($"\n- #{lesson.RuleId} {CategoryLabel(lesson.Category)}: {lesson.Text}{standing}");
             }
         }
 

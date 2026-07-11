@@ -28,6 +28,15 @@ public sealed record NormalizedRule
     /// <summary>The scope the rule belongs to (e.g. a repository name), when the judge names one.</summary>
     public string? Scope { get; init; }
 
+    /// <summary>
+    /// True when the judge classified this as a universal constraint — a style, tone, process,
+    /// or quality rule that applies to every task rather than a contextual lesson tied to a
+    /// domain. Universal rules are delivered on every turn (see
+    /// <see cref="Domain.RecallRule.AlwaysApply"/>), so one correction is enough. Preferences
+    /// are treated as universal even when the judge leaves this false.
+    /// </summary>
+    public bool AlwaysApply { get; init; }
+
     /// <summary>Free-form tags the judge attached to the rule.</summary>
     public IReadOnlyList<string> Tags { get; init; } = [];
 }

@@ -53,6 +53,7 @@ public static class CaptureJudgeDecisionMapper
                 Confidence = verdict.Confidence,
                 TargetRuleId = verdict.TargetExistingRuleId,
                 Rule = verdict.NormalizedRule,
+                AlwaysApply = ResolveAlwaysApply(verdict),
                 Reason = reason,
             };
 
@@ -123,6 +124,16 @@ public static class CaptureJudgeDecisionMapper
 
         return Outcome(JudgePersistAction.Skip, "Below the capture confidence threshold.");
     }
+
+    /// <summary>
+    /// Decides whether a stored rule is a universal constraint (applies on every turn). True
+    /// when the judge flagged the normalized rule as universal, or when it is a preference —
+    /// a durable behaviour/communication preference applies to the user everywhere, so it is
+    /// always-apply by nature even when the judge leaves the flag unset.
+    /// </summary>
+    private static bool ResolveAlwaysApply(CaptureJudgeVerdict verdict) =>
+        verdict.NormalizedRule?.AlwaysApply == true ||
+        verdict.MemoryType is JudgeMemoryType.UserPreference or JudgeMemoryType.CommunicationPreference;
 
     /// <summary>Maps the judge's memory type to the domain rule category.</summary>
     public static RuleCategory MapCategory(JudgeMemoryType type) => type switch

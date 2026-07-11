@@ -16,6 +16,12 @@ public sealed record TurnSummaryRule
 
     /// <summary>True when the rule came from a built-in seed pack (shown as a [seed] marker).</summary>
     public bool Seed { get; init; }
+
+    /// <summary>
+    /// True when the rule is a standing (always-apply) universal constraint (shown as a
+    /// [standing] marker), so the user sees a correction became a rule that applies every turn.
+    /// </summary>
+    public bool Standing { get; init; }
 }
 
 /// <summary>A skipped capture candidate in a turn summary: why it was not stored.</summary>

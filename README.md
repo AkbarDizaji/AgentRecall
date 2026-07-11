@@ -26,6 +26,11 @@ knowledge so the right guidance reaches your agent at the right moment:
   similarity is an optional extension point that stays off until an
   `IEmbeddingProvider` is configured (the default contributes nothing); see
   [Search ranking](#search-ranking).
+- **Applies universal constraints every turn.** Style, tone, and quality rules that
+  belong on *every* task (e.g. "don't leave unnecessary comments") are captured as
+  **standing rules** and injected regardless of keyword relevance — capped and
+  prominent so they reach the model when it matters, not lost below the relevance
+  floor; see [Standing Rules](#standing-rules).
 - **Resolves conflicts automatically.** When rules disagree ("use the repository
   pattern" vs "do not"), the policy engine picks the effective one by scope,
   explicit supersede, priority, recency, then confidence.
@@ -374,6 +379,89 @@ agentrecall rules explain <id>   # shows Type: CommunicationPreference, Captured
 Preferences are recalled alongside other rules when relevant, and captured preferences
 appear in the activity log and Turn Memory Summary (*"🧠 AgentRecall: captured 1 user
 preference."*).
+
+---
+
+## Standing Rules
+
+Most rules are **contextual**: AgentRecall retrieves them by relevance to the task in
+front of you (keyword, semantic, changed-code, and task-type match, weighted by
+confidence). That works well for "scope validators to the tenant" — but it structurally
+misses **universal constraints** like *"don't leave unnecessary comments"* or *"always run
+the formatter"*. A universal rule shares no keyword with "add a date parser", so it scores
+below the relevance floor and never gets injected — exactly on the turn it should apply.
+
+A **standing rule** solves this. It carries the `AlwaysApply` flag, which makes AgentRecall
+deliver it on **every** task rather than only when it matches — bypassing the relevance
+floor and surfacing as **must-follow** guidance (prohibitions surface as warnings).
+
+### `AlwaysApply` vs. `ScopeLevel`
+
+These are **orthogonal** — a rule has both:
+
+- **`ScopeLevel`** answers *where* a rule is true — `Global`, `Language`, `Repository`, a
+  path. It bounds which projects/files a rule belongs to and drives ranking specificity.
+- **`AlwaysApply`** answers *how* a rule is delivered — as a standing constraint injected
+  every turn, or as a contextual rule retrieved by relevance.
+
+A standing rule is typically `Global` scope (it applies everywhere), but the two are
+independent: `AlwaysApply` is a delivery property, **not** a new scope level.
+
+### How a rule becomes standing
+
+- **Preferences are standing by default.** A `UserPreference` or `CommunicationPreference`
+  applies to you everywhere, so it is captured as standing automatically — no flag needed.
+  (See [User Preferences](#user-preferences).)
+- **The capture judge flags a universal constraint.** When a correction is a style, tone,
+  process, or quality rule that applies to every task, the judge marks it `always_apply` and
+  it is captured standing.
+- **The repeated-correction backstop promotes it.** If you keep making the *same*
+  correction, AgentRecall promotes that rule to standing on its own — you should not have to
+  repeat yourself to make a lesson stick.
+
+Standing rules are marked `[standing]` in the Turn Memory Summary and
+`[standing — applies every turn]` on capture, so you can see when a correction became one.
+
+### The band is capped at 5
+
+Always-injecting is only useful if it stays **few and prominent** — a rule that appears on
+every turn becomes wallpaper the model stops reading, which is the same failure as a bloated
+`CLAUDE.md`. So the standing band is **capped at the 5 highest-confidence standing rules per
+prompt**. Any beyond the cap fall back to ordinary relevance gating (they are not dropped —
+they simply compete on relevance like everything else). Keep the standing set small and
+deliberate.
+
+### Project and contextual rules are unaffected
+
+Non-standing rules work exactly as before: they are retrieved by relevance, respect their
+`ScopeLevel`, and never force their way into a turn they do not match. Standing rules take
+their reserved slots first; the rest of the token budget is filled by the usual
+relevance-ranked rules. A project-scoped convention still applies only in its repository.
+
+### Good vs. overbroad standing rules
+
+Standing rules earn their always-on cost by being **universal and actionable**. Good ones:
+
+- *"Keep comments minimal and purposeful; don't restate what the code already says."*
+- *"Run the formatter before finishing a change."*
+- *"Answer briefly; add examples only when they help."* (a preference — standing by default)
+- *"Prefer descriptive names over abbreviations."*
+
+Bad standing rules are **contextual guidance masquerading as universal** — they should be
+ordinary relevance-gated rules, not always-on:
+
+- *"Use `Money` value objects in the billing service."* → contextual: only when touching
+  billing. Let relevance surface it.
+- *"In `PaymentController`, validate the tenant before charging."* → project/path-specific:
+  scope it to the repository, don't make it standing.
+- *"Always write the most performant code possible."* → vague and unactionable; it adds
+  noise to every turn without changing behaviour.
+- *"Never use inheritance."* → an overbroad absolute; the useful, non-standing form is
+  *"prefer composition over inheritance when designing class hierarchies."*
+
+Rule of thumb: if it only applies to some tasks, files, or projects, keep it contextual and
+let ranking do its job. Reserve standing for the handful of constraints that genuinely apply
+to **every** turn.
 
 ---
 

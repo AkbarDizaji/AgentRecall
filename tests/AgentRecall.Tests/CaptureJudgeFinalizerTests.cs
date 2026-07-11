@@ -520,6 +520,83 @@ public class CaptureJudgeFinalizerTests
         Assert.Equal(0.88, last.JudgeConfidence);
     }
 
+    // Standing-1. A preference is stored as an always-apply rule at Global scope.
+    [Fact]
+    public async Task Standing_Preference_IsStoredAlwaysApplyGlobal()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        var pref = JudgeVerdicts.Rule(
+            title: "Answer briefly", condition: "when answering the user",
+            action: "answer briefly with examples when helpful", because: "the user prefers concise replies",
+            scope: "user", avoid: null);
+        await Finalize(db, Turn(Capture(
+            JudgeMemoryType.CommunicationPreference, JudgeCaptureReason.UserPreference, 0.9, pref)));
+
+        var rule = Assert.Single(await Rules(db));
+        Assert.True(rule.AlwaysApply);
+        Assert.Equal(ScopeLevel.Global, rule.ScopeLevel);
+    }
+
+    // Standing-2. The judge's explicit always_apply flag stores an engineering rule as standing.
+    [Fact]
+    public async Task Standing_AlwaysApplyFlag_IsStoredStanding()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        var universal = JudgeVerdicts.Rule(
+            title: "No unnecessary comments",
+            condition: "when writing or editing any code",
+            action: "omit comments that restate what the code already says",
+            because: "redundant comments add noise and drift out of date",
+            scope: "workspace", avoid: "obvious restating comments") with { AlwaysApply = true };
+        await Finalize(db, Turn(Capture(
+            JudgeMemoryType.EngineeringLesson, JudgeCaptureReason.UserCorrection, 0.9, universal)));
+
+        Assert.True(Assert.Single(await Rules(db)).AlwaysApply);
+    }
+
+    // Standing-3. Backstop: a repeated correction reinforcing an existing rule promotes it to standing.
+    [Fact]
+    public async Task Standing_RepeatedCorrection_PromotesExistingRuleToStanding()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        int existingId;
+        await using (var scope = db.CreateScope())
+        {
+            var feedback = scope.ServiceProvider.GetRequiredService<IFeedbackService>();
+            var seeded = await feedback.AddAsync(new FeedbackInput
+            {
+                Task = "work",
+                Feedback = "Do not leave unnecessary comments.",
+                ScopeLevel = ScopeLevel.Repository,
+                ScopeValue = "project",
+                AutoApprove = true,
+            });
+            existingId = seeded.Rule!.Id;
+            Assert.False(seeded.Rule.AlwaysApply); // not standing when first captured
+        }
+
+        var repeated = new CaptureJudgeVerdict
+        {
+            Decision = JudgeDecision.ReinforceExisting,
+            MemoryType = JudgeMemoryType.EngineeringLesson,
+            CaptureReason = JudgeCaptureReason.RepeatedMistake,
+            Confidence = 0.85,
+            TargetExistingRuleId = existingId,
+            DedupeNotes = "same unnecessary-comments correction recurred",
+        };
+        var result = await Finalize(db, Turn(repeated));
+
+        Assert.Contains(existingId, result.Duplicates);
+        var rule = Assert.Single(await Rules(db));
+        Assert.True(rule.AlwaysApply); // promoted by the repeated-correction backstop
+    }
+
     private static async Task<(int Code, string Output)> RunCli(TestDatabase db, JsonObject payload, params string[] args)
     {
         var originalIn = Console.In;

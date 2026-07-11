@@ -212,6 +212,18 @@ public class TurnSummaryTests
         Assert.Contains("…and 2 more", text, StringComparison.Ordinal);
     }
 
+    [Fact] // A standing (always-apply) captured rule renders a [standing] marker.
+    public void Detailed_StandingRule_ShowsMarker()
+    {
+        var summary = new TurnSummary
+        {
+            Captured = [new TurnSummaryRule { Id = 7, Title = "Keep comments minimal", Standing = true }],
+        };
+
+        var text = TurnSummaryRenderer.RenderDetailed(summary);
+        Assert.Contains("#7 Keep comments minimal [standing]", text, StringComparison.Ordinal);
+    }
+
     [Fact] // U. Empty summary renders the "no memory activity" message.
     public void Empty_RendersNoActivityMessage()
     {

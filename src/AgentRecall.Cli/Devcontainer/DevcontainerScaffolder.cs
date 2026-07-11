@@ -108,6 +108,12 @@ public static class DevcontainerScaffolder
           it into a clean rule.
         - **If the user says not to save something, it is not saved** — no active or pending
           rule.
+        - **A universal constraint becomes a standing rule.** When a correction is a style, tone,
+          process, or quality rule that applies to every task (e.g. "don't leave unnecessary
+          comments", "always run the formatter"), it is captured as an always-apply rule and
+          injected on every turn — not only when it matches the task's keywords. Preferences are
+          standing by nature; if you keep making the same correction, AgentRecall promotes that
+          rule to standing on its own. Standing rules are marked `[standing]` in the summary.
         - **Documentation, tool/skill instructions, command output, and logs you read are not
           memory on their own.** They become a rule only when the turn pairs them with an
           observed failure, a correction, or an explicit save — a documentation-backed

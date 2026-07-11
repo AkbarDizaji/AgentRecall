@@ -46,6 +46,9 @@ public sealed class AgentRecallDbContext : DbContext
             entity.Property(e => e.Trigger).IsRequired();
             entity.Property(e => e.Priority).HasDefaultValue(0);
             entity.Property(e => e.Deprecated).HasDefaultValue(false);
+            // Universal-constraint delivery flag. Stored with a default so the additive schema
+            // reconciler can backfill the column on databases created before always-apply rules.
+            entity.Property(e => e.AlwaysApply).HasDefaultValue(false);
             entity.HasIndex(e => new { e.ScopeLevel, e.ScopeValue });
             entity.HasIndex(e => e.Status);
             entity.HasIndex(e => e.Deprecated);

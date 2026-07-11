@@ -55,6 +55,12 @@ public sealed record CaptureJudgeOutcome
     /// <summary>The normalized rule to store, when the action stores one.</summary>
     public NormalizedRule? Rule { get; init; }
 
+    /// <summary>
+    /// True when the stored rule is a universal constraint delivered on every turn (see
+    /// <see cref="Domain.RecallRule.AlwaysApply"/>), rather than a contextual lesson.
+    /// </summary>
+    public bool AlwaysApply { get; init; }
+
     /// <summary>A short, human-readable account of the decision (why stored/skipped).</summary>
     public string Reason { get; init; } = string.Empty;
 }

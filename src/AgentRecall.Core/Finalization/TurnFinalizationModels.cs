@@ -51,6 +51,12 @@ public sealed record FinalizedLesson
     public required string ScopeLabel { get; init; }
     public double Confidence { get; init; }
 
+    /// <summary>
+    /// True when the rule is a standing (always-apply) universal constraint, surfaced so the
+    /// user sees the correction became a rule that applies on every turn.
+    /// </summary>
+    public bool AlwaysApply { get; init; }
+
     /// <summary>An optional note (e.g. why it was suggested rather than captured).</summary>
     public string? Note { get; init; }
 }

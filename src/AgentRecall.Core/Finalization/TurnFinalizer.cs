@@ -315,7 +315,7 @@ public sealed class TurnFinalizer : ITurnFinalizer
         CancellationToken cancellationToken)
     {
         if (outcome.TargetRuleId is not { } targetId ||
-            await _rules.GetAsync(targetId, cancellationToken).ConfigureAwait(false) is null)
+            await _rules.GetAsync(targetId, cancellationToken).ConfigureAwait(false) is not { } target)
         {
             skipped.Add(new SkippedLesson { Reason = "Reinforcement target no longer exists; nothing stored." });
             return summary;
@@ -323,10 +323,24 @@ public sealed class TurnFinalizer : ITurnFinalizer
 
         await _lifecycle.ReinforceAsync(targetId, RuleLifecycleService.ReinforcementDelta, cancellationToken)
             .ConfigureAwait(false);
+
+        // Repeated-correction backstop: the same mistake recurred against a rule that already
+        // exists, so relevance-gated delivery was not enough — promote it to always-apply so it
+        // is surfaced on every turn from now on. A no-op when it is already always-apply.
+        var promoted = false;
+        if (outcome.DomainReason == CaptureReason.RepeatedCorrection && !target.AlwaysApply)
+        {
+            target.AlwaysApply = true;
+            await _rules.UpdateAsync(target, cancellationToken).ConfigureAwait(false);
+            promoted = true;
+        }
+
         duplicates.Add(targetId);
         skipped.Add(new SkippedLesson
         {
-            Reason = $"Reinforced existing rule #{targetId}.",
+            Reason = promoted
+                ? $"Reinforced existing rule #{targetId} and promoted it to a standing rule (repeated correction)."
+                : $"Reinforced existing rule #{targetId}.",
             DuplicateOfRuleId = targetId,
         });
         return summary with { TargetRuleId = targetId };
@@ -350,11 +364,16 @@ public sealed class TurnFinalizer : ITurnFinalizer
     {
         var normalized = outcome.Rule ?? new NormalizedRule();
 
-        // A preference applies to the user everywhere, so it is stored at Global scope; every
-        // other rule keeps the turn's derived repository scope.
-        var isPreference = outcome.Category is RuleCategory.UserPreference or RuleCategory.CommunicationPreference;
-        var scopeLevel = isPreference ? ScopeLevel.Global : input.ScopeLevel;
-        var scopeValue = isPreference ? string.Empty : input.ScopeValue ?? string.Empty;
+        // A repeated mistake is the backstop: if the same correction recurred, the rule the
+        // judge captured earlier plainly did not stick, so promote this one to always-apply.
+        var alwaysApply = outcome.AlwaysApply || outcome.DomainReason == CaptureReason.RepeatedCorrection;
+
+        // A rule that applies everywhere — a preference or any always-apply constraint — is
+        // stored at Global scope; every other rule keeps the turn's derived repository scope.
+        var appliesEverywhere =
+            alwaysApply || outcome.Category is RuleCategory.UserPreference or RuleCategory.CommunicationPreference;
+        var scopeLevel = appliesEverywhere ? ScopeLevel.Global : input.ScopeLevel;
+        var scopeValue = appliesEverywhere ? string.Empty : input.ScopeValue ?? string.Empty;
 
         return new RecallRule
         {
@@ -367,6 +386,7 @@ public sealed class TurnFinalizer : ITurnFinalizer
             TechnicalContext = Trim(normalized.Because),
             Tags = BuildTags(normalized.Tags),
             Confidence = outcome.Confidence,
+            AlwaysApply = alwaysApply,
             ScopeLevel = scopeLevel,
             ScopeValue = scopeValue,
         };
@@ -519,6 +539,7 @@ public sealed class TurnFinalizer : ITurnFinalizer
             Text = rule.RuleText,
             ScopeLabel = ScopeLabel(rule.ScopeLevel, rule.ScopeValue),
             Confidence = rule.Confidence,
+            AlwaysApply = rule.AlwaysApply,
             Note = note,
         };
 

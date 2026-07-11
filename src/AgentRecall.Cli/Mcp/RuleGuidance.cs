@@ -22,6 +22,12 @@ public sealed record RuleGuidance
     public required double Confidence { get; init; }
     public required string Status { get; init; }
 
+    /// <summary>
+    /// True when this is a standing rule — a universal constraint that applies to every task,
+    /// not only when it matches the current one. Omitted when false.
+    /// </summary>
+    public bool? AlwaysApply { get; init; }
+
     public static RuleGuidance From(RecallRule rule) => new()
     {
         Id = rule.Id,
@@ -33,6 +39,7 @@ public sealed record RuleGuidance
         AppliesTo = BuildAppliesTo(rule),
         Confidence = Math.Round(rule.Confidence, 2),
         Status = rule.Status.ToString(),
+        AlwaysApply = rule.AlwaysApply ? true : null,
     };
 
     private static string BuildReason(RecallRule rule)

@@ -27,6 +27,13 @@ public sealed class ContextInjectionService : IContextInjectionService
     private const double MustFollowFloor = 0.15;
 
     /// <summary>
+    /// Most always-apply (universal-constraint) rules injected per prompt. This band bypasses the
+    /// relevance floor so a standing rule reaches the model on turns it shares no keywords with;
+    /// the cap keeps it small and salient so it never degrades into an ignored wall of guidance.
+    /// </summary>
+    private const int AlwaysApplyCap = 5;
+
+    /// <summary>
     /// Score multiplier applied to built-in seed rules so a locally learned rule of equal
     /// relevance always ranks above generic starter guidance. Repeated successful local use
     /// raises a seed rule's confidence, which lifts its score back up over time.
@@ -102,14 +109,43 @@ public sealed class ContextInjectionService : IContextInjectionService
         var all = await _rules.ListAsync(cancellationToken).ConfigureAwait(false);
         var pool = all.Where(RuleStatusSets.IsEffective).ToList();
 
-        // Score every rule; keep those clearing the relevance floor.
+        // Score every rule; keep those clearing the relevance floor. Always-apply rules are a
+        // separate universal-constraint band: they are kept even below the floor so they reach
+        // the model on turns that share no keywords with them (a style/quality rule matches
+        // every task via no specific keyword). The band is capped so it never floods the context.
         var assessments = new Dictionary<int, Assessment>();
+        var alwaysApply = new List<Assessment>();
         foreach (var rule in pool)
         {
             var assessment = Assess(rule, taskTokens, domainTokens, concepts, request);
-            if (assessment.Relevance >= RelevanceFloor)
+            if (assessment.AlwaysApply)
+            {
+                alwaysApply.Add(assessment);
+            }
+            else if (assessment.Relevance >= RelevanceFloor)
             {
                 assessments[rule.Id] = assessment;
+            }
+        }
+
+        // Keep the highest-trust always-apply rules as the standing band (capped). Any beyond the
+        // cap fall back to ordinary relevance gating, so the band stays small and the rest do not
+        // silently vanish — they compete on relevance like everything else.
+        var rankedAlwaysApply = alwaysApply
+            .OrderByDescending(a => a.Rule.Confidence)
+            .ThenByDescending(a => a.Score)
+            .ThenBy(a => a.Rule.Id)
+            .ToList();
+        foreach (var a in rankedAlwaysApply.Take(AlwaysApplyCap))
+        {
+            assessments[a.Rule.Id] = a;
+        }
+
+        foreach (var a in rankedAlwaysApply.Skip(AlwaysApplyCap))
+        {
+            if (a.Relevance >= RelevanceFloor)
+            {
+                assessments[a.Rule.Id] = a with { AlwaysApply = false };
             }
         }
 
@@ -142,7 +178,10 @@ public sealed class ContextInjectionService : IContextInjectionService
         }
 
         ranked = ranked
-            .OrderByDescending(a => a.Score)
+            // Standing (always-apply) rules rank first so they claim their reserved slots before
+            // relevance-ranked rules compete for the remaining token budget.
+            .OrderByDescending(a => a.AlwaysApply)
+            .ThenByDescending(a => a.Score)
             .ThenByDescending(a => a.Rule.Confidence)
             .ThenBy(a => a.Rule.Id)
             .ToList();
@@ -388,7 +427,7 @@ public sealed class ContextInjectionService : IContextInjectionService
             reasons.Add("seed rule (starter guidance)");
         }
 
-        return new Assessment(rule, relevance, score, reasons, projectScoped, highTrust, IsProhibition(rule), false, isSeed);
+        return new Assessment(rule, relevance, score, reasons, projectScoped, highTrust, IsProhibition(rule), false, isSeed, rule.AlwaysApply);
     }
 
     /// <summary>
@@ -490,14 +529,18 @@ public sealed class ContextInjectionService : IContextInjectionService
     {
         var importance = a.Prohibition
             ? RuleImportance.Warning
-            // Unapproved (Pending) rules, and seed rules, are surfaced but never as
-            // must-follow: seeds are starter guidance, not project truth.
-            : !a.Unapproved && !a.IsSeed && (a.HighTrust || a.ProjectScoped) && a.Score >= MustFollowFloor
+            // A standing (always-apply) rule is must-follow regardless of relevance score — it is a
+            // universal constraint, not a task match. Unapproved (Pending) rules and seed rules are
+            // surfaced but never as must-follow: seeds are starter guidance, not project truth.
+            : !a.Unapproved && !a.IsSeed && (a.AlwaysApply || a.HighTrust || a.ProjectScoped) && (a.AlwaysApply || a.Score >= MustFollowFloor)
                 ? RuleImportance.MustFollow
                 : RuleImportance.Suggested;
 
-        var explanation = a.Reasons.Count > 0
-            ? $"{string.Join("; ", a.Reasons)} (score {a.Score:0.00})."
+        var reasons = a.AlwaysApply
+            ? a.Reasons.Prepend("standing rule — applies to every task").ToList()
+            : a.Reasons;
+        var explanation = reasons.Count > 0
+            ? $"{string.Join("; ", reasons)} (score {a.Score:0.00})."
             : $"Relevant to the task (score {a.Score:0.00}).";
 
         return new InjectedRule
@@ -549,5 +592,6 @@ public sealed class ContextInjectionService : IContextInjectionService
         bool HighTrust,
         bool Prohibition,
         bool Unapproved,
-        bool IsSeed);
+        bool IsSeed,
+        bool AlwaysApply);
 }

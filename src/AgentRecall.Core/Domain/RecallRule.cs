@@ -81,6 +81,18 @@ public sealed class RecallRule
     /// </summary>
     public bool Deprecated { get; set; }
 
+    /// <summary>
+    /// When true, this rule is a universal constraint that applies to every task, not a
+    /// contextual lesson retrieved by relevance. It bypasses the relevance floor during
+    /// injection and is delivered as a small, capped, high-salience band so it reaches the
+    /// model on turns where it shares no keywords with the task (e.g. "no unnecessary
+    /// comments"). Orthogonal to <see cref="ScopeLevel"/>: an always-apply rule is still
+    /// scoped (typically <see cref="ScopeLevel.Global"/>). Defaults to false so existing rules
+    /// keep their relevance-gated behaviour. Set by the capture judge (a preference, or an
+    /// explicit universal flag) or earned via the repeated-correction backstop.
+    /// </summary>
+    public bool AlwaysApply { get; set; }
+
     public ScopeLevel ScopeLevel { get; set; } = ScopeLevel.Global;
 
     /// <summary>The scope identifier (e.g. repo name, language, file path).</summary>

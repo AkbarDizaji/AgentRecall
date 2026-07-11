@@ -133,6 +133,11 @@ public static class TurnSummaryRenderer
                 sb.Append(" [seed]");
             }
 
+            if (rule.Standing)
+            {
+                sb.Append(" [standing]");
+            }
+
             if (withApprove)
             {
                 sb.Append("\n  Approve: `agentrecall rules approve ").Append(rule.Id).Append('`');

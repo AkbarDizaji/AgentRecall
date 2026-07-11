@@ -253,4 +253,28 @@ public class CaptureJudgeTests
         Assert.Equal("Capture", outcome.JudgeDecision);
         Assert.Equal(CaptureReason.AcceptedReviewComment, outcome.DomainReason);
     }
+
+    // ---- Always-apply classification ------------------------------------------
+
+    [Fact] // The judge's explicit always_apply flag makes the outcome standing.
+    public void Mapper_AlwaysApplyFlag_MarksOutcomeStanding()
+    {
+        var rule = SoundRule() with { AlwaysApply = true };
+        Assert.True(Map(Verdict(rule: rule)).AlwaysApply);
+    }
+
+    [Theory] // A preference is standing by nature, even without the flag.
+    [InlineData(JudgeMemoryType.UserPreference)]
+    [InlineData(JudgeMemoryType.CommunicationPreference)]
+    public void Mapper_Preference_IsAlwaysApply(JudgeMemoryType type)
+    {
+        var outcome = Map(Verdict(memoryType: type, reason: JudgeCaptureReason.UserPreference, rule: SoundRule()));
+        Assert.True(outcome.AlwaysApply);
+    }
+
+    [Fact] // An ordinary engineering lesson is not standing unless flagged.
+    public void Mapper_OrdinaryLesson_IsNotAlwaysApply()
+    {
+        Assert.False(Map(Verdict(rule: SoundRule())).AlwaysApply);
+    }
 }

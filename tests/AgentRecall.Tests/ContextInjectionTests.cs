@@ -24,7 +24,8 @@ public class ContextInjectionTests
         RuleStatus status = RuleStatus.Active,
         ScopeLevel scopeLevel = ScopeLevel.Global,
         string scopeValue = "",
-        string mistake = "")
+        string mistake = "",
+        bool alwaysApply = false)
     {
         await using var scope = db.CreateScope();
         var repo = scope.ServiceProvider.GetRequiredService<IRecallRuleRepository>();
@@ -32,7 +33,7 @@ public class ContextInjectionTests
         {
             Trigger = trigger, RuleText = ruleText, Mistake = mistake, TechnicalContext = "",
             Tags = tags, Confidence = confidence, Status = status,
-            ScopeLevel = scopeLevel, ScopeValue = scopeValue,
+            ScopeLevel = scopeLevel, ScopeValue = scopeValue, AlwaysApply = alwaysApply,
         });
         return rule.Id;
     }
@@ -385,5 +386,48 @@ public class ContextInjectionTests
         Assert.False(string.IsNullOrWhiteSpace(mustFollow[0]!["explanation"]!.GetValue<string>()));
         Assert.NotNull(mustFollow[0]!["match_reasons"]);
         Assert.True(result["tokens_used"]!.GetValue<int>() > 0);
+    }
+
+    // ---- Always-apply (standing) rules ----------------------------------------
+
+    [Fact] // A standing rule reaches the model even when it shares no keyword with the task.
+    public async Task AlwaysApplyRule_IsInjectedDespiteZeroRelevance()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        // No token here overlaps with the date-parsing task below (non-prohibition phrasing, so it
+        // buckets as must-follow rather than a warning).
+        var standingId = await Seed(db, "Keep comments minimal and purposeful.",
+            tags: "style", confidence: 0.7, alwaysApply: true);
+        // A non-standing rule with the same (zero) relevance must NOT be injected.
+        await Seed(db, "Prefer composition over inheritance.", tags: "design", confidence: 0.7);
+
+        var result = await Build(db, new ContextRequest { Task = "add a function to parse ISO dates" });
+
+        var injectedIds = result.All.Select(i => i.Rule.Id).ToList();
+        Assert.Contains(standingId, injectedIds);
+        Assert.Single(injectedIds); // only the standing rule cleared, the irrelevant one did not
+        Assert.Contains(result.MustFollow, i => i.Rule.Id == standingId);
+        Assert.Contains(result.MustFollow, i => i.Explanation.Contains("standing rule", StringComparison.Ordinal));
+    }
+
+    [Fact] // The standing band is capped so it cannot flood the context.
+    public async Task AlwaysApplyBand_IsCappedAtFive()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        for (var i = 0; i < 8; i++)
+        {
+            await Seed(db, $"Standing constraint number {i} about zzzptmatter.",
+                confidence: 0.5 + i * 0.05, alwaysApply: true);
+        }
+
+        var result = await Build(db, new ContextRequest { Task = "add a function to parse ISO dates" });
+
+        // At most five standing rules are delivered as the reserved band; the rest fall back to
+        // relevance gating and (sharing no keywords) drop out.
+        Assert.Equal(5, result.All.Count());
     }
 }

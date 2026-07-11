@@ -145,6 +145,7 @@ public static class TurnPayload
             Avoid = AsString(rule["avoid"]),
             Because = AsString(rule["because"]),
             Scope = AsString(rule["scope"]),
+            AlwaysApply = AsBool(rule["always_apply"]) ?? false,
             Tags = tags,
         };
     }
