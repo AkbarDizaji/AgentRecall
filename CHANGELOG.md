@@ -4,6 +4,35 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-07-11
+
+### Added
+- **Standing (always-apply) rules.** A rule can now carry an `AlwaysApply` delivery flag that makes
+  AgentRecall inject it on **every** task rather than only when it matches by relevance. This fixes
+  universal constraints — style, tone, process, and quality rules such as "don't leave unnecessary
+  comments" — being captured correctly yet never surfaced, because relevance retrieval filters out
+  any rule that shares no keyword with the task. `AlwaysApply` is orthogonal to `ScopeLevel`: it
+  governs *how* a rule is delivered (standing vs. relevance-gated), not *where* it is true.
+  - Standing rules bypass the relevance floor and are delivered as a small, capped (5 per prompt),
+    high-salience **must-follow** band ordered ahead of relevance-ranked rules; prohibitions surface
+    as warnings. Rules beyond the cap fall back to ordinary relevance gating, so the band stays few
+    and prominent instead of degrading into ignored guidance.
+  - Universality is classified at capture time, so one correction is enough: the semantic capture
+    judge flags a universal constraint via `always_apply`, preferences (`UserPreference` /
+    `CommunicationPreference`) are standing by nature, and a repeated correction promotes an
+    existing rule to standing as a backstop.
+  - Standing rules are surfaced on capture (`[standing — applies every turn]`), in the Turn Memory
+    Summary (`[standing]`), and in the model-facing rule guidance (`always_apply`).
+  - Contextual and project-scoped rules are unchanged: still retrieved by relevance and bound to
+    their scope. The `AlwaysApply` column is backfilled on existing databases by the additive schema
+    reconciler. See the README "Standing Rules" section for guidance on good vs. overbroad standing
+    rules.
+
+### Changed
+- The compact Turn Memory Summary now labels AgentRecall's own end-of-turn capture as
+  `auto-captured` (previously `captured`), so the count no longer reads as "nothing was saved this
+  turn" when the model saved rules directly via the MCP tools mid-turn.
+
 ## [2.0.0] - 2026-07-09
 
 ### Breaking
