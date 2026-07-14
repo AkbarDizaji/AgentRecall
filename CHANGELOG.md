@@ -4,6 +4,26 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-07-14
+
+### Added
+- **PreToolUse recall hook.** AgentRecall now injects rules at the moment a file is written, keyed
+  on the file's path and the code being written — not only on the turn's opening prompt. This closes
+  the gap where a high-level request (e.g. "implement login feature") carries no signal that a
+  matching file is coming, so a convention scoped to that file was never surfaced by prompt-time
+  recall alone. Recall keyed on the actual artifact surfaces it right before the write.
+  - The hook is deterministic: Claude Code runs it before every file-mutating tool call, so recall
+    no longer depends on the model choosing to call an MCP tool. It is scoped via a matcher to the
+    file-mutating tools (`Edit`, `Write`, `MultiEdit`), so it is never spawned for reads, searches,
+    or shell commands.
+  - It is targeted, not always-on: the request is built from the file path and a bounded snippet of
+    the new code, and when no rule is relevant to that file the hook injects nothing. Context is
+    delivered through `hookSpecificOutput.additionalContext` (the only PreToolUse channel the model
+    sees), and code extraction tolerates both the tool payload shapes a host may send.
+  - `agentrecall hook pre-tool-use` is the new CLI entry point, and `agentrecall devcontainer init`
+    wires the hook into `.claude/settings.json` automatically alongside the existing
+    UserPromptSubmit (recall) and Stop (capture) hooks.
+
 ## [2.1.0] - 2026-07-11
 
 ### Added

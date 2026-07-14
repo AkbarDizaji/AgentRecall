@@ -75,6 +75,26 @@ public static class DevcontainerScaffolder
     /// </summary>
     public const string CaptureHookEvent = "Stop";
 
+    /// <summary>The invariant tail that identifies the pre-tool-use recall hook.</summary>
+    public const string PreToolUseHookMarker = "agentrecall hook pre-tool-use";
+
+    /// <summary>
+    /// The command Claude Code runs before a file-writing tool so AgentRecall injects the
+    /// rules relevant to the file about to be written — recall keyed on the artifact rather
+    /// than the turn's opening prompt, which closes the gap where a high-level request (e.g.
+    /// "implement login feature") carries no signal that a matching file is coming.
+    /// </summary>
+    public const string PreToolUseHookCommand = HookPathPrefix + PreToolUseHookMarker;
+
+    /// <summary>The Claude Code event the pre-tool-use hook binds to.</summary>
+    public const string PreToolUseHookEvent = "PreToolUse";
+
+    /// <summary>
+    /// The tool matcher the pre-tool-use hook binds to: only the file-mutating tools, so the
+    /// hook is never spawned for reads, searches, or shell commands.
+    /// </summary>
+    public const string PreToolUseHookMatcher = "Edit|Write|MultiEdit";
+
     /// <summary>Path, relative to the project root, of the agent guidance file.</summary>
     public const string ClaudeMdRelativePath = "CLAUDE.md";
 
@@ -559,6 +579,7 @@ public static class DevcontainerScaffolder
         // applied — regardless of whether a dev container is scaffolded.
         var hookOutcome = EnsureUserPromptSubmitHook(projectRoot);
         var captureHookOutcome = EnsureCaptureHook(projectRoot);
+        var preToolUseHookOutcome = EnsurePreToolUseHook(projectRoot);
 
         // Append standing guidance so the agent recalls rules and captures accepted
         // review comments by default.
@@ -582,6 +603,7 @@ public static class DevcontainerScaffolder
                 ManualSteps: DeferredManifestInstructions,
                 HookOutcome: hookOutcome,
                 CaptureHookOutcome: captureHookOutcome,
+                PreToolUseHookOutcome: preToolUseHookOutcome,
                 ClaudeSettingsPath: ClaudeSettingsRelativePath,
                 GuidanceOutcome: guidanceOutcome,
                 ClaudeMdPath: ClaudeMdRelativePath);
@@ -610,6 +632,7 @@ public static class DevcontainerScaffolder
             ManualSteps: jsonExisted ? ExistingManifestInstructions : null,
             HookOutcome: hookOutcome,
             CaptureHookOutcome: captureHookOutcome,
+            PreToolUseHookOutcome: preToolUseHookOutcome,
             ClaudeSettingsPath: ClaudeSettingsRelativePath,
             GuidanceOutcome: guidanceOutcome,
             ClaudeMdPath: ClaudeMdRelativePath);
@@ -692,7 +715,18 @@ public static class DevcontainerScaffolder
     /// <c>agentrecall hook capture</c> registration is upgraded in place to the finalizer.
     /// </summary>
     public static HookSetupOutcome EnsureCaptureHook(string projectRoot) =>
-        EnsureHook(projectRoot, CaptureHookEvent, FinalizeTurnHookCommand, FinalizeTurnMarker, CaptureHookMarker);
+        EnsureHook(projectRoot, CaptureHookEvent, FinalizeTurnHookCommand, FinalizeTurnMarker,
+            legacyMarkers: [CaptureHookMarker]);
+
+    /// <summary>
+    /// Ensures the project's <c>.claude/settings.json</c> registers the AgentRecall
+    /// pre-tool-use (<c>PreToolUse</c>) hook, scoped to the file-mutating tools, so rules
+    /// relevant to the file about to be written are injected at the moment it is written.
+    /// Creating or merging without disturbing other settings, and idempotent like the
+    /// other hooks.
+    /// </summary>
+    public static HookSetupOutcome EnsurePreToolUseHook(string projectRoot) =>
+        EnsureHook(projectRoot, PreToolUseHookEvent, PreToolUseHookCommand, PreToolUseHookMarker, matcher: PreToolUseHookMatcher);
 
     /// <summary>
     /// Registers <paramref name="command"/> under the given Claude Code
@@ -709,7 +743,8 @@ public static class DevcontainerScaffolder
         string eventName,
         string command,
         string marker,
-        params string[] legacyMarkers)
+        string? matcher = null,
+        string[]? legacyMarkers = null)
     {
         var path = Path.Combine(projectRoot, ClaudeSettingsRelativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -770,7 +805,7 @@ public static class DevcontainerScaffolder
         // If AgentRecall already registered this hook in any form, upgrade it in place
         // (e.g. an older PATH-less command) instead of appending a second, duplicate
         // matcher — which would leave the broken command still firing alongside the fix.
-        var markers = new[] { marker }.Concat(legacyMarkers).ToArray();
+        var markers = new[] { marker }.Concat(legacyMarkers ?? []).ToArray();
         var existingCommand = FindHookCommand(matchers, markers);
         if (existingCommand is not null)
         {
@@ -784,7 +819,7 @@ public static class DevcontainerScaffolder
             return HookSetupOutcome.Merged;
         }
 
-        matchers.Add(new JsonObject
+        var matcherObject = new JsonObject
         {
             ["hooks"] = new JsonArray
             {
@@ -794,7 +829,16 @@ public static class DevcontainerScaffolder
                     ["command"] = command,
                 },
             },
-        });
+        };
+
+        // Tool-scoped events (PreToolUse) carry a matcher so the hook only fires for the
+        // named tools; prompt/turn events (UserPromptSubmit, Stop) have no tool to match.
+        if (matcher is not null)
+        {
+            matcherObject["matcher"] = matcher;
+        }
+
+        matchers.Add(matcherObject);
 
         File.WriteAllText(path, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
         return existed ? HookSetupOutcome.Merged : HookSetupOutcome.Created;
@@ -930,6 +974,7 @@ public enum GuidanceOutcome
 /// <param name="ManualSteps">Steps to apply to an existing manifest, deferral guidance, or null.</param>
 /// <param name="HookOutcome">How the UserPromptSubmit (recall) hook was wired in.</param>
 /// <param name="CaptureHookOutcome">How the Stop (capture) hook was wired in.</param>
+/// <param name="PreToolUseHookOutcome">How the PreToolUse (per-write recall) hook was wired in.</param>
 /// <param name="ClaudeSettingsPath">Relative path of the Claude Code settings file.</param>
 /// <param name="GuidanceOutcome">How the CLAUDE.md guidance block was applied.</param>
 /// <param name="ClaudeMdPath">Relative path of the guidance file.</param>
@@ -943,6 +988,7 @@ public sealed record DevcontainerInitResult(
     string? ManualSteps,
     HookSetupOutcome HookOutcome,
     HookSetupOutcome CaptureHookOutcome,
+    HookSetupOutcome PreToolUseHookOutcome,
     string ClaudeSettingsPath,
     GuidanceOutcome GuidanceOutcome,
     string ClaudeMdPath);

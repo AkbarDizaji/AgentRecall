@@ -165,6 +165,54 @@ public class DevcontainerScaffolderTests
     }
 
     [Fact]
+    public void Init_WiresPreToolUseHook_WithToolMatcher()
+    {
+        var root = NewTempProject();
+        try
+        {
+            var result = DevcontainerScaffolder.Init(root);
+
+            // The settings file is created by the first hook wired (UserPromptSubmit), so
+            // PreToolUse merges into it rather than creating it.
+            Assert.Equal(HookSetupOutcome.Merged, result.PreToolUseHookOutcome);
+
+            var settingsPath = Path.Combine(root, DevcontainerScaffolder.ClaudeSettingsRelativePath);
+            var node = JsonNode.Parse(File.ReadAllText(settingsPath))!;
+            var matcher = node["hooks"]!["PreToolUse"]![0]!;
+
+            // The hook is scoped to the file-mutating tools, not fired on reads/searches.
+            Assert.Equal(DevcontainerScaffolder.PreToolUseHookMatcher, matcher["matcher"]!.GetValue<string>());
+            Assert.Equal(
+                DevcontainerScaffolder.PreToolUseHookCommand,
+                matcher["hooks"]![0]!["command"]!.GetValue<string>());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void EnsurePreToolUseHook_IsIdempotent()
+    {
+        var root = NewTempProject();
+        try
+        {
+            Assert.Equal(HookSetupOutcome.Created, DevcontainerScaffolder.EnsurePreToolUseHook(root));
+            Assert.Equal(HookSetupOutcome.AlreadyPresent, DevcontainerScaffolder.EnsurePreToolUseHook(root));
+
+            var settingsPath = Path.Combine(root, DevcontainerScaffolder.ClaudeSettingsRelativePath);
+            var node = JsonNode.Parse(File.ReadAllText(settingsPath))!;
+            // Exactly one matcher — a second run never appends a duplicate.
+            Assert.Single(node["hooks"]!["PreToolUse"]!.AsArray());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void EnsureHook_PreservesExistingSettingsAndIsIdempotent()
     {
         var root = NewTempProject();
@@ -207,11 +255,14 @@ public class DevcontainerScaffolderTests
         Assert.EndsWith(DevcontainerScaffolder.RecallHookMarker, DevcontainerScaffolder.HookCommand);
         Assert.StartsWith("PATH=$HOME/.dotnet/tools:$PATH ", DevcontainerScaffolder.CaptureHookCommand);
         Assert.EndsWith(DevcontainerScaffolder.CaptureHookMarker, DevcontainerScaffolder.CaptureHookCommand);
+        Assert.StartsWith("PATH=$HOME/.dotnet/tools:$PATH ", DevcontainerScaffolder.PreToolUseHookCommand);
+        Assert.EndsWith(DevcontainerScaffolder.PreToolUseHookMarker, DevcontainerScaffolder.PreToolUseHookCommand);
 
         // No double quotes — they would be escaped in settings.json and break the
         // shell-portable, machine-independent form.
         Assert.DoesNotContain('"', DevcontainerScaffolder.HookCommand);
         Assert.DoesNotContain('"', DevcontainerScaffolder.CaptureHookCommand);
+        Assert.DoesNotContain('"', DevcontainerScaffolder.PreToolUseHookCommand);
     }
 
     [Fact]

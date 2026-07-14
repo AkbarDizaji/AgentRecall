@@ -185,6 +185,8 @@ public static partial class CommandRouter
 
             WriteHookOutcome(output, result.HookOutcome, result.ClaudeSettingsPath,
                 "UserPromptSubmit", "automatic rule injection", Devcontainer.DevcontainerScaffolder.HookCommand);
+            WriteHookOutcome(output, result.PreToolUseHookOutcome, result.ClaudeSettingsPath,
+                "PreToolUse", "per-write rule injection", Devcontainer.DevcontainerScaffolder.PreToolUseHookCommand);
             WriteHookOutcome(output, result.CaptureHookOutcome, result.ClaudeSettingsPath,
                 "Stop", "automatic lesson capture", Devcontainer.DevcontainerScaffolder.CaptureHookCommand);
 
@@ -1467,6 +1469,32 @@ public static partial class CommandRouter
                 return 0;
             }
 
+            case "pre-tool-use":
+            {
+                var payload = await Console.In.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+                var context = await Hooks.PreToolUseHook
+                    .RunAsync(payload, services, Console.Error, cancellationToken)
+                    .ConfigureAwait(false);
+
+                // PreToolUse only injects context via hookSpecificOutput.additionalContext;
+                // plain stdout is shown to the user, not added to the model's context. Emit
+                // nothing when there was no relevant rule, so a write is never annotated needlessly.
+                if (!string.IsNullOrEmpty(context))
+                {
+                    output.WriteLine(new System.Text.Json.Nodes.JsonObject
+                    {
+                        ["hookSpecificOutput"] = new System.Text.Json.Nodes.JsonObject
+                        {
+                            ["hookEventName"] = "PreToolUse",
+                            ["additionalContext"] = context,
+                        },
+                    }.ToJsonString());
+                }
+
+                // Always succeed so the hook never blocks the write.
+                return 0;
+            }
+
             case "capture":
             {
                 var payload = await Console.In.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
@@ -1489,9 +1517,10 @@ public static partial class CommandRouter
             }
 
             default:
-                output.WriteLine("Usage: agentrecall hook <user-prompt-submit|capture>");
+                output.WriteLine("Usage: agentrecall hook <user-prompt-submit|pre-tool-use|capture>");
                 output.WriteLine("(reads the Claude Code hook payload on stdin; user-prompt-submit injects");
-                output.WriteLine(" recall context, capture stores reusable lessons after a turn)");
+                output.WriteLine(" recall context at turn start, pre-tool-use injects rules relevant to the file");
+                output.WriteLine(" about to be written, capture stores reusable lessons after a turn)");
                 return 1;
         }
     }
