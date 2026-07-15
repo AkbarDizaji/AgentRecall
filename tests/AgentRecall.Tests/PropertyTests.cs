@@ -7,6 +7,7 @@ using AgentRecall.Core.Services;
 using FsCheck;
 using FsCheck.Fluent;
 using FsCheck.Xunit;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace AgentRecall.Tests;
@@ -22,6 +23,20 @@ public class PropertyTests
 {
     private static readonly MemoryWorthinessClassifier Classifier = new();
 
+    // A single initialized database, shared across property iterations so each generated input
+    // does not pay for a fresh schema build. Leaked for the test run (temp dir); acceptable in a
+    // test process.
+    private static readonly IServiceProvider HookServices = CreateInitializedServices();
+
+    private static IServiceProvider CreateInitializedServices()
+    {
+        var db = new TestDatabase();
+        using var scope = db.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<AgentRecall.Core.Abstractions.IDatabaseInitializer>()
+            .InitializeAsync().GetAwaiter().GetResult();
+        return db.Services;
+    }
+
     // ---- TurnPayload.Parse — the documented "never throws" contract -----------
 
     [Property]
@@ -30,6 +45,17 @@ public class PropertyTests
         // The docstring promises tolerance: "returns null rather than throwing, so the
         // hook never blocks Claude Code." That must hold for any string at all.
         TurnPayload.Parse(payload, TextWriter.Null);
+    }
+
+    // ---- PreToolUseHook.RunAsync — the "never blocks a write" contract --------
+
+    [Property]
+    public void PreToolUseHook_RunAsync_NeverThrows_ForArbitraryText(string? payload)
+    {
+        // The hook must never throw regardless of the payload, or it would block a file write.
+        // FsCheck throws arbitrary strings — including null, non-JSON, and non-object JSON — and
+        // shrinks any counterexample to a minimal failing input.
+        PreToolUseHook.RunAsync(payload, HookServices, TextWriter.Null).GetAwaiter().GetResult();
     }
 
     [Property]

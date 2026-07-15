@@ -94,6 +94,9 @@ public interface IAgentRecallActivityRepository : IRepository<AgentRecallActivit
     /// <summary>The most recent activities, newest first, capped at <paramref name="limit"/>.</summary>
     Task<IReadOnlyList<AgentRecallActivity>> ListRecentAsync(int limit, CancellationToken cancellationToken = default);
 
+    /// <summary>All activities recorded for a given turn correlation id, newest first.</summary>
+    Task<IReadOnlyList<AgentRecallActivity>> ListByTurnAsync(string turnId, CancellationToken cancellationToken = default);
+
     /// <summary>The activity with the given operation hash, or null when none matches.</summary>
     Task<AgentRecallActivity?> FindByOperationHashAsync(string operationHash, CancellationToken cancellationToken = default);
 }

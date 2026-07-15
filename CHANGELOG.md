@@ -4,6 +4,30 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.1] - 2026-07-15
+
+### Fixed
+- **File/Directory-scoped rules are now surfaced by the PreToolUse hook.** The relevance ranker
+  only rewarded a rule whose `ScopeValue` exactly equalled the request's — the repository — so a
+  `File`- or `Directory`-scoped rule scored `0.0`, *below* a global rule, and could never surface
+  when recall was keyed on a file. It now also matches a rule whose file/directory scope contains
+  a changed file (separator- and prefix-tolerant, so a repository-relative stored path matches an
+  absolute host path).
+- **PreToolUse retrievals join the end-of-turn summary.** The hook derived its turn correlation id
+  from the file path, which never matched the `(cwd, prompt)` id the UserPromptSubmit and Stop
+  hooks use — so its retrievals were dropped from the per-turn summary entirely (a non-empty,
+  non-matching id also skipped the time-window fallback). It now reads the turn's prompt from the
+  transcript like the Stop hook, and leaves the id null when none is available.
+- **No more per-write inflation or duplication within a turn.** A rule surfaced earlier in a turn
+  (by an earlier write, or by UserPromptSubmit) is now excluded from later writes via the new
+  `ContextRequest.ExcludeRuleIds`, so it is neither re-injected (context bloat) nor re-counted as
+  used (which had skewed the "which rules help" telemetry by however many files a turn touched).
+- **Concurrent hook processes no longer drop writes.** The SQLite connection now uses a busy
+  command timeout (wait-and-retry instead of an immediate `SQLITE_BUSY`) and WAL journaling, so the
+  MCP server and per-write hook processes writing the one local database serialise rather than fail.
+- **The "fetched N rules" status line no longer pollutes the model's context.** It moves to the
+  user-facing `systemMessage` channel; only the rule text is injected via `additionalContext`.
+
 ## [2.2.0] - 2026-07-14
 
 ### Added

@@ -25,6 +25,12 @@ namespace AgentRecall.Infrastructure.DependencyInjection;
 public static class ServiceCollectionExtensions
 {
     /// <summary>
+    /// How long a database command waits on a locked SQLite file before giving up. Generous
+    /// because contention is brief (small local writes) and a dropped write loses recall.
+    /// </summary>
+    internal const int SqliteBusyTimeoutSeconds = 30;
+
+    /// <summary>
     /// Registers the AgentRecall SQLite context, repositories, and database
     /// initializer. Assumes <see cref="AgentRecallOptions"/> is already registered.
     /// </summary>
@@ -33,7 +39,20 @@ public static class ServiceCollectionExtensions
         services.AddDbContext<AgentRecallDbContext>((provider, builder) =>
         {
             var options = provider.GetRequiredService<AgentRecallOptions>();
-            builder.UseSqlite($"Data Source={options.DatabasePath}");
+
+            // AgentRecall runs as several short-lived processes (the MCP server plus one process
+            // per hook fire) against one local SQLite file. The PreToolUse hook writes on every
+            // file-mutating tool call, so concurrent writers are routine. A command timeout makes
+            // Microsoft.Data.Sqlite wait-and-retry on a locked database instead of failing
+            // immediately with SQLITE_BUSY (WAL, enabled at initialization, lets reads proceed
+            // during a write). Without this, a contended write silently drops recall.
+            var connectionString = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
+            {
+                DataSource = options.DatabasePath,
+                DefaultTimeout = SqliteBusyTimeoutSeconds,
+            }.ToString();
+
+            builder.UseSqlite(connectionString, sqlite => sqlite.CommandTimeout(SqliteBusyTimeoutSeconds));
         });
 
         services.AddScoped<IRecallRuleRepository, RecallRuleRepository>();

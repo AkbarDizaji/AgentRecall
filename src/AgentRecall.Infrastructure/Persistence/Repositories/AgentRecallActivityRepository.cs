@@ -47,6 +47,21 @@ public sealed class AgentRecallActivityRepository : EfRepository<AgentRecallActi
             .ConfigureAwait(false);
     }
 
+    public async Task<IReadOnlyList<AgentRecallActivity>> ListByTurnAsync(string turnId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrEmpty(turnId))
+        {
+            return [];
+        }
+
+        return await Db.Set<AgentRecallActivity>()
+            .AsNoTracking()
+            .Where(a => a.TurnId == turnId)
+            .OrderByDescending(a => a.Id)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     public async Task<AgentRecallActivity?> FindByOperationHashAsync(string operationHash, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(operationHash))

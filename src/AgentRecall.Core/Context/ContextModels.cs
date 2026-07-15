@@ -56,6 +56,16 @@ public sealed record ContextRequest
     public int Limit { get; init; } = 25;
 
     /// <summary>
+    /// Rule ids to exclude from this retrieval entirely — neither injected nor recorded as
+    /// used. The PreToolUse hook sets this to the rules already surfaced earlier in the same
+    /// turn, so a rule is not re-injected on every file write (context bloat) or re-counted as
+    /// used on every write (usage-telemetry inflation).
+    /// </summary>
+    public IReadOnlySet<int> ExcludeRuleIds { get; init; } = EmptyIds;
+
+    private static readonly IReadOnlySet<int> EmptyIds = new HashSet<int>();
+
+    /// <summary>
     /// When true, also consider Pending rules (never as must-follow). Off by
     /// default: only Active and Promoted rules are returned.
     /// </summary>

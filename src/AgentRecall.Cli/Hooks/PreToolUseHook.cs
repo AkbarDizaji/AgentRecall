@@ -12,6 +12,20 @@ using Microsoft.Extensions.DependencyInjection;
 namespace AgentRecall.Cli.Hooks;
 
 /// <summary>
+/// The outcome of a PreToolUse hook run. <see cref="AdditionalContext"/> is the rule text to
+/// inject into the model's context (the only PreToolUse channel the model reads);
+/// <see cref="SystemMessage"/> is the user-facing status line (shown, not fed to the model).
+/// Keeping them apart stops the "fetched N rules" notice from polluting the model's context.
+/// </summary>
+public readonly record struct PreToolUseInjection(string AdditionalContext, string? SystemMessage)
+{
+    public static readonly PreToolUseInjection None = new(string.Empty, null);
+
+    /// <summary>True when there is nothing to inject.</summary>
+    public bool IsEmpty => string.IsNullOrEmpty(AdditionalContext);
+}
+
+/// <summary>
 /// Runs the PreToolUse hook: when the agent is about to write or edit a file, it
 /// recalls the rules relevant to that file (keyed on the file's path and the code
 /// being written, not the turn's opening prompt) and returns a compact context block
@@ -36,7 +50,7 @@ public static class PreToolUseHook
     // types and members involved, without letting a large file dominate the request.
     private const int MaxSnippetLength = 2000;
 
-    public static async Task<string> RunAsync(
+    public static async Task<PreToolUseInjection> RunAsync(
         string? hookInputJson,
         IServiceProvider services,
         TextWriter diagnostics,
@@ -47,24 +61,43 @@ public static class PreToolUseHook
             var options = services.GetRequiredService<AgentRecallOptions>();
             if (!options.HookEnabled)
             {
-                return string.Empty;
+                return PreToolUseInjection.None;
             }
 
             if (!TryReadPayload(hookInputJson, out var toolName, out var toolInput, out var cwd))
             {
-                return string.Empty;
+                return PreToolUseInjection.None;
             }
 
             if (!FileMutatingTools.Contains(toolName))
             {
-                return string.Empty;
+                return PreToolUseInjection.None;
             }
 
             var filePath = ReadFilePath(toolInput);
             if (string.IsNullOrWhiteSpace(filePath))
             {
-                return string.Empty;
+                return PreToolUseInjection.None;
             }
+
+            await using var scope = services.CreateAsyncScope();
+            await HookDatabaseGuard.EnsureInitializedAsync(scope.ServiceProvider, cancellationToken)
+                .ConfigureAwait(false);
+
+            // Stamp the same turn id the UserPromptSubmit and Stop hooks use, so this retrieval
+            // joins the turn in the end-of-turn summary (which matches activities by exact
+            // TurnId). TurnCorrelation hashes (cwd, prompt), so we key off the turn's prompt —
+            // read from the transcript exactly as the Stop hook does — not the file path (which
+            // produced an id that never matched any turn). No transcript prompt (e.g. tests)
+            // yields a null id, and the summary's time-window fallback still picks it up.
+            var turnPrompt = TurnPayload.Parse(hookInputJson, diagnostics)?.Prompt;
+            var turnId = TurnCorrelation.Compute(cwd, turnPrompt);
+
+            // Skip rules already surfaced earlier this turn (by this hook on a previous write, or
+            // by UserPromptSubmit at the start), so a rule is neither re-injected nor re-counted
+            // as used on every file the turn touches. Requires a turn id; without one, no dedup.
+            var alreadySurfaced = await AlreadySurfacedRuleIdsAsync(scope.ServiceProvider, turnId, cancellationToken)
+                .ConfigureAwait(false);
 
             var repository = RepositoryName(cwd);
             var snippet = ExtractCode(toolName, toolInput);
@@ -79,13 +112,10 @@ public static class PreToolUseHook
                 FileNames = [filePath],
                 Limit = options.HookMaxRules,
                 IncludePending = options.HookIncludePending,
-                // Rules surfaced to the agent count as retrievals for learning reports.
+                ExcludeRuleIds = alreadySurfaced,
+                // Surfacing (of not-yet-seen rules) counts as a retrieval for learning reports.
                 RecordUsage = true,
             };
-
-            await using var scope = services.CreateAsyncScope();
-            await HookDatabaseGuard.EnsureInitializedAsync(scope.ServiceProvider, cancellationToken)
-                .ConfigureAwait(false);
 
             var context = scope.ServiceProvider.GetRequiredService<IContextInjectionService>();
             var result = await context.BuildContextAsync(request, cancellationToken).ConfigureAwait(false);
@@ -93,15 +123,13 @@ public static class PreToolUseHook
             var formatted = HookContextFormatter.Format(result);
             if (string.IsNullOrEmpty(formatted))
             {
-                // No rule was relevant to this file: nothing to inject, no activity
-                // recorded (a per-write hook must never spam on a no-op).
-                return string.Empty;
+                // No new rule was relevant to this file (nothing matched, or everything was
+                // already surfaced this turn): inject nothing, record nothing — a per-write hook
+                // must never spam on a no-op.
+                return PreToolUseInjection.None;
             }
 
-            // Stamp the turn id off the file path so the same file's writes correlate,
-            // and so this retrieval can join the turn's capture in the activity log.
             var recorder = scope.ServiceProvider.GetRequiredService<IActivityRecorder>();
-            var turnId = TurnCorrelation.Compute(cwd, filePath);
             var notice = ActivityNoticeFactory.ForContextFetched(result, "pretooluse");
             if (notice is not null)
             {
@@ -114,19 +142,61 @@ public static class PreToolUseHook
                 await recorder.RecordAsync(conflictNotice with { TurnId = turnId }, cancellationToken).ConfigureAwait(false);
             }
 
+            // The rule text is the only thing injected into the model's context; the compact
+            // "fetched N rules" notice goes to the user-facing channel instead of prefixing the
+            // context, so status text never reads as guidance.
             var compact = notice is null
                 ? null
                 : ActivityNoticeRenderer.RenderCompact(notice, options.ResolvedHookNoticeLevel);
 
-            return string.IsNullOrEmpty(compact) ? formatted : compact + "\n\n" + formatted;
+            return new PreToolUseInjection(formatted, string.IsNullOrEmpty(compact) ? null : compact);
         }
         catch (Exception ex)
         {
             // Never block the write; surface the failure on stderr only.
             diagnostics.WriteLine($"[agentrecall] pre-tool-use hook skipped: {ex.Message}");
-            return string.Empty;
+            return PreToolUseInjection.None;
         }
     }
+
+    /// <summary>
+    /// The set of rule ids already surfaced this turn (from prior ContextFetched activities), so
+    /// they can be excluded from this write's retrieval. Empty when there is no turn id to key on.
+    /// </summary>
+    private static async Task<IReadOnlySet<int>> AlreadySurfacedRuleIdsAsync(
+        IServiceProvider provider,
+        string? turnId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(turnId))
+        {
+            return EmptyIds;
+        }
+
+        var activities = provider.GetRequiredService<IAgentRecallActivityRepository>();
+        var prior = await activities.ListByTurnAsync(turnId, cancellationToken).ConfigureAwait(false);
+
+        var seen = new HashSet<int>();
+        foreach (var activity in prior)
+        {
+            if (activity.ActivityType != ActivityType.ContextFetched || string.IsNullOrEmpty(activity.RuleIds))
+            {
+                continue;
+            }
+
+            foreach (var part in activity.RuleIds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (int.TryParse(part, out var id))
+                {
+                    seen.Add(id);
+                }
+            }
+        }
+
+        return seen;
+    }
+
+    private static readonly IReadOnlySet<int> EmptyIds = new HashSet<int>();
 
     private static string BuildTaskText(string filePath, string? snippet)
     {

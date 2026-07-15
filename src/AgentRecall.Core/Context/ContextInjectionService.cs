@@ -107,7 +107,13 @@ public sealed class ContextInjectionService : IContextInjectionService
         var concepts = _concepts.Build(taskTokens.Concat(domainTokens));
 
         var all = await _rules.ListAsync(cancellationToken).ConfigureAwait(false);
-        var pool = all.Where(RuleStatusSets.IsEffective).ToList();
+        // Excluded rules are dropped from the candidate pool up front, so they are neither
+        // ranked/injected nor recorded as used — the single point that de-duplicates a rule
+        // across repeated retrievals within one turn (see ContextRequest.ExcludeRuleIds).
+        var pool = all
+            .Where(RuleStatusSets.IsEffective)
+            .Where(r => !request.ExcludeRuleIds.Contains(r.Id))
+            .ToList();
 
         // Score every rule; keep those clearing the relevance floor. Always-apply rules are a
         // separate universal-constraint band: they are kept even below the floor so they reach
@@ -167,7 +173,7 @@ public sealed class ContextInjectionService : IContextInjectionService
         // to must-follow since they haven't been approved.
         if (request.IncludePending)
         {
-            foreach (var rule in all.Where(r => r.Status == RuleStatus.Pending && !r.Deprecated))
+            foreach (var rule in all.Where(r => r.Status == RuleStatus.Pending && !r.Deprecated && !request.ExcludeRuleIds.Contains(r.Id)))
             {
                 var assessment = Assess(rule, taskTokens, domainTokens, concepts, request) with { Unapproved = true };
                 if (assessment.Relevance >= RelevanceFloor)
@@ -383,7 +389,7 @@ public sealed class ContextInjectionService : IContextInjectionService
             }
         }
 
-        // 5. Scope: a project-specific match beats a global rule.
+        // 5. Scope: a rule bound to this work's project, directory, or file beats a global rule.
         double scope;
         var projectScoped = false;
         if (!string.IsNullOrWhiteSpace(request.ScopeValue)
@@ -393,6 +399,16 @@ public sealed class ContextInjectionService : IContextInjectionService
             scope = 1.0;
             projectScoped = true;
             reasons.Add($"project-specific rule for {rule.ScopeValue}");
+        }
+        else if (FileScopeContainsAnyChangedFile(rule, request.FileNames))
+        {
+            // A File/Directory-scoped rule whose scope contains a file this task touches is as
+            // specific as a repository match. Without this, such a rule scores 0.0 — below a
+            // global rule — whenever the request's ScopeValue is the repository (as the hooks
+            // send it), so recall keyed on a file could never reward a rule bound to that file.
+            scope = 1.0;
+            projectScoped = true;
+            reasons.Add($"rule scoped to {rule.ScopeValue}, which contains a changed file");
         }
         else
         {
@@ -429,6 +445,66 @@ public sealed class ContextInjectionService : IContextInjectionService
 
         return new Assessment(rule, relevance, score, reasons, projectScoped, highTrust, IsProhibition(rule), false, isSeed, rule.AlwaysApply);
     }
+
+    /// <summary>
+    /// True when <paramref name="rule"/> is File- or Directory-scoped and one of the task's
+    /// changed files lies within that scope. This lets recall keyed on a file (e.g. the
+    /// PreToolUse hook) reward a rule bound to that file or its directory — which the plain
+    /// ScopeValue-equality check cannot, because a request built from a file write carries
+    /// the repository as its ScopeValue, not the file path. Comparison normalises separators
+    /// and matches on a segment boundary from either end, so a rule stored with a
+    /// repository-relative path still matches an absolute path supplied by the host.
+    /// </summary>
+    private static bool FileScopeContainsAnyChangedFile(RecallRule rule, IReadOnlyList<string> fileNames)
+    {
+        if (fileNames.Count == 0
+            || string.IsNullOrWhiteSpace(rule.ScopeValue)
+            || rule.ScopeLevel is not (ScopeLevel.File or ScopeLevel.Directory))
+        {
+            return false;
+        }
+
+        var scopePath = NormalizePath(rule.ScopeValue);
+        if (scopePath.Length == 0)
+        {
+            return false;
+        }
+
+        foreach (var file in fileNames)
+        {
+            if (string.IsNullOrWhiteSpace(file))
+            {
+                continue;
+            }
+
+            var filePath = NormalizePath(file);
+            var matched = rule.ScopeLevel == ScopeLevel.File
+                ? PathTailMatches(filePath, scopePath)
+                : IsWithinDirectory(filePath, scopePath);
+            if (matched)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string NormalizePath(string path) =>
+        path.Replace('\\', '/').Trim().TrimEnd('/');
+
+    // A file matches a File-scoped rule when the paths are equal, or one is a tail of the
+    // other on a segment boundary (tolerating absolute-vs-relative storage).
+    private static bool PathTailMatches(string filePath, string scopePath) =>
+        string.Equals(filePath, scopePath, StringComparison.OrdinalIgnoreCase)
+        || filePath.EndsWith("/" + scopePath, StringComparison.OrdinalIgnoreCase)
+        || scopePath.EndsWith("/" + filePath, StringComparison.OrdinalIgnoreCase);
+
+    // A file is within a Directory-scoped rule when the directory is a segment-aligned prefix
+    // of the file path, matched from either end so a relative dir matches an absolute file.
+    private static bool IsWithinDirectory(string filePath, string dirPath) =>
+        filePath.StartsWith(dirPath + "/", StringComparison.OrdinalIgnoreCase)
+        || filePath.Contains("/" + dirPath + "/", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Keeps at most <see cref="SeedInjectionCap"/> seed rules (highest-ranked first) unless

@@ -222,6 +222,109 @@ public class ContextInjectionTests
     }
 
     [Fact]
+    public async Task ExcludeRuleIds_DropsRulesFromSelectionAndUsageRecording()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        var kept = await Seed(db, "Always use parameterized SQL queries.", tags: "sql", confidence: 0.9);
+        var excluded = await Seed(db, "Validate tenant scope before SQL.", tags: "sql", confidence: 0.9);
+
+        ContextInjectionResult result;
+        await using (var scope = db.CreateScope())
+        {
+            var service = scope.ServiceProvider.GetRequiredService<IContextInjectionService>();
+            result = await service.BuildContextAsync(new ContextRequest
+            {
+                Task = "write a SQL query",
+                ExcludeRuleIds = new HashSet<int> { excluded },
+                RecordUsage = true,
+            });
+        }
+
+        var ids = result.All.Select(r => r.Rule.Id).ToList();
+        Assert.Contains(kept, ids);
+        Assert.DoesNotContain(excluded, ids);
+
+        // The excluded rule is not recorded as used either (no RuleApplied event for it).
+        await using var readScope = db.CreateScope();
+        var events = await readScope.ServiceProvider.GetRequiredService<IRecallEventRepository>().ListAsync();
+        Assert.DoesNotContain(events, e => e.RuleId == excluded && e.Type == RecallEventType.RuleApplied);
+        Assert.Contains(events, e => e.RuleId == kept && e.Type == RecallEventType.RuleApplied);
+    }
+
+    [Fact]
+    public async Task FileScopedRule_RewardedWhenChangedFileIsWithinScope()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        // A rule bound to a specific file, stored with a repository-relative path.
+        var fileRule = await Seed(db, "Prefer composition in this file.", tags: "design",
+            scopeLevel: ScopeLevel.File, scopeValue: "src/Auth/LoginService.cs");
+
+        // The request carries the repository as its ScopeValue (as the hooks send it) and the
+        // absolute path of the file being changed.
+        var result = await Build(db, new ContextRequest
+        {
+            Task = "apply a design rule",
+            ScopeLevel = ScopeLevel.Repository,
+            ScopeValue = "AgentRecall",
+            FileNames = ["/Users/dev/AgentRecall/src/Auth/LoginService.cs"],
+        });
+
+        var injected = result.All.SingleOrDefault(r => r.Rule.Id == fileRule);
+        Assert.NotNull(injected);
+        // The scope bonus fired: the rule is treated as project-specific, not scored 0.0.
+        Assert.Contains(injected!.MatchReasons, m => m.Contains("contains a changed file", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task DirectoryScopedRule_RewardedWhenChangedFileIsUnderDirectory()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        var dirRule = await Seed(db, "Handlers in this folder must be idempotent.", tags: "design",
+            scopeLevel: ScopeLevel.Directory, scopeValue: "src/Handlers");
+
+        var result = await Build(db, new ContextRequest
+        {
+            Task = "apply a design rule",
+            ScopeValue = "AgentRecall",
+            FileNames = ["/Users/dev/AgentRecall/src/Handlers/RefundHandler.cs"],
+        });
+
+        var injected = result.All.SingleOrDefault(r => r.Rule.Id == dirRule);
+        Assert.NotNull(injected);
+        Assert.Contains(injected!.MatchReasons, m => m.Contains("contains a changed file", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task FileScopedRule_NotRewardedWhenChangedFileIsElsewhere()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        var fileRule = await Seed(db, "Prefer composition in this file.", tags: "design",
+            scopeLevel: ScopeLevel.File, scopeValue: "src/Auth/LoginService.cs");
+
+        var result = await Build(db, new ContextRequest
+        {
+            Task = "apply a design rule",
+            ScopeValue = "AgentRecall",
+            FileNames = ["/Users/dev/AgentRecall/src/Billing/InvoiceService.cs"],
+        });
+
+        // It may still surface on the keyword match, but never with the scope reason.
+        var injected = result.All.SingleOrDefault(r => r.Rule.Id == fileRule);
+        if (injected is not null)
+        {
+            Assert.DoesNotContain(injected.MatchReasons, m => m.Contains("contains a changed file", StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
     public async Task ProhibitionRuleBecomesWarning()
     {
         await using var db = new TestDatabase();

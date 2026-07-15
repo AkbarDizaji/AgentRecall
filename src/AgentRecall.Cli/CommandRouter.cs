@@ -1472,23 +1472,30 @@ public static partial class CommandRouter
             case "pre-tool-use":
             {
                 var payload = await Console.In.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
-                var context = await Hooks.PreToolUseHook
+                var injection = await Hooks.PreToolUseHook
                     .RunAsync(payload, services, Console.Error, cancellationToken)
                     .ConfigureAwait(false);
 
-                // PreToolUse only injects context via hookSpecificOutput.additionalContext;
-                // plain stdout is shown to the user, not added to the model's context. Emit
-                // nothing when there was no relevant rule, so a write is never annotated needlessly.
-                if (!string.IsNullOrEmpty(context))
+                // The model reads only hookSpecificOutput.additionalContext, so the rule text goes
+                // there; the "fetched N rules" status line goes to systemMessage (user-facing).
+                // Emit nothing when there was no relevant rule, so a write is never annotated needlessly.
+                if (!injection.IsEmpty)
                 {
-                    output.WriteLine(new System.Text.Json.Nodes.JsonObject
+                    var response = new System.Text.Json.Nodes.JsonObject
                     {
                         ["hookSpecificOutput"] = new System.Text.Json.Nodes.JsonObject
                         {
                             ["hookEventName"] = "PreToolUse",
-                            ["additionalContext"] = context,
+                            ["additionalContext"] = injection.AdditionalContext,
                         },
-                    }.ToJsonString());
+                    };
+
+                    if (!string.IsNullOrEmpty(injection.SystemMessage))
+                    {
+                        response["systemMessage"] = injection.SystemMessage;
+                    }
+
+                    output.WriteLine(response.ToJsonString());
                 }
 
                 // Always succeed so the hook never blocks the write.

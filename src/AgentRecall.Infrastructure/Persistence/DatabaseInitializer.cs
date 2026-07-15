@@ -33,6 +33,20 @@ public sealed class DatabaseInitializer : IDatabaseInitializer
 
         var created = await _db.Database.EnsureCreatedAsync(cancellationToken).ConfigureAwait(false);
 
+        // Write-Ahead Logging lets readers proceed while a writer holds the database, which
+        // matters because AgentRecall runs as several concurrent short-lived processes (the MCP
+        // server plus one per hook fire) against one file. The setting is persisted on the file,
+        // so re-running it is a cheap no-op. Best-effort: a transient lock here must not fail
+        // initialization — the command timeout still serialises writers without WAL.
+        try
+        {
+            await _db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;", cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not enable WAL journal mode; continuing with the default journal.");
+        }
+
         if (created)
         {
             _logger.LogInformation("Created AgentRecall database at {Path}", _options.DatabasePath);
