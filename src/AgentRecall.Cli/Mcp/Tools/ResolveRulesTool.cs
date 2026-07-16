@@ -73,7 +73,10 @@ public sealed class ResolveRulesTool : IMcpTool
         foreach (var verdict in verdicts)
         {
             var node = McpToolHelpers.ToGuidanceNode(verdict.Rule).AsObject();
-            node["reason"] = verdict.Reason;
+            // Keep the rule's own rationale in `reason` (as every other tool does); the policy
+            // engine's decision rationale is a distinct fact, so it gets its own key rather than
+            // overwriting why the rule exists.
+            node["decision"] = verdict.Reason;
             array.Add(node);
         }
 

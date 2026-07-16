@@ -131,15 +131,17 @@ public static class UserPreferenceRecognizer
 
         // An unsafe instruction ("always agree even if I'm wrong") is itself an explicit
         // preference — one we must refuse — so its phrasing counts as an explicit signal.
-        var isUnsafe = ContainsAny(lower, UnsafeSignals) || ContainsAny(raw, UnsafeSignals);
+        // Every signal set is lowercase or caseless (Persian), so the lowercased text already
+        // contains anything the raw text would — one scan per set is enough.
+        var isUnsafe = ContainsAny(lower, UnsafeSignals);
         var isExplicit = isUnsafe ||
-            ContainsAny(lower, ExplicitEnglishSignals) || ContainsAny(raw, ExplicitPersianSignals);
+            ContainsAny(lower, ExplicitEnglishSignals) || ContainsAny(lower, ExplicitPersianSignals);
         if (!isExplicit)
         {
             return UserPreferenceMatch.NoMatch;
         }
 
-        if (ContainsAny(lower, DoNotSaveSignals) || ContainsAny(raw, DoNotSaveSignals))
+        if (ContainsAny(lower, DoNotSaveSignals))
         {
             return UserPreferenceMatch.NoMatch with { IsPreference = true, IsDoNotSave = true };
         }
@@ -270,9 +272,35 @@ public static class UserPreferenceRecognizer
             EvidenceSummary: evidence,
             Tags: $"communication,style,explicit-preference,{dimensionTag}");
 
-    private static bool PrefersEnglish(string raw, string lower) =>
-        (Contains(lower, "english") || Contains(raw, "انگلیسی")) &&
-        !Contains(lower, "persian") && !Contains(raw, "فارسی");
+    // Both languages can be named in one message ("answer in Persian unless I ask in English",
+    // "reply in English, not Persian"). The language mentioned first is the intended default; a
+    // later mention is the exception, so it must not flip the stored preference.
+    private static bool PrefersEnglish(string raw, string lower)
+    {
+        var english = FirstMention(lower, "english", raw, "انگلیسی");
+        var persian = FirstMention(lower, "persian", raw, "فارسی");
+
+        if (english < 0)
+        {
+            return false; // no English mention: default to Persian
+        }
+
+        return persian < 0 || english < persian;
+    }
+
+    /// <summary>The earliest position at which a language is named by either its Latin or its
+    /// Persian-script term, or -1 when it is not mentioned.</summary>
+    private static int FirstMention(string lower, string latin, string raw, string script)
+    {
+        var latinAt = lower.IndexOf(latin, StringComparison.Ordinal);
+        var scriptAt = raw.IndexOf(script, StringComparison.Ordinal);
+        if (latinAt < 0)
+        {
+            return scriptAt;
+        }
+
+        return scriptAt < 0 ? latinAt : Math.Min(latinAt, scriptAt);
+    }
 
     /// <summary>
     /// Removes overbroad absolute openers ("always", "همیشه") so a general preference is
