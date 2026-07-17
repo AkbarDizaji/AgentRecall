@@ -39,7 +39,6 @@ public sealed class FeedbackService : IFeedbackService
     private readonly IMemoryWorthinessClassifier _classifier;
     private readonly ICaptureDecisionPolicy _decisionPolicy;
     private readonly IAdaptiveWorthinessPolicy _adaptivePolicy;
-    private readonly IRuleLifecycleRecommendationRepository _recommendations;
     private readonly AgentRecallOptions _options;
 
     public FeedbackService(
@@ -49,7 +48,6 @@ public sealed class FeedbackService : IFeedbackService
         IMemoryWorthinessClassifier classifier,
         ICaptureDecisionPolicy decisionPolicy,
         IAdaptiveWorthinessPolicy adaptivePolicy,
-        IRuleLifecycleRecommendationRepository recommendations,
         AgentRecallOptions options)
     {
         _events = events ?? throw new ArgumentNullException(nameof(events));
@@ -58,7 +56,6 @@ public sealed class FeedbackService : IFeedbackService
         _classifier = classifier ?? throw new ArgumentNullException(nameof(classifier));
         _decisionPolicy = decisionPolicy ?? throw new ArgumentNullException(nameof(decisionPolicy));
         _adaptivePolicy = adaptivePolicy ?? throw new ArgumentNullException(nameof(adaptivePolicy));
-        _recommendations = recommendations ?? throw new ArgumentNullException(nameof(recommendations));
         _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
@@ -213,15 +210,6 @@ public sealed class FeedbackService : IFeedbackService
         }
 
         rule = await _rules.AddAsync(rule, cancellationToken).ConfigureAwait(false);
-
-        // A newer explicit preference about the same dimension (e.g. answer length) as an
-        // older active one conflicts with it. Silently keeping both active would leave the
-        // agent with contradictory guidance, so — rather than auto-superseding, which is
-        // risky — record a Supersede recommendation the user can apply.
-        if (preference && rule.Status == RuleStatus.Active)
-        {
-            await RecommendSupersedeConflictingPreferencesAsync(rule, worthiness!, cancellationToken).ConfigureAwait(false);
-        }
 
         var recallEvent = await _events.AddAsync(new RecallEvent
         {
@@ -472,11 +460,6 @@ public sealed class FeedbackService : IFeedbackService
         };
     }
 
-    // The communication/interaction dimensions a preference can be about. Two preferences
-    // about the same dimension (e.g. both about answer length) are treated as conflicting.
-    private static readonly string[] PreferenceDimensionTags =
-        ["verbosity", "language", "prompt-format", "questioning", "honesty", "explanation-level"];
-
     /// <summary>
     /// Merges the extractor's tags with the classifier-assigned preference tags,
     /// de-duplicated and order-preserving, into a single comma-separated string.
@@ -495,58 +478,6 @@ public sealed class FeedbackService : IFeedbackService
 
         return string.Join(",", merged);
     }
-
-    /// <summary>
-    /// Records a Supersede recommendation for each in-force preference rule that governs
-    /// the same dimension as the newly captured one but prescribes different guidance, so
-    /// the user can retire the stale preference deliberately. Never mutates the old rule.
-    /// </summary>
-    private async Task RecommendSupersedeConflictingPreferencesAsync(
-        RecallRule newer, MemoryWorthinessResult worthiness, CancellationToken cancellationToken)
-    {
-        var dimension = PreferenceDimensionTags.FirstOrDefault(d =>
-            (worthiness.Tags ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Any(t => string.Equals(t, d, StringComparison.OrdinalIgnoreCase)));
-        if (dimension is null)
-        {
-            return;
-        }
-
-        var newerKey = NormalizeGuidance(newer.RuleText);
-        var candidates = await _rules.QueryAsync(new RuleQuery
-        {
-            ScopeLevel = newer.ScopeLevel,
-            ScopeValue = newer.ScopeValue ?? string.Empty,
-            ExcludeStatuses = NotReusable,
-        }, cancellationToken).ConfigureAwait(false);
-
-        foreach (var older in candidates)
-        {
-            if (older.Id == newer.Id ||
-                older.Category is not (RuleCategory.CommunicationPreference or RuleCategory.UserPreference) ||
-                NormalizeGuidance(older.RuleText) == newerKey ||
-                !HasDimensionTag(older.Tags, dimension))
-            {
-                continue;
-            }
-
-            await _recommendations.AddAsync(new RuleLifecycleRecommendation
-            {
-                RuleId = older.Id,
-                TargetRuleId = newer.Id,
-                RecommendationType = RecommendationType.Supersede,
-                Reason = $"A newer explicit {dimension} preference (#{newer.Id}) replaces this one.",
-                Evidence = $"Both rules set the user's {dimension} preference; the newer one is #{newer.Id}.",
-                Confidence = UserPreferenceConfidence,
-                Signature = $"Supersede:{older.Id}:{newer.Id}",
-            }, cancellationToken).ConfigureAwait(false);
-        }
-    }
-
-    private static bool HasDimensionTag(string? tags, string dimension) =>
-        (tags ?? string.Empty)
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Any(t => string.Equals(t, dimension, StringComparison.OrdinalIgnoreCase));
 
     private async Task<RecallRule?> FindEquivalentAsync(RecallRule candidate, CancellationToken cancellationToken)
     {

@@ -341,7 +341,6 @@ style, a `CommunicationPreference`) — not a repository coding rule.
 Examples of preferences it recognises (English and Persian):
 
 - preferred explanation style — *"answer short and simple, add an example if needed"*
-- language — *"reply in Persian unless I ask in English"* / *"فارسی جواب بده مگر اینکه انگلیسی پرسیدم"*
 - prompt format — *"when I ask for a prompt, give it directly with tests and edge cases"*
 - interaction style — *"don't ask me too many questions; make a reasonable assumption"*
 - verbosity — concise vs. detailed answers
@@ -360,9 +359,10 @@ How preferences differ from other memory:
   and throwaway wording are dropped, your intent is kept.
 - **Unsafe preferences are refused.** A preference that conflicts with correctness or
   honesty (*"always agree even if I'm wrong"*) is skipped, never stored.
-- **Conflicts are surfaced.** A newer preference about the same dimension (e.g. answer
-  length) as an older one raises a `Supersede` recommendation rather than silently
-  keeping both.
+- **Response language is the model's call, not AgentRecall's.** A stated language
+  preference (*"reply in Persian unless I ask in English"*) is still captured, but
+  verbatim as a general preference — AgentRecall does not classify or decide which
+  language to default to.
 
 Record one explicitly:
 

@@ -84,11 +84,13 @@ public class PureLogicCoverageTests
     }
 
     [Fact]
-    public void Recognizer_EnglishOnlyLanguagePreference_RepliesInEnglish()
+    public void Recognizer_LanguagePreference_IsStoredVerbatimAsGeneralPreference()
     {
+        // Which language to reply in is the model's call, not a dimension this recognizer
+        // decides — it falls through to the general bucket and keeps the user's own wording.
         var match = UserPreferenceRecognizer.Match("From now on, please answer in English.");
 
-        Assert.Equal(PreferenceDimension.Language, match.Dimension);
+        Assert.Equal(PreferenceDimension.General, match.Dimension);
         Assert.Contains("English", match.NormalizedRule, StringComparison.OrdinalIgnoreCase);
     }
 

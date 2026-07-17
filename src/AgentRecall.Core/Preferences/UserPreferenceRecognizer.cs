@@ -15,9 +15,6 @@ public enum PreferenceDimension
     /// <summary>Answer length / detail: concise vs verbose.</summary>
     Verbosity,
 
-    /// <summary>Response language ("reply in Persian").</summary>
-    Language,
-
     /// <summary>How prompts are delivered ("give me the prompt directly").</summary>
     PromptFormat,
 
@@ -152,7 +149,7 @@ public static class UserPreferenceRecognizer
         }
 
         var dimension = Classify(raw, lower);
-        return Normalize(dimension, raw, lower);
+        return Normalize(dimension, raw);
     }
 
     private static PreferenceDimension Classify(string raw, string lower)
@@ -161,12 +158,6 @@ public static class UserPreferenceRecognizer
         if (Contains(lower, "prompt") || Contains(raw, "پرامپت"))
         {
             return PreferenceDimension.PromptFormat;
-        }
-
-        if (Contains(lower, "persian") || Contains(lower, "english") || Contains(lower, "language") ||
-            Contains(raw, "فارسی") || Contains(raw, "انگلیسی") || Contains(raw, "زبان"))
-        {
-            return PreferenceDimension.Language;
         }
 
         if (Contains(lower, "don't ask") || Contains(lower, "do not ask") || Contains(lower, "stop asking") ||
@@ -198,7 +189,7 @@ public static class UserPreferenceRecognizer
         return PreferenceDimension.General;
     }
 
-    private static UserPreferenceMatch Normalize(PreferenceDimension dimension, string raw, string lower)
+    private static UserPreferenceMatch Normalize(PreferenceDimension dimension, string raw)
     {
         return dimension switch
         {
@@ -208,15 +199,6 @@ public static class UserPreferenceRecognizer
                 "Answer briefly and simply first, and prefer concrete examples. Provide more detail only when the user explicitly asks for it.",
                 "User explicitly requested concise, simple answers with examples when helpful.",
                 "verbosity"),
-
-            PreferenceDimension.Language => Communication(
-                dimension,
-                "When responding to this user",
-                PrefersEnglish(raw, lower)
-                    ? "Reply in English by default with this user. Switch language when the user explicitly switches or asks for another language."
-                    : "Reply in Persian by default with this user. Switch language when the user explicitly switches or asks for another language.",
-                "User explicitly set a default response language.",
-                "language"),
 
             PreferenceDimension.PromptFormat => Communication(
                 dimension,
@@ -271,36 +253,6 @@ public static class UserPreferenceRecognizer
             NormalizedRule: rule,
             EvidenceSummary: evidence,
             Tags: $"communication,style,explicit-preference,{dimensionTag}");
-
-    // Both languages can be named in one message ("answer in Persian unless I ask in English",
-    // "reply in English, not Persian"). The language mentioned first is the intended default; a
-    // later mention is the exception, so it must not flip the stored preference.
-    private static bool PrefersEnglish(string raw, string lower)
-    {
-        var english = FirstMention(lower, "english", raw, "انگلیسی");
-        var persian = FirstMention(lower, "persian", raw, "فارسی");
-
-        if (english < 0)
-        {
-            return false; // no English mention: default to Persian
-        }
-
-        return persian < 0 || english < persian;
-    }
-
-    /// <summary>The earliest position at which a language is named by either its Latin or its
-    /// Persian-script term, or -1 when it is not mentioned.</summary>
-    private static int FirstMention(string lower, string latin, string raw, string script)
-    {
-        var latinAt = lower.IndexOf(latin, StringComparison.Ordinal);
-        var scriptAt = raw.IndexOf(script, StringComparison.Ordinal);
-        if (latinAt < 0)
-        {
-            return scriptAt;
-        }
-
-        return scriptAt < 0 ? latinAt : Math.Min(latinAt, scriptAt);
-    }
 
     /// <summary>
     /// Removes overbroad absolute openers ("always", "همیشه") so a general preference is

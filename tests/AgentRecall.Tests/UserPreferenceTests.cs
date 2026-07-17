@@ -94,18 +94,20 @@ public class UserPreferenceTests
         Assert.Contains("tests", result.Rule.RuleText, StringComparison.OrdinalIgnoreCase);
     }
 
-    // ---- D. Language preference -----------------------------------------------
+    // ---- D. Language preference: captured verbatim, not decided by this code --
 
     [Fact]
-    public async Task D_LanguagePreference_IsCapturedHighConfidence()
+    public async Task D_LanguagePreference_IsCapturedVerbatimAsGeneralPreference()
     {
+        // Which language to reply in is the model's call, not a dimension this recognizer
+        // classifies or decides — it just stores the user's own wording as a general preference.
         await using var db = await NewDbAsync();
         var result = await AddAsync(db, "فارسی جواب بده مگر اینکه انگلیسی پرسیدم.");
 
         Assert.NotNull(result.Rule);
-        Assert.Equal(RuleCategory.CommunicationPreference, result.Rule!.Category);
+        Assert.Equal(RuleCategory.UserPreference, result.Rule!.Category);
         Assert.Equal(CaptureReason.ExplicitUserPreference, result.Rule.CaptureReason);
-        Assert.Contains("Persian", result.Rule.RuleText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("فارسی", result.Rule.RuleText, StringComparison.OrdinalIgnoreCase);
         Assert.True(result.Rule.Confidence >= 0.85);
     }
 
@@ -167,28 +169,6 @@ public class UserPreferenceTests
 
         Assert.Null(result.Rule);
         Assert.Equal(CaptureOutcome.Skip, result.Decision!.Outcome);
-    }
-
-    // ---- J. Conflicting newer preference recommends superseding the older -----
-
-    [Fact]
-    public async Task J_ConflictingNewerPreference_RecommendsSupersedingOlder()
-    {
-        await using var db = await NewDbAsync();
-
-        var older = await AddAsync(db, "From now on, reply in Persian.");
-        Assert.Equal(RuleCategory.CommunicationPreference, older.Rule!.Category);
-
-        var newer = await AddAsync(db, "Change of mind: from now on reply in English.");
-        Assert.NotNull(newer.Rule);
-        Assert.NotEqual(older.Rule.Id, newer.Rule!.Id);
-
-        await using var scope = db.CreateScope();
-        var recs = await scope.ServiceProvider
-            .GetRequiredService<IRuleLifecycleRecommendationRepository>().ListAsync();
-        var supersede = Assert.Single(recs, r => r.RecommendationType == RecommendationType.Supersede);
-        Assert.Equal(older.Rule.Id, supersede.RuleId);
-        Assert.Equal(newer.Rule.Id, supersede.TargetRuleId);
     }
 
     // ---- K. Duplicate preference reinforces instead of duplicating ------------
@@ -318,7 +298,7 @@ public class UserPreferenceTests
     [Theory]
     [InlineData("From now on, answer short and simple.", PreferenceDimension.Verbosity)]
     [InlineData("When I ask for a prompt, give me the prompt directly.", PreferenceDimension.PromptFormat)]
-    [InlineData("Please respond in Persian.", PreferenceDimension.Language)]
+    [InlineData("Please respond in Persian.", PreferenceDimension.General)]
     [InlineData("Don't ask me too many questions; make a reasonable assumption.", PreferenceDimension.Questioning)]
     public void Recognizer_ClassifiesDimensions(string text, PreferenceDimension expected)
     {
