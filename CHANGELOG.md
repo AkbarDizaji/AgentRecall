@@ -4,6 +4,24 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.2] - 2026-07-17
+
+### Fixed
+- **`resolve_rules` no longer clobbers a rule's own rationale.** The policy decision reason was
+  written into the guidance node's `reason` key, overwriting the rule's own stored rationale. The
+  decision rationale now goes under a distinct `decision` key so both survive.
+
+### Changed
+- **`UserPreferenceRecognizer` no longer decides which language to reply in.** Deciding a default
+  language (English vs. Persian) belongs to the model, not this deterministic recognizer — an
+  earlier heuristic could even store the opposite of what was asked (e.g. "reply in English, not
+  Persian" was saved as "reply in Persian"). A stated language preference is now captured verbatim
+  as a general user preference instead of being classified into a decided default.
+  - Removing that dimension also made `FeedbackService`'s supersede-on-conflict recommendation
+    permanently unreachable (every other communication dimension always normalizes to the same
+    fixed guidance text, so language was the only one that could ever produce a real conflict).
+    That dead code path is removed too.
+
 ## [2.2.1] - 2026-07-15
 
 ### Fixed
