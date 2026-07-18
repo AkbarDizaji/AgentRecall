@@ -141,8 +141,69 @@ public static class DevcontainerScaffolder
         - **Do not narrate the mechanism.** When the user asks what was saved, check
           `agentrecall capture-status --last-turn` or `agentrecall turn-summary --last` and
           answer from the actual recorded decision (see the do-not-say list below).
-        - If the semantic judge is unavailable, automatic capture is skipped for the turn —
+        - If no judgment is supplied for a turn, automatic capture is skipped for it —
           AgentRecall never falls back to keyword capture.
+
+        ### You are the semantic judge — report your verdict every substantive turn
+
+        AgentRecall makes no model or network calls of its own: the judge in "semantic
+        capture judge" above is you. The Stop hook fires automatically after you finish, but
+        its payload carries no judgment unless you supply one yourself first. So on every
+        substantive coding turn — not on pure conversation — before you finish, decide the
+        verdict and report it:
+
+            echo '<payload>' | agentrecall finalize-turn
+
+        where `<payload>` is:
+
+            {
+              "cwd": "<this turn's working directory>",
+              "source": "model-self-judged",
+              "prompt": "<the user's message for this turn, verbatim>",
+              "assistant_response": "<a short summary of what you did/said this turn>",
+              "judgment": {
+                "decision": "Capture | SuggestCapture | Skip | ReinforceExisting | SupersedeExisting",
+                "memory_type": "EngineeringLesson | RepositoryConvention | UserPreference | CommunicationPreference | DocBackedCorrection | ToolWorkflowConvention | ReviewLesson | CodeFact | NotMemory",
+                "confidence": 0.0,
+                "capture_reason": "ExplicitUserSave | ExplicitUserDoNotSave | ObservedAgentFailure | ReviewerCorrection | UserCorrection | RepositoryConvention | UserPreference | RepeatedMistake | DocBackedCorrection | DuplicateExisting | AssistantProse | SourceDocumentOnly | CommandOutputOnly | LogOutputOnly | CodeFact | NotReusable | Ambiguous | NotMemory",
+                "target_existing_rule_id": null,
+                "normalized_rule": {
+                  "title": "...",
+                  "condition": "when ...",
+                  "action": "...",
+                  "avoid": "...",
+                  "because": "...",
+                  "scope": "...",
+                  "always_apply": false,
+                  "tags": ["..."]
+                },
+                "evidence": "...",
+                "why_not_saved": "...",
+                "dedupe_notes": "..."
+              }
+            }
+
+        Use `cwd` and `prompt` exactly as they were for this turn — the turn correlation id is
+        derived from both, and a mismatch stops this capture from joining the turn's earlier
+        recall in `turn-summary`.
+
+        Required fields depend on `decision`:
+
+        - **Skip** — `why_not_saved` is required. This is the common case: most turns are
+          ordinary work with nothing durable to learn, and a real "nothing worth saving"
+          verdict is what makes `agentrecall capture-status --last-turn` trustworthy, instead
+          of showing the generic "judge unavailable" placeholder the native Stop hook records
+          when no judgment is supplied at all.
+        - **Capture** / **SuggestCapture** — `normalized_rule.title`, `.condition`, and
+          `.action` are the minimum; also fill `.because` and `.scope`, or `Capture` downgrades
+          to a pending suggestion instead.
+        - **ReinforceExisting** — `target_existing_rule_id` and `dedupe_notes` are required (no
+          new rule is created; the existing one's confidence is bumped instead).
+        - **SupersedeExisting** — `target_existing_rule_id` is required, plus a sound
+          `normalized_rule` (all of title/condition/action/because/scope filled in).
+
+        Do this yourself even when nothing seems worth saving — a `Skip` verdict you report is
+        real signal; a turn you never report on just looks unavailable.
 
         ### AgentRecall behavior contract
 

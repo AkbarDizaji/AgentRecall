@@ -450,8 +450,20 @@ public sealed class TurnFinalizer : ITurnFinalizer
         CancellationToken cancellationToken = default)
     {
         var all = await _finalizations.ListAsync(cancellationToken).ConfigureAwait(false);
+
+        // A turn can be finalized twice: once by a model-supplied judgment, once by the
+        // native Stop hook firing with none (recorded as an "unavailable" skip). Within a
+        // turn, the real judged decision must win "last" even if the unjudged record was
+        // created afterward — otherwise the native hook's placeholder silently buries the
+        // actual verdict. Across turns, recency still decides: this never lets an older
+        // turn's judged record outrank a newer turn's real (if unjudged) outcome.
         var last = all
             .Where(f => cwd is null || string.Equals(f.Cwd, cwd, StringComparison.Ordinal))
+            .GroupBy(f => string.IsNullOrEmpty(f.TurnId) ? $"__id:{f.Id}" : f.TurnId)
+            .Select(g => g.OrderByDescending(f => f.DecisionSource == JudgeDecisionSource)
+                .ThenByDescending(f => f.CreatedAt)
+                .ThenByDescending(f => f.Id)
+                .First())
             .OrderByDescending(f => f.CreatedAt)
             .ThenByDescending(f => f.Id)
             .FirstOrDefault();

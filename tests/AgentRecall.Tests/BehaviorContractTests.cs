@@ -4,6 +4,7 @@ using AgentRecall.Cli.Devcontainer;
 using AgentRecall.Cli.Mcp;
 using AgentRecall.Cli.Mcp.Tools;
 using AgentRecall.Core.Abstractions;
+using AgentRecall.Core.Capture.Judge;
 using AgentRecall.Core.Domain;
 using AgentRecall.Core.Feedback;
 using AgentRecall.Core.Finalization;
@@ -285,6 +286,70 @@ public class BehaviorContractTests
         {
             Directory.Delete(root, recursive: true);
         }
+    }
+
+    // ----- 4b. Self-reported judgment contract: the model is told to be the judge -----
+
+    // The Stop hook fires with no judgment on its own payload, so the guidance must tell the
+    // model to construct one itself and pipe it into finalize-turn on every substantive turn.
+    [Fact]
+    public void Guidance_InstructsSelfReportedJudgmentOnEverySubstantiveTurn()
+    {
+        Assert.Contains("You are the semantic judge", Guidance, StringComparison.Ordinal);
+        Assert.Contains("echo '<payload>' | agentrecall finalize-turn", Guidance, StringComparison.Ordinal);
+        Assert.Contains("substantive coding turn", Guidance, StringComparison.Ordinal);
+    }
+
+    // The documented JSON shape must match what TurnPayload.ParseJudgment actually reads.
+    [Theory]
+    [InlineData("\"cwd\"")]
+    [InlineData("\"prompt\"")]
+    [InlineData("\"assistant_response\"")]
+    [InlineData("\"judgment\"")]
+    [InlineData("\"decision\"")]
+    [InlineData("\"memory_type\"")]
+    [InlineData("\"confidence\"")]
+    [InlineData("\"capture_reason\"")]
+    [InlineData("\"target_existing_rule_id\"")]
+    [InlineData("\"normalized_rule\"")]
+    [InlineData("\"why_not_saved\"")]
+    [InlineData("\"dedupe_notes\"")]
+    public void Guidance_JudgmentPayloadNamesRealJsonKeys(string key) =>
+        Assert.Contains(key, Guidance, StringComparison.Ordinal);
+
+    // Every JudgeDecision/JudgeMemoryType/JudgeCaptureReason value named in the guidance must
+    // actually parse as that enum, so the documented options never drift from the real ones.
+    [Fact]
+    public void Guidance_EnumOptionsListedForEachFieldAllParse()
+    {
+        var decisions = ExtractPipedOptions("\"decision\": \"");
+        Assert.NotEmpty(decisions);
+        Assert.All(decisions, d => Assert.True(Enum.TryParse<JudgeDecision>(d, out _), $"'{d}' is not a JudgeDecision"));
+
+        var memoryTypes = ExtractPipedOptions("\"memory_type\": \"");
+        Assert.NotEmpty(memoryTypes);
+        Assert.All(memoryTypes, m => Assert.True(Enum.TryParse<JudgeMemoryType>(m, out _), $"'{m}' is not a JudgeMemoryType"));
+
+        var reasons = ExtractPipedOptions("\"capture_reason\": \"");
+        Assert.NotEmpty(reasons);
+        Assert.All(reasons, r => Assert.True(Enum.TryParse<JudgeCaptureReason>(r, out _), $"'{r}' is not a JudgeCaptureReason"));
+    }
+
+    // Required-field guidance per decision must be spelled out, not left implicit.
+    [Theory]
+    [InlineData("why_not_saved` is required")]
+    [InlineData("target_existing_rule_id` and `dedupe_notes` are required")]
+    public void Guidance_StatesRequiredFieldsPerDecision(string phrase) =>
+        Assert.Contains(phrase, Guidance, StringComparison.Ordinal);
+
+    private static List<string> ExtractPipedOptions(string fieldMarker)
+    {
+        var start = Guidance.IndexOf(fieldMarker, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"Guidance must document the {fieldMarker} field.");
+        start += fieldMarker.Length;
+        var end = Guidance.IndexOf('"', start);
+        Assert.True(end > start, "Malformed documented field options.");
+        return Guidance[start..end].Split('|', StringSplitOptions.TrimEntries).ToList();
     }
 
     // ----- 5. Status command contract (both spellings) -----

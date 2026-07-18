@@ -7,6 +7,7 @@ using AgentRecall.Core.Activity;
 using AgentRecall.Core.Capture;
 using AgentRecall.Core.Configuration;
 using AgentRecall.Core.Domain;
+using AgentRecall.Core.Finalization;
 using AgentRecall.Core.Summary;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -84,7 +85,8 @@ public class TurnSummaryTests
         IEnumerable<int>? suggested = null,
         IEnumerable<string>? skipped = null,
         string? error = null,
-        DateTimeOffset createdAt = default)
+        DateTimeOffset createdAt = default,
+        string decisionSource = "")
     {
         await using var scope = db.CreateScope();
         var repo = scope.ServiceProvider.GetRequiredService<ITurnFinalizationRepository>();
@@ -97,6 +99,7 @@ public class TurnSummaryTests
             SuggestedRuleIds = suggested is null ? string.Empty : string.Join(',', suggested),
             SkippedReasons = skipped is null ? string.Empty : string.Join('\n', skipped),
             ErrorSummary = error ?? string.Empty,
+            DecisionSource = decisionSource,
         });
     }
 
@@ -285,6 +288,28 @@ public class TurnSummaryTests
         Assert.Equal(r, summary.Captured[0].Id);
         // Captured rules carry the capture evidence as the reason (structured, not parsed).
         Assert.Equal(nameof(CaptureReason.ObservedAgentFailure), summary.Captured[0].Reason);
+    }
+
+    // J2. A model-supplied judgment for a turn still wins the summary even when a later
+    // "judge unavailable" finalization was recorded for the same turn (the native Stop hook
+    // firing with no judgment) — the real judged decision must not be buried.
+    [Fact]
+    public async Task Summary_PrefersJudgedFinalizationOverLaterUnavailableForSameTurn()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+        var r = await AddRule(db, "flattening conditionals", "Preserve else semantics",
+            reason: CaptureReason.ObservedAgentFailure, category: RuleCategory.EngineeringLesson);
+
+        await AddFinalization(db, "turn-2b", captured: [r],
+            decisionSource: TurnFinalizer.JudgeDecisionSource, createdAt: DateTimeOffset.UtcNow);
+        await AddFinalization(db, "turn-2b", skipped: ["Semantic capture judge unavailable; no automatic capture performed."],
+            createdAt: DateTimeOffset.UtcNow.AddSeconds(1));
+
+        var summary = await BuildForTurn(db, "turn-2b");
+        Assert.Single(summary.Captured);
+        Assert.Equal(r, summary.Captured[0].Id);
+        Assert.Empty(summary.Skipped);
     }
 
     [Fact] // K. Summary includes suggested pending rules from the same turn.

@@ -1,6 +1,7 @@
 using System.Globalization;
 using AgentRecall.Core.Abstractions;
 using AgentRecall.Core.Domain;
+using AgentRecall.Core.Finalization;
 
 namespace AgentRecall.Core.Summary;
 
@@ -225,9 +226,14 @@ public sealed class TurnSummaryService : ITurnSummaryService
     private async Task<TurnFinalization?> FindFinalizationByTurnAsync(string turnId, CancellationToken cancellationToken)
     {
         var all = await _finalizations.ListAsync(cancellationToken).ConfigureAwait(false);
+
+        // As in TurnFinalizer.GetLastAsync: a real judged decision for this turn must win
+        // over a later "judge unavailable" record from the native Stop hook firing with no
+        // supplied judgment.
         return all
             .Where(f => string.Equals(f.TurnId, turnId, StringComparison.Ordinal))
-            .OrderByDescending(f => f.CreatedAt)
+            .OrderByDescending(f => f.DecisionSource == TurnFinalizer.JudgeDecisionSource)
+            .ThenByDescending(f => f.CreatedAt)
             .ThenByDescending(f => f.Id)
             .FirstOrDefault();
     }

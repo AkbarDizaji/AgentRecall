@@ -874,7 +874,16 @@ content, and the system only validates the judge's structured output and persist
 continues to work through the existing explicit flow.
 
 The verdict is supplied by the host on the `finalize-turn` payload as a `judgment`
-object (AgentRecall itself makes no network or LLM calls). Its strict-JSON shape is:
+object (AgentRecall itself makes no network or LLM calls) — **the Stop hook alone
+does not produce one.** Claude Code invokes the Stop hook automatically with its own
+standard payload (`cwd`, `transcript_path`, etc.), which has no `judgment` field, so a
+turn where nothing else supplies one is recorded as "judge unavailable" and skipped.
+The model itself is the judge: `agentrecall devcontainer init` scaffolds `CLAUDE.md`
+guidance instructing it to decide the verdict on every substantive turn and pipe it
+into `finalize-turn` directly, before the native Stop hook fires. A finalization with
+a real judged decision always wins over a later "unavailable" one for the same turn,
+so the native hook firing afterward with nothing to add is harmless. Its strict-JSON
+shape is:
 
 ```json
 {

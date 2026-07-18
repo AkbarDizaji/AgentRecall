@@ -70,13 +70,14 @@ public class TurnFinalizerTests
         string? prompt = null,
         string? assistant = null,
         bool? accepted = null,
-        string? cwd = "/repo/project") =>
+        string? cwd = "/repo/project",
+        string source = "stop_hook") =>
         new()
         {
             Prompt = prompt,
             AssistantResponse = assistant,
             Accepted = accepted,
-            Source = "stop_hook",
+            Source = source,
             Cwd = cwd,
             ScopeLevel = cwd is null ? ScopeLevel.Global : ScopeLevel.Repository,
             ScopeValue = cwd is null ? null : "project",
@@ -366,6 +367,28 @@ public class TurnFinalizerTests
         Assert.NotNull(last);
         Assert.Single(last!.Captured);
         Assert.Equal(TurnFinalizer.JudgeDecisionSource, last.DecisionSource);
+    }
+
+    // U2. A model-supplied judgment for a turn still wins "last" even when the native Stop
+    // hook fires afterward for the same turn with no judgment (recorded as "unavailable").
+    [Fact]
+    public async Task Status_PrefersJudgedDecisionOverLaterUnavailableForSameTurn()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        // Same cwd + prompt => same turn correlation id; distinct source => distinct hash,
+        // so this is not treated as an idempotent replay of the first finalization.
+        await Finalize(db, Turn(Verdict(), prompt: "shared turn", source: "model-self-judged"));
+        await Finalize(db, Turn(judgment: null, prompt: "shared turn", source: "stop_hook"));
+
+        await using var scope = db.CreateScope();
+        var finalizer = scope.ServiceProvider.GetRequiredService<ITurnFinalizer>();
+        var last = await finalizer.GetLastAsync();
+
+        Assert.NotNull(last);
+        Assert.Equal(TurnFinalizer.JudgeDecisionSource, last!.DecisionSource);
+        Assert.Single(last.Captured);
     }
 
     // V. JSON output is valid and carries the documented shape plus the judge decision fields.
