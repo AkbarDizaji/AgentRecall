@@ -4,6 +4,15 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.3] - 2026-07-19
+
+### Added
+- **Rule delete capability.** Rules could previously only be archived (soft-retired, kept in the
+  database with an `Archived` status). `IRuleLifecycleService.DeleteAsync` now permanently removes
+  a rule's row, exposed as `agentrecall rules delete <id> [--force]` and the `delete_rule` MCP tool.
+  Deleting a rule that is currently in force (`Active` or `Promoted`) requires `force=true`; other
+  statuses delete without it. A `RuleDeleted` event is recorded for the audit log either way.
+
 ## [2.2.2] - 2026-07-17
 
 ### Fixed
