@@ -497,6 +497,30 @@ public static partial class CommandRouter
                 }
             }
 
+            case "delete":
+            {
+                if (args.Length < 2 || !int.TryParse(args[1], out var id))
+                {
+                    output.WriteLine("Usage: agentrecall rules delete <id> [--force]");
+                    return 1;
+                }
+
+                var force = ParseOptions(args[2..]).ContainsKey("force");
+
+                var lifecycle = scope.ServiceProvider.GetRequiredService<IRuleLifecycleService>();
+                try
+                {
+                    var deleted = await lifecycle.DeleteAsync(id, force, cancellationToken).ConfigureAwait(false);
+                    output.WriteLine($"Rule #{deleted.Id} permanently deleted (was {deleted.Status}).");
+                    return 0;
+                }
+                catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException)
+                {
+                    output.WriteLine(ex.Message);
+                    return 1;
+                }
+            }
+
             case "supersede":
             {
                 if (args.Length < 3 || !int.TryParse(args[1], out var oldId) || !int.TryParse(args[2], out var newId))
@@ -530,6 +554,7 @@ public static partial class CommandRouter
                 output.WriteLine("  agentrecall rules promote <id>");
                 output.WriteLine("  agentrecall rules supersede <oldId> <newId>");
                 output.WriteLine("  agentrecall rules archive <id>");
+                output.WriteLine("  agentrecall rules delete <id> [--force]");
                 output.WriteLine("  agentrecall rules conflicts [--scope-level <level>] [--scope-value <text>] [--json]");
                 output.WriteLine("  agentrecall rules explain <id>");
                 return 1;

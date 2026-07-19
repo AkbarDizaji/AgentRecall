@@ -101,6 +101,29 @@ public sealed class RuleLifecycleService : IRuleLifecycleService
         return archived;
     }
 
+    public async Task<RecallRule> DeleteAsync(int id, bool force = false, CancellationToken cancellationToken = default)
+    {
+        var rule = await GetOrThrowAsync(id, cancellationToken).ConfigureAwait(false);
+
+        if (!force && rule.Status is RuleStatus.Active or RuleStatus.Promoted)
+        {
+            throw new InvalidOperationException(
+                $"Rule #{id} is {rule.Status} and currently in force. Pass force=true to delete it anyway.");
+        }
+
+        await _rules.DeleteAsync(id, cancellationToken).ConfigureAwait(false);
+
+        await _events.AddAsync(new RecallEvent
+        {
+            Type = RecallEventType.RuleDeleted,
+            RuleId = id,
+            Trigger = "delete",
+            Details = $"Rule #{id} permanently deleted (was {rule.Status}).",
+        }, cancellationToken).ConfigureAwait(false);
+
+        return rule;
+    }
+
     public async Task<RecallRule> ReinforceAsync(int id, double amount, CancellationToken cancellationToken = default)
     {
         var rule = await GetOrThrowAsync(id, cancellationToken).ConfigureAwait(false);

@@ -141,4 +141,62 @@ public class LifecycleTests
 
         Assert.Equal(RuleStatus.Archived, updated.Status);
     }
+
+    [Fact]
+    public async Task Delete_OnDraftRule_RemovesRowAndRecordsEvent()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+        var id = await SeedRule(db, RuleStatus.Draft);
+
+        await using (var scope = db.CreateScope())
+        {
+            var lifecycle = scope.ServiceProvider.GetRequiredService<IRuleLifecycleService>();
+            var deleted = await lifecycle.DeleteAsync(id);
+            Assert.Equal(RuleStatus.Draft, deleted.Status);
+        }
+
+        await using (var scope = db.CreateScope())
+        {
+            var rules = scope.ServiceProvider.GetRequiredService<IRecallRuleRepository>();
+            var events = scope.ServiceProvider.GetRequiredService<IRecallEventRepository>();
+
+            Assert.Null(await rules.GetAsync(id));
+
+            var all = await events.ListAsync();
+            Assert.Contains(all, e => e.Type == RecallEventType.RuleDeleted && e.RuleId == id);
+        }
+    }
+
+    [Fact]
+    public async Task Delete_OnActiveRule_WithoutForce_Throws()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+        var id = await SeedRule(db, RuleStatus.Active);
+
+        await using var scope = db.CreateScope();
+        var lifecycle = scope.ServiceProvider.GetRequiredService<IRuleLifecycleService>();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => lifecycle.DeleteAsync(id));
+
+        var rules = scope.ServiceProvider.GetRequiredService<IRecallRuleRepository>();
+        Assert.NotNull(await rules.GetAsync(id));
+    }
+
+    [Fact]
+    public async Task Delete_OnActiveRule_WithForce_Removes()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+        var id = await SeedRule(db, RuleStatus.Active);
+
+        await using var scope = db.CreateScope();
+        var lifecycle = scope.ServiceProvider.GetRequiredService<IRuleLifecycleService>();
+
+        await lifecycle.DeleteAsync(id, force: true);
+
+        var rules = scope.ServiceProvider.GetRequiredService<IRecallRuleRepository>();
+        Assert.Null(await rules.GetAsync(id));
+    }
 }

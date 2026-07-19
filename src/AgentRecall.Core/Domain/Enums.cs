@@ -116,6 +116,9 @@ public enum RecallEventType
 
     /// <summary>A captured candidate was rejected as not memory-worthy.</summary>
     RuleRejected = 8,
+
+    /// <summary>A rule was permanently removed from the database.</summary>
+    RuleDeleted = 9,
 }
 
 /// <summary>

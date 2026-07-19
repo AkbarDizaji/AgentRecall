@@ -28,4 +28,13 @@ public interface IRuleLifecycleService
     /// and auto-promotes it once the promotion threshold is reached.
     /// </summary>
     Task<RecallRule> ReinforceAsync(int id, double amount, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Permanently removes a rule from the database. Unlike <see cref="ArchiveAsync"/>,
+    /// this is irreversible — there is no status to revert. Deleting a rule that is
+    /// currently in force (<see cref="RuleStatus.Active"/> or <see cref="RuleStatus.Promoted"/>)
+    /// requires <paramref name="force"/>, since that is more likely a mistake than
+    /// deleting a Draft/Pending/Archived/Superseded/Retired rule.
+    /// </summary>
+    Task<RecallRule> DeleteAsync(int id, bool force = false, CancellationToken cancellationToken = default);
 }
