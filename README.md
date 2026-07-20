@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/AkbarDizaji/AgentRecall/actions/workflows/ci.yml/badge.svg)](https://github.com/AkbarDizaji/AgentRecall/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/AkbarDizaji/AgentRecall/branch/main/graph/badge.svg)](https://codecov.io/gh/AkbarDizaji/AgentRecall)
+[![Indexed on TensorBlock MCP Index](https://mcp-index.tensorblock.co/v1/servers/github-akbardizaji-agentrecall-9b7529bd/badge.svg)](https://tensorblock.co/mcp/servers/github-akbardizaji-agentrecall-9b7529bd)
 
 **A local-first memory for AI coding agents.** AgentRecall turns the feedback and
 failures you run into while coding into reusable rules, then serves the right
