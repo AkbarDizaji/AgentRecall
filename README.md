@@ -2,81 +2,73 @@
 
 [![CI](https://github.com/AkbarDizaji/AgentRecall/actions/workflows/ci.yml/badge.svg)](https://github.com/AkbarDizaji/AgentRecall/actions/workflows/ci.yml)
 
-**A local-first memory for AI coding agents.** AgentRecall captures the feedback
-and failures you run into while coding, turns them into reusable technical rules,
-and serves those rules back — on the command line or directly to Claude Code over
-MCP. Everything stays on your machine: no cloud sync, no web UI, no API keys.
+**A local-first memory for AI coding agents.** AgentRecall turns the feedback and
+failures you run into while coding into reusable rules, then serves the right
+ones back — on the command line or directly to Claude Code over MCP. Everything
+stays on your machine: no cloud sync, no web UI, no API keys.
 
----
+## Contents
+
+- [What it does](#what-it-does)
+- [Install](#install)
+- [Quick start](#quick-start)
+- [Using AgentRecall](#using-agentrecall)
+- [Command reference](#command-reference)
+- [Core concepts](#core-concepts)
+  - [User preferences](#user-preferences)
+  - [Standing rules](#standing-rules)
+  - [Project DNA](#project-dna)
+  - [Seed packs](#seed-packs)
+  - [Capture pipeline](#capture-pipeline)
+  - [Interactive memory](#interactive-memory)
+  - [Visibility: activity notices & turn summary](#visibility-activity-notices--turn-summary)
+- [Claude Code integration](#claude-code-integration)
+- [Configuration](#configuration)
+- [Development](#development)
 
 ## What it does
 
-AgentRecall is more than a notes file — it actively manages a body of technical
-knowledge so the right guidance reaches your agent at the right moment:
-
 - **Turns feedback into structured rules.** Each correction is parsed into a
-  readable `trigger`, `rule`, `do`, `do_not`, `reason`, and `applies_to`, then
-  validated for quality — not stored as a raw note.
-- **Ranks what to surface.** Retrieval scores rules by keyword + semantic +
-  domain + task-type + scope match, weighted by confidence, and returns them
-  bucketed into **must-follow**, **suggested**, and **warnings** within a token
-  budget — not a flat keyword dump. Here "semantic" means a deterministic,
-  built-in concept graph (e.g. *refund* relates to *money*), **not** vector
-  embeddings — ranking is keyword + concept based out of the box. Embedding-based
-  similarity is an optional extension point that stays off until an
-  `IEmbeddingProvider` is configured (the default contributes nothing); see
-  [Search ranking](#search-ranking).
-- **Applies universal constraints every turn.** Style, tone, and quality rules that
-  belong on *every* task (e.g. "don't leave unnecessary comments") are captured as
-  **standing rules** and injected regardless of keyword relevance — capped and
-  prominent so they reach the model when it matters, not lost below the relevance
-  floor; see [Standing Rules](#standing-rules).
-- **Resolves conflicts automatically.** When rules disagree ("use the repository
-  pattern" vs "do not"), the policy engine picks the effective one by scope,
-  explicit supersede, priority, recency, then confidence.
-- **Learns from failures.** Build, test, and lint logs feed back in; repeatedly
-  hitting the same problem raises a rule's confidence and can auto-promote the
-  rule that prevents it.
-- **Compresses its own memory.** Duplicate, near-duplicate, and overlapping
-  rules are detected and merged into one canonical rule, with the originals kept
-  as an audit trail.
-- **Measures retrieval quality.** A bundled evaluation reports Precision@1/@3
-  and Recall@5 and fails CI on a regression, so recall stays trustworthy as the
-  rule set grows.
-- **Injects deterministically.** A gated Claude Code hook prepends the relevant
-  rules to the model's context on every matching prompt — not just when the
-  model remembers to ask.
-
-Everything below is the detail behind each of these.
-
----
+  `trigger`, `rule`, `do`, `do_not`, `reason`, and `applies_to`, and validated —
+  not stored as a raw note.
+- **Ranks what to surface.** `search` scores rules by keyword + a deterministic
+  concept graph (e.g. *refund* relates to *money* — not vector embeddings)
+  + scope + confidence, then buckets results into **must-follow**,
+  **suggested**, and **warnings** within a token budget. An `IEmbeddingProvider`
+  extension point exists for hybrid search, but ships as a no-op — ranking is
+  keyword + concept based and fully local until you configure one.
+- **Applies universal constraints every turn.** Style/tone/quality rules that
+  belong on *every* task are captured as [standing rules](#standing-rules) and
+  injected regardless of keyword relevance.
+- **Resolves conflicts automatically.** When rules disagree, the policy engine
+  picks the effective one by scope, explicit supersede, priority, recency, then
+  confidence.
+- **Learns from failures.** Build/test/lint logs feed back in; repeated
+  failures raise a rule's confidence and can auto-promote the fix.
+- **Compresses its own memory.** Duplicate and overlapping rules are detected
+  and merged, with originals kept as an audit trail.
+- **Measures retrieval quality.** A bundled eval reports Precision@1/@3 and
+  Recall@5, and fails CI on a regression.
+- **Injects deterministically.** A gated Claude Code hook prepends relevant
+  rules to context on every matching prompt — not just when the model
+  remembers to ask.
 
 ## Install
 
-AgentRecall is a .NET global tool. You need the [.NET SDK](https://dotnet.microsoft.com/download)
-(8 or newer) installed, then:
+AgentRecall is a .NET global tool. Install the [.NET SDK](https://dotnet.microsoft.com/download)
+(8+), then:
 
 ```bash
 dotnet tool install -g AgentRecall
-```
-
-This installs `agentrecall` into the .NET tools directory (`~/.dotnet/tools` on
-macOS/Linux, `%USERPROFILE%\.dotnet\tools` on Windows). Verify it:
-
-```bash
 agentrecall --version
 ```
 
-**PATH is handled for you.** A .NET global tool has no post-install step, so a
-fresh install often isn't on `PATH` in your current shell — which is why
-`agentrecall` can report "command not found" right after a successful install.
-The first time AgentRecall runs it adds its directory to your PATH permanently
-(your shell profile on macOS/Linux, the user `PATH` on Windows) and prints a
-one-time notice; open a new terminal and it's found automatically. If the very
-first invocation is the one that can't be found, either open a new terminal, or
-run it once by full path / via the bootstrap below.
-
-Bootstrap install (installs **and** fixes PATH in one step):
+**PATH.** A fresh install often isn't on `PATH` in your current shell, so
+`agentrecall` can report "command not found" right after installing — the tool
+fixes its own PATH on first run and prints a one-time notice, so a new terminal
+picks it up automatically. If the very first invocation is the one that fails,
+either open a new terminal or use the bootstrap script below, which installs
+**and** fixes PATH in one step:
 
 ```bash
 # macOS / Linux
@@ -88,62 +80,26 @@ curl -fsSL https://raw.githubusercontent.com/AkbarDizaji/AgentRecall/main/script
 iwr -useb https://raw.githubusercontent.com/AkbarDizaji/AgentRecall/main/scripts/install.ps1 | iex
 ```
 
-You can also fix PATH any time with `agentrecall setup`.
-
-Update or remove it later with:
-
-```bash
-dotnet tool update -g AgentRecall
-dotnet tool uninstall -g AgentRecall
-```
+You can also fix PATH any time with `agentrecall setup`. Update/remove later
+with `dotnet tool update -g AgentRecall` / `dotnet tool uninstall -g AgentRecall`.
 
 ### Dev containers
 
-A global tool installs under `~/.dotnet/tools`, which lives on the container
-filesystem and is wiped by "Rebuild Container" — so a manual `dotnet tool install`
-disappears on every rebuild. Run this once from your project root to make the
-install survive rebuilds:
+A global tool lives under `~/.dotnet/tools`, which is wiped on container
+rebuild. Run once per project to make the install and hook wiring survive
+rebuilds:
 
 ```bash
 agentrecall devcontainer init
 ```
 
-It always wires the **`UserPromptSubmit` hook** into `.claude/settings.json` (see
-[Guarantee it with a hook](#guarantee-it-with-a-hook-deterministic-injection)),
-so relevant rules are injected automatically on every prompt rather than only
-when the agent decides to call an MCP tool, and appends the **`CLAUDE.md`
-guidance block** so the agent recalls rules and captures accepted PR comments as
-Active rules by default. These work in any environment, with or without a dev
-container. Existing settings, `CLAUDE.md` content, and JSONC are merged or left
-untouched — never overwritten — and a re-run is a no-op.
-
-The dev-container scaffolding is separate and **opt-in**:
-
-- If you **already have** a `devcontainer.json`, it's wired into automatically: the
-  `.devcontainer/agentrecall-post-create.sh` script is written and the exact keys to
-  merge in are printed — your JSONC is left untouched, never rewritten.
-- If you have **none**, none is created. AgentRecall doesn't hand your project a dev
-  container it didn't ask for; it prints the one command to generate one when you want
-  it:
-
-```bash
-agentrecall devcontainer init --create
-```
-
-`--create` writes `.devcontainer/devcontainer.json` and the
-`agentrecall-post-create.sh` script, which reinstalls AgentRecall from NuGet, persists
-the database on a named Docker volume, and re-registers the MCP server on every
-create/rebuild. The script logs each step and, on failure, names the command that
-aborted it.
-
-> **PATH note.** A global tool lives in `~/.dotnet/tools`, and VS Code often opens
-> integrated terminals as non-login shells that don't read `~/.profile`, so
-> `agentrecall` can be installed yet "not found". The generated manifest adds the
-> directory via `remoteEnv`, and the setup script also appends it to `~/.bashrc`;
-> for an existing `devcontainer.json`, add
-> `"remoteEnv": { "PATH": "${containerEnv:PATH}:/home/vscode/.dotnet/tools" }`.
-
----
+This wires the `UserPromptSubmit` hook (see [Claude Code integration](#claude-code-integration))
+and appends the `CLAUDE.md` guidance block — merged in, never overwritten, and
+a re-run is a no-op. Dev-container scaffolding itself is separate and
+**opt-in**: if a `devcontainer.json` already exists it's wired in automatically;
+if not, none is created — pass `--create` to generate one that reinstalls
+AgentRecall, persists data on a named volume, and re-registers the MCP server
+on every rebuild.
 
 ## Quick start
 
@@ -161,90 +117,45 @@ agentrecall feedback add \
 agentrecall search "sql injection"
 ```
 
-That's the whole loop: **capture → recall.** Everything below is detail on each
-step.
-
----
+That's the whole loop: **capture → recall.**
 
 ## Using AgentRecall
 
-### Capture feedback
-
-Record a lesson learned. `--task` and `--feedback` are required; the rest add
-context and improve later matching:
+**Capture feedback** — `--task` and `--feedback` are required; the rest add
+context that improves matching:
 
 ```bash
 agentrecall feedback add \
   --task "writing a SQL query for user lookup" \
   --feedback "use parameterized queries to avoid injection" \
-  --bad-output "string-concatenated SQL" \
-  --fixed-output "a parameterized command with @name" \
-  --scope-level Repository --scope-value my-repo \
-  --tags "security,sql"
+  --bad-output "string-concatenated SQL" --fixed-output "a parameterized command with @name" \
+  --scope-level Repository --scope-value my-repo --tags "security,sql"
 ```
 
-Each entry is stored as an event and turned into a **rule** you can search for.
-
-### Search and read rules
+**Search and read rules**, ranked by relevance, status, and confidence:
 
 ```bash
-agentrecall search "sql injection"          # ranked keyword search
-agentrecall search "sql" --scope-value my-repo --limit 5
-agentrecall rules list                       # everything you've captured
-agentrecall rules show 1                      # full detail for one rule
+agentrecall search "sql injection"
+agentrecall rules list
+agentrecall rules show 1
 ```
 
-Results are ranked by relevance, rule status, and confidence.
-
-### Search ranking
-
-Ranking is **keyword-based out of the box** — there is no semantic vector search
-unless you wire one up. `search` scores rules by weighted term matches across the
-trigger, tags, rule text, mistake, and technical context, blended with status and
-confidence. Context injection adds a deterministic, built-in **concept graph** so a
-task about *refunds* can surface a *money* rule with no shared words; this is rule-based
-relatedness, not embeddings.
-
-The pipeline has an `IEmbeddingProvider` extension point for hybrid (keyword + vector)
-search, but the only provider shipped is a no-op (`IsAvailable == false`), so **no
-embeddings are computed and no external service is contacted** by default. Until a real
-provider is configured, semantic similarity contributes nothing to the score — ranking
-stays keyword + concept based and fully local and deterministic.
-
-> **Tags are a comma-separated string, not a normalized table.** Tag matching therefore
-> happens in memory (search tokenizes the field), with no indexed/SQL-level tag filter.
-> This is fine for the local-first, single-user corpus sizes AgentRecall targets; a tag
-> join table would be the change to make if tag querying ever needs to scale.
-
-### Curate rules
-
-Captured rules are **Active** by default, so they apply immediately. Promote the
-best, retire the rest:
+**Curate.** Captured rules are **Active** by default. Lifecycle states are
+`Draft → Pending → Active → Promoted`, plus dead-end states `Superseded`,
+`Retired`, `Archived` (excluded from search and dedup):
 
 ```bash
-agentrecall rules promote 1                  # Active   → Promoted
-agentrecall rules approve 1                  # Pending  → Active (if captured as pending)
-agentrecall rules supersede 1 2              # replace rule 1 with rule 2
-agentrecall rules archive 3                  # hide a rule from search
+agentrecall rules promote 1     # Active   → Promoted
+agentrecall rules approve 1     # Pending  → Active
+agentrecall rules supersede 1 2 # replace rule 1 with rule 2
+agentrecall rules archive 3     # hide from search
 ```
 
-A rule's lifecycle states (the `RuleStatus` enum) are `Draft`, `Pending`, `Active`,
-`Promoted`, `Superseded`, `Retired`, and `Archived`. The usual flow is
-`Pending → Active → Promoted`. `Active` and `Promoted` are the **in-force** states —
-the only ones the policy engine applies and context injection can mark must-follow.
-`Superseded`, `Retired`, and `Archived` are **dead**: they never show up in search and
-are never reused when deduplicating. `Draft` and `Pending` are still searchable but are
-not auto-applied until approved.
+Prefer to review before a rule counts? Capture with `--pending`, or set
+`AutoApproveFeedback: false` to make it the default.
 
-Prefer to review before a rule counts? Capture it as pending with
-`agentrecall feedback add … --pending`, or make pending the default for every
-capture by setting `AutoApproveFeedback` to `false` (see [Configuration](#configuration)).
-
-### Learn from failures
-
-Point AgentRecall at a build, test, or lint log. Each failure is recorded, and
-failures that match an existing rule increase its confidence — repeatedly hitting
-the same problem can automatically promote the rule that prevents it:
+**Learn from failures.** Failures that match an existing rule raise its
+confidence and can auto-promote the fix:
 
 ```bash
 agentrecall import build-log ./build.log
@@ -252,703 +163,339 @@ agentrecall import test-log ./test.log
 agentrecall import lint-log ./lint.log
 ```
 
-### Learn from PR review comments
-
-Reviewer comments are feedback too. Point AgentRecall at a comments file — JSON
-from the GitHub CLI or plain text — and each comment that reads as a reusable
-correction becomes a **pending rule** (tagged `pr-review`); praise, questions and
-nits are skipped:
+**Learn from PR review comments.** Each comment that reads as a reusable
+correction becomes a **pending** rule (tagged `pr-review`); praise/questions/nits
+are skipped. Add `--accepted` if you've already acted on the comments, so they
+land as **Active** rules directly:
 
 ```bash
 gh pr view 42 --json comments > comments.json
 agentrecall import pr-comments ./comments.json --task "PR #42: add refunds" --scope-value my-repo
 ```
 
-Then review what it captured with `agentrecall rules list` and approve the keepers.
-
-If the comments have already been **accepted** — you acted on them, so they're not
-guesses to vet — add `--accepted` and they're recorded as **Active** rules
-straight away (the MCP tool takes the same `accepted: true`). The scaffolded
-`CLAUDE.md` guidance tells the agent to do this on its own: when you ask it to
-apply what a review comment says, it captures that comment as an Active rule
-without being asked.
-
-### Evaluate retrieval quality
-
-Retrieval is only useful if the right rule comes back for a task. `eval retrieval`
-runs a bundled dataset of rules and query scenarios through the ranker in a
-throwaway store (your real database is never touched) and reports **Precision@1**,
-**Precision@3**, and **Recall@5**:
+**Evaluate retrieval quality** against a bundled dataset (a throwaway store —
+your real database is never touched). Exits non-zero on a regression below
+baseline; the same check runs as a unit test:
 
 ```bash
-agentrecall eval retrieval                 # bundled dataset
+agentrecall eval retrieval
 agentrecall eval retrieval --dataset ./my-eval.json
 ```
 
-It exits non-zero when any metric falls below the dataset's baseline, so CI fails
-on a retrieval regression. The same check also runs as a unit test.
-
-### Command reference
+## Command reference
 
 | Command | Description |
 | --- | --- |
 | `init` | Create the local data directory and database. |
 | `setup` | Ensure the .NET tools directory is on your PATH (runs automatically on first use). |
-| `devcontainer init` | Wire AgentRecall's hooks + CLAUDE.md guidance; pass `--create` to also scaffold a dev container that reinstalls it on every rebuild (optional `[path]`). |
+| `devcontainer init` | Wire AgentRecall's hooks + CLAUDE.md guidance; `--create` also scaffolds a dev container (optional `[path]`). |
 | `feedback add` | Record feedback and extract a rule from it. |
 | `search "<query>"` | Search rules by keyword (`--scope-level`, `--scope-value`, `--limit`). |
-| `rules list` | List all rules (`--status <status>`, e.g. `Pending`). |
+| `rules list` | List all rules (`--status <status>`). |
 | `rules show <id>` | Show a single rule in detail. |
 | `rules approve <id>` | Move a Pending rule to Active. |
 | `rules promote <id>` | Promote a rule. |
 | `rules supersede <oldId> <newId>` | Replace one rule with another (versioned). |
 | `rules archive <id>` | Archive a rule (excluded from search). |
-| `import build-log <file>` | Ingest build failures. |
-| `import test-log <file>` | Ingest test failures. |
-| `import lint-log <file>` | Ingest lint failures. |
-| `import pr-comments <file>` | Capture PR review comments as rules (`--task`, `--scope-level`, `--scope-value`, `--tags`; `--accepted` records them Active instead of pending). |
-| `inject-context "<task>"` | Build agent-ready context (must-follow, warnings, preferred/anti-patterns) for a task. |
-| `dna` | Summarise the repo's engineering personality for onboarding (`--markdown`, `--json`, `--top <n>`, `--scope-level`, `--scope-value`, `--output <file>`). |
-| `eval retrieval` | Evaluate retrieval quality against the bundled dataset (`--dataset <path>`); non-zero exit below baseline. |
-| `activity last` | Show the latest AgentRecall activity notice (`--json`). |
-| `activity list` | Show recent activity notices, newest first (`--limit <n>`, `--json`). |
-| `turn-summary --last` | Show the aggregated Turn Memory Summary for the last turn (`--json`, `--detailed`, `--compact`). |
-| `seed list` | List built-in seed packs and whether they are installed (`--json`). |
-| `seed show <pack>` | Show a seed pack's rules, defaults, and provenance (`--json`). |
-| `seed install <pack>` | Install a seed pack; rules are Active by default (`--active` spells that out, `--suggested` installs them as Pending for manual approval, `--force`, `--json`). |
-| `seed remove <pack>` | Remove an installed seed pack (`--force`, `--json`). |
-| `seed status` | Show installed seed packs and rule counts by status (`--json`). |
-| `career impact --last` | Show the last turn's career-impact candidate (`--json`, `--detailed`). |
-| `career journal --last` | Generate a promotion-ready journal entry on demand (`--json`, `--file <path>`). |
-| `career status` | Show the career-impact pack/mode and the last candidate (`--json`). |
-| `cleanup pending-noise` | Find and archive noisy Pending rules the Stop hook created before source/outcome-aware capture (dry run by default; `--apply`, `--json`, `--tag <tag>`, `--status <status>`). |
+| `import build-log / test-log / lint-log <file>` | Ingest failures. |
+| `import pr-comments <file>` | Capture PR review comments as rules (`--task`, `--scope-level`, `--scope-value`, `--tags`, `--accepted`). |
+| `inject-context "<task>"` | Build agent-ready context (must-follow, warnings, preferred/anti-patterns). |
+| `dna` | Summarise the repo's engineering personality (`--markdown`, `--json`, `--top <n>`, `--scope-level`, `--scope-value`, `--output <file>`). |
+| `eval retrieval` | Evaluate retrieval quality (`--dataset <path>`); non-zero exit below baseline. |
+| `activity last` / `activity list` | Show recent activity notices (`--json`, `--limit <n>`). |
+| `turn-summary --last` | Aggregated Turn Memory Summary for the last turn (`--json`, `--detailed`, `--compact`). |
+| `seed list` / `show <pack>` / `install <pack>` / `remove <pack>` / `status` | Manage seed packs (`--active`, `--suggested`, `--force`, `--json`). |
+| `career impact --last` / `career journal --last` / `career status` | Career-impact pack commands (`--json`, `--detailed`, `--file <path>`). |
+| `cleanup pending-noise` | Archive noisy Pending rules from before source/outcome-aware capture (dry run by default; `--apply`, `--json`, `--tag`, `--status`). |
+| `finalize-turn` / `finalize-turn status` | Run or inspect turn finalization (`--json`, `--hook`). |
+| `capture-status --last-turn` | Alias for `finalize-turn status`. |
 | `mcp` | Run the MCP server over stdio (for Claude Code). |
 | `status` | Show where data is stored. |
-| `help` / `--help` / `-h` | Show usage. |
-| `version` / `--version` / `-v` | Show the installed version. |
+| `help`, `version` | Usage / installed version. |
 
 Run `agentrecall help` any time for the same list.
 
----
+## Core concepts
 
-## User Preferences
+### User preferences
 
-AgentRecall remembers explicit **user preferences** separately from repository
-conventions and engineering lessons. When you state a durable preference for how the
-assistant should behave, it is captured as a `UserPreference` (or, for communication
-style, a `CommunicationPreference`) — not a repository coding rule.
+Explicit, durable statements about how *you* want the assistant to behave
+(*"answer short and simple"*, *"don't ask me too many questions"*) are captured
+as a `UserPreference` or `CommunicationPreference` — separate from repository
+conventions and engineering lessons:
 
-Examples of preferences it recognises (English and Persian):
-
-- preferred explanation style — *"answer short and simple, add an example if needed"*
-- prompt format — *"when I ask for a prompt, give it directly with tests and edge cases"*
-- interaction style — *"don't ask me too many questions; make a reasonable assumption"*
-- verbosity — concise vs. detailed answers
-
-How preferences differ from other memory:
-
-- **Higher confidence.** An explicit preference is your own word, so it is captured
-  with high confidence (≈0.9) and auto-captured when safe — not parked as a
-  low-confidence pending suggestion.
-- **User scope, not repository scope.** A communication preference applies to you
-  everywhere, so it is stored at user (global) scope. Technical repository conventions
-  still use `Repository` scope; engineering lessons still use their own scope.
-- **The phrasing is normalized.** Raw wording (*"always answer caveman form"*) is
-  rewritten into durable, bounded guidance (*"Answer briefly and simply first, and
-  prefer concrete examples; provide more detail when asked."*) — overbroad absolutes
-  and throwaway wording are dropped, your intent is kept.
-- **Unsafe preferences are refused.** A preference that conflicts with correctness or
-  honesty (*"always agree even if I'm wrong"*) is skipped, never stored.
-- **Response language is the model's call, not AgentRecall's.** A stated language
-  preference (*"reply in Persian unless I ask in English"*) is still captured, but
-  verbatim as a general preference — AgentRecall does not classify or decide which
-  language to default to.
-
-Record one explicitly:
+- **High confidence, user scope.** Captured at ≈0.9 confidence and stored
+  globally (not per-repository), since it applies to you everywhere.
+- **Normalized, not verbatim.** *"always answer caveman form"* becomes durable,
+  bounded guidance; overbroad absolutes are dropped, intent is kept.
+- **Unsafe preferences are refused** — one that conflicts with correctness or
+  honesty (*"always agree even if I'm wrong"*) is never stored.
+- **Response language is never decided by AgentRecall.** A stated language
+  preference is captured verbatim as a general preference; it does not choose a
+  default language for the model.
 
 ```bash
-agentrecall feedback add \
-  --task "how to answer me" \
+agentrecall feedback add --task "how to answer me" \
   --feedback "From now on, answer short and simple, add examples only if needed."
-# → captured a CommunicationPreference at user scope with high confidence
-
-agentrecall rules explain <id>   # shows Type: CommunicationPreference, Captured because:
-                                 # ExplicitUserPreference, Evidence, Scope, Confidence
+agentrecall rules explain <id>   # Type: CommunicationPreference, evidence, scope, confidence
 ```
 
-Preferences are recalled alongside other rules when relevant, and captured preferences
-appear in the activity log and Turn Memory Summary (*"🧠 AgentRecall: captured 1 user
-preference."*).
+### Standing rules
 
----
+Most rules are **contextual** — retrieved by relevance to the task at hand.
+That structurally misses **universal constraints** (*"don't leave unnecessary
+comments"*, *"always run the formatter"*): they share no keywords with most
+tasks, so they'd never clear the relevance floor. A rule carrying the
+`AlwaysApply` flag is delivered on **every** task instead, as must-follow
+guidance (or a warning, if it's a prohibition).
 
-## Standing Rules
+`AlwaysApply` (delivery: standing vs. contextual) and `ScopeLevel` (where a rule
+is true: `Global`/`Language`/`Repository`/path) are orthogonal — a standing
+rule is usually `Global`, but the two are independent properties.
 
-Most rules are **contextual**: AgentRecall retrieves them by relevance to the task in
-front of you (keyword, semantic, changed-code, and task-type match, weighted by
-confidence). That works well for "scope validators to the tenant" — but it structurally
-misses **universal constraints** like *"don't leave unnecessary comments"* or *"always run
-the formatter"*. A universal rule shares no keyword with "add a date parser", so it scores
-below the relevance floor and never gets injected — exactly on the turn it should apply.
+A rule becomes standing when: it's a preference (always standing), the capture
+judge flags it as a universal style/process/quality constraint, or you keep
+making the same correction (the repeated-correction backstop promotes it).
+Standing rules show as `[standing]` in the Turn Memory Summary.
 
-A **standing rule** solves this. It carries the `AlwaysApply` flag, which makes AgentRecall
-deliver it on **every** task rather than only when it matches — bypassing the relevance
-floor and surfacing as **must-follow** guidance (prohibitions surface as warnings).
+The standing band is **capped at 5 highest-confidence rules per prompt** so it
+stays prominent instead of becoming wallpaper; anything beyond the cap falls
+back to ordinary relevance ranking rather than being dropped.
 
-### `AlwaysApply` vs. `ScopeLevel`
+Good standing rules are universal and actionable (*"Run the formatter before
+finishing a change"*). Bad ones are contextual guidance in disguise (*"Use
+`Money` value objects in the billing service"* — scope it to billing instead)
+or vague absolutes (*"Never use inheritance"* → prefer *"favor composition over
+inheritance"*, kept contextual).
 
-These are **orthogonal** — a rule has both:
+### Project DNA
 
-- **`ScopeLevel`** answers *where* a rule is true — `Global`, `Language`, `Repository`, a
-  path. It bounds which projects/files a rule belongs to and drives ranking specificity.
-- **`AlwaysApply`** answers *how* a rule is delivered — as a standing constraint injected
-  every turn, or as a contextual rule retrieved by relevance.
+A single, onboarding-ready summary of a repository's *engineering
+personality* — conventions, patterns, risks, and recurring lessons — meant to
+get a new developer or agent productive in under five minutes. It reads the
+same data as the rest of AgentRecall (active/promoted rules, retrieval
+frequency, mined lessons, conflicts) and organizes it into fixed sections: Core
+Principles, Repository Conventions, Testing Patterns, Architecture Patterns,
+Error Handling, Feature Gates/Authorization/Security, Common Mistakes, Agent
+Warnings, Stale or Risky Knowledge.
 
-A standing rule is typically `Global` scope (it applies everywhere), but the two are
-independent: `AlwaysApply` is a delivery property, **not** a new scope level.
-
-### How a rule becomes standing
-
-- **Preferences are standing by default.** A `UserPreference` or `CommunicationPreference`
-  applies to you everywhere, so it is captured as standing automatically — no flag needed.
-  (See [User Preferences](#user-preferences).)
-- **The capture judge flags a universal constraint.** When a correction is a style, tone,
-  process, or quality rule that applies to every task, the judge marks it `always_apply` and
-  it is captured standing.
-- **The repeated-correction backstop promotes it.** If you keep making the *same*
-  correction, AgentRecall promotes that rule to standing on its own — you should not have to
-  repeat yourself to make a lesson stick.
-
-Standing rules are marked `[standing]` in the Turn Memory Summary and
-`[standing — applies every turn]` on capture, so you can see when a correction became one.
-
-### The band is capped at 5
-
-Always-injecting is only useful if it stays **few and prominent** — a rule that appears on
-every turn becomes wallpaper the model stops reading, which is the same failure as a bloated
-`CLAUDE.md`. So the standing band is **capped at the 5 highest-confidence standing rules per
-prompt**. Any beyond the cap fall back to ordinary relevance gating (they are not dropped —
-they simply compete on relevance like everything else). Keep the standing set small and
-deliberate.
-
-### Project and contextual rules are unaffected
-
-Non-standing rules work exactly as before: they are retrieved by relevance, respect their
-`ScopeLevel`, and never force their way into a turn they do not match. Standing rules take
-their reserved slots first; the rest of the token budget is filled by the usual
-relevance-ranked rules. A project-scoped convention still applies only in its repository.
-
-### Good vs. overbroad standing rules
-
-Standing rules earn their always-on cost by being **universal and actionable**. Good ones:
-
-- *"Keep comments minimal and purposeful; don't restate what the code already says."*
-- *"Run the formatter before finishing a change."*
-- *"Answer briefly; add examples only when they help."* (a preference — standing by default)
-- *"Prefer descriptive names over abbreviations."*
-
-Bad standing rules are **contextual guidance masquerading as universal** — they should be
-ordinary relevance-gated rules, not always-on:
-
-- *"Use `Money` value objects in the billing service."* → contextual: only when touching
-  billing. Let relevance surface it.
-- *"In `PaymentController`, validate the tenant before charging."* → project/path-specific:
-  scope it to the repository, don't make it standing.
-- *"Always write the most performant code possible."* → vague and unactionable; it adds
-  noise to every turn without changing behaviour.
-- *"Never use inheritance."* → an overbroad absolute; the useful, non-standing form is
-  *"prefer composition over inheritance when designing class hierarchies."*
-
-Rule of thumb: if it only applies to some tasks, files, or projects, keep it contextual and
-let ranking do its job. Reserve standing for the handful of constraints that genuinely apply
-to **every** turn.
-
----
-
-## Project DNA
-
-**Project DNA** distils everything AgentRecall has learned about a repository into a
-single, onboarding-ready summary of its *engineering personality* — the conventions,
-patterns, risks, and recurring lessons that explain how the project actually works.
-The goal is to get a new developer (or a new AI coding agent) productive in **under
-five minutes**.
-
-It reads the same local data the rest of AgentRecall uses — active and promoted
-rules, how often each rule is retrieved, mined lesson candidates, accepted lifecycle
-recommendations, outcomes, and detected conflicts — and organises it into fixed
-sections:
-
-- **Core Principles** — the highest-confidence, most broadly applicable lessons.
-- **Repository Conventions** — repo-specific "when X, do Y" rules.
-- **Testing Patterns** — testing rules and common testing mistakes.
-- **Architecture Patterns** — architecture and design preferences.
-- **Error Handling** — exceptions, `Result<T>`, validation, domain failures.
-- **Feature Gates / Authorization / Security** — gates, permissions, auth, access control.
-- **Common Mistakes** — frequently corrected or mined lessons.
-- **Agent Warnings** — high-impact anti-patterns to avoid.
-- **Stale or Risky Knowledge** — low-confidence or conflict-prone guidance to review.
-
-### How it differs from search and reports
-
-Search answers "which rules match *this* task?" and the `report` commands give you
-*metrics* (counts, growth, staleness). Project DNA is neither: it's a **curated,
-deterministic narrative** of the whole corpus, ranked so the most trustworthy and
-broadly useful guidance rises to the top — Promoted over Active over Pending, then by
-confidence, retrieval frequency, recency, outcome evidence, and lifecycle signals.
-There are **no LLM calls, no embeddings, and no external services** — the same inputs
-always produce the same output.
-
-### Generate it
+Unlike `search` (which rule matches *this* task?) or `report` (metrics), DNA is
+a **curated, deterministic narrative** of the whole corpus — no LLM calls, no
+embeddings, same inputs always produce the same output.
 
 ```bash
-agentrecall dna                                          # human-readable summary
-agentrecall dna --markdown                               # Markdown for onboarding docs
-agentrecall dna --json                                   # stable, structured JSON
-agentrecall dna --top 10                                 # more items per section
-agentrecall dna --scope-level Repository --scope-value my-repo   # one repo only
-agentrecall dna --markdown --output PROJECT_DNA.md       # write straight to a file
+agentrecall dna                                    # human-readable
+agentrecall dna --markdown --output PROJECT_DNA.md # for onboarding docs
+agentrecall dna --json                              # stable, snake_case JSON
 ```
 
-The Markdown output is designed to drop straight into a `PROJECT_DNA.md`,
-`CONTRIBUTING.md`, or a wiki page. The JSON output is stable (snake_case keys —
-`generated_at`, `scope`, `sections`, `items`, `rule_ids`, `confidence`, `evidence`,
-`category`, `source_counts`) so you can feed it to other tooling.
+Commit the Markdown output as `PROJECT_DNA.md`/`CONTRIBUTING.md`, or paste
+`agentrecall dna` into an agent's context at the start of a session.
 
-### Use it for onboarding
+### Seed packs
 
-- **Humans:** run `agentrecall dna --markdown --output PROJECT_DNA.md`, commit it, and
-  point new contributors at it. Regenerate it whenever the rule corpus changes.
-- **Agents:** paste `agentrecall dna` (or the Markdown) into an agent's context at the
-  start of a session so it inherits the project's conventions before writing any code.
-
----
-
-## Seed Packs
-
-Seed packs provide optional **starter engineering memories** — curated, conditional rules
-that give an agent useful instincts before a project has accumulated enough learned memory
-of its own. They are **not** project facts, they are **opt-in at the pack level**, and they
-can be removed at any time. AgentRecall never installs a seed pack automatically.
-
-The first built-in pack is `tidy-first`: ten paraphrased, practical rules for separating
-behaviour-preserving cleanup from behaviour change (guard clauses, naming, extraction,
-scoping a tidy, and so on).
+Optional **starter engineering memories** — curated rules that give an agent
+useful instincts before a project has accumulated its own. They're opt-in per
+pack, never installed automatically, and removable at any time.
 
 ```bash
-agentrecall seed list                    # what packs exist, and whether they're installed
-agentrecall seed show tidy-first         # rules, defaults, and provenance
-agentrecall seed install tidy-first      # install as Active (the default)
-agentrecall seed install tidy-first --active     # same as the default, spelled out
-agentrecall seed install tidy-first --suggested  # conservative mode: install as Pending for manual approval
-agentrecall seed status                  # installed packs and rule counts by status
+agentrecall seed list                    # available packs, installed or not
+agentrecall seed install tidy-first      # install as Active (default)
+agentrecall seed install tidy-first --suggested  # install as Pending instead
 agentrecall seed remove tidy-first       # archive the pack's rules
 ```
 
-How seed rules behave:
+- **Active by default**, at moderate confidence (~0.65); marked with source
+  `BuiltInSeed` and a `[seed]` marker in the Turn Memory Summary.
+- **Ranked below learned rules** — your own repository conventions and
+  corrections always outrank and win conflicts against seed rules, and a seed
+  rule is never injected as must-follow. Capped at two per prompt unless the
+  task is itself about tidying/refactoring.
+- **Not absolute** — reject or archive a seed rule that doesn't fit; that
+  lowers its confidence like any learned rule.
+- **Idempotent** — installing only adds rules, never edits/deletes yours;
+  reinstalling never duplicates or resurrects a removed rule without `--force`.
 
-- **Active by default.** Installing a pack is the opt-in, so its rules are in force from day
-  one at a moderate confidence (~0.65). Prefer manual approval? Pass `--suggested` to install
-  them as Pending/Suggested and approve individual rules with `agentrecall rules approve <id>`.
-- **Marked as seed-derived** (source `BuiltInSeed`, tagged `seed` and the pack name) so you
-  can always tell starter guidance from learned memory. Used seed rules show a `[seed]`
-  marker in the Turn Memory Summary.
-- **Ranked below learned rules.** Project-specific `RepositoryConvention` / `EngineeringLesson`
-  rules and explicit user corrections override seed rules: they outrank seed rules in retrieval
-  and win conflicts against them, and a seed rule is never injected as "must-follow". Seed
-  injection is capped (at most two per prompt) unless the task is itself about tidying or
-  refactoring, so starter guidance never floods the context.
-- **Not absolute.** Apply a seed rule only when its condition matches. If a seed rule is not
-  applicable in this project, reject or archive it: rejections, corrections, or archiving lower
-  its confidence and can trigger an archive/suppress lifecycle recommendation — exactly like any
-  learned rule. Repeated uneventful use raises confidence a small, capped amount; explicit
-  acceptance raises it more.
-- **Idempotent and safe.** Installing a pack only ever *adds* seed rules — it never edits or
-  deletes rules you already have. Your own (learned) rules are matched by source and left
-  completely untouched, so installing on top of an existing corpus is safe; if a seed rule
-  happens to overlap one of yours, the two coexist and your rule wins (seed rules rank lower).
-  Installing the same pack twice creates no duplicates, an install never overwrites a seed rule
-  you edited, and removing a pack archives only that pack's rules (preserving ones you edited or
-  promoted). A reinstall will not resurrect a removed rule unless you pass `--force`.
+Built-in packs:
 
-The `tidy-first` pack is paraphrased practical guidance inspired by common tidying and
-refactoring practices. It contains no copied or quoted book text.
+- **`tidy-first`** — ten rules on separating behavior-preserving cleanup from
+  behavior change (guard clauses, naming, extraction, scoping a tidy).
+- **`career-impact`** — coaching guidance for noticing and documenting
+  promotion-worthy engineering work (impact, evidence, metrics, stakeholders,
+  ADRs). Low-token by design: a cheap deterministic end-of-turn detector decides
+  whether a turn was significant (no LLM/embeddings/network); the full
+  impact/journal detail generates only on demand or when a significant
+  candidate exists. The automatic summary is human-visible only (never fed back
+  into model context), at most five bullets, and only prints for significant
+  work under the default `SignificantOnly` mode.
 
----
+  ```bash
+  agentrecall seed install career-impact
+  agentrecall career impact --last       # last turn's candidate
+  agentrecall career journal --last      # promotion-ready entry, on demand
+  ```
 
-## Career Impact Pack
+Both packs are original, paraphrased guidance — no copied book, article, or
+third-party text.
 
-The `career-impact` seed pack helps you avoid losing promotion-worthy engineering work. It
-identifies Staff-level impact, evidence, metrics, stakeholders, ADRs, leadership behaviors,
-and promotion-ready achievements — as coaching guidance, not project facts.
+### Capture pipeline
 
-It is **opt-in** and installs **active starter guidance** (ten conditional rules), exactly
-like any other seed pack:
+Recall is deterministic through the `UserPromptSubmit` hook. **Capture** — what
+gets remembered — runs through a separate pipeline each time a turn finishes:
+
+```
+Stop hook → finalize-turn → semantic capture judge verdict → validate
+  → map by confidence → store / suggest / skip / reinforce / supersede
+  → structured summary
+```
+
+**The semantic capture judge decides, not keyword heuristics.** A word like
+"validation" or "auth" appearing in a sentence is never enough on its own to
+capture anything.
+
+- **Explicit save/do-not-save requests are always respected**, even for narrow
+  or stylistic rules.
+- **Confidence maps to outcome:** `≥0.80` captures, `0.55–0.79` suggests a
+  Pending rule, `<0.55` skips.
+- **Duplicates are reinforced, not duplicated**; an explicit supersede replaces
+  the prior rule.
+- **If the judge is unavailable, automatic capture is skipped** for that turn —
+  there is no keyword fallback. The verdict is supplied by the host as a
+  `judgment` object on the `finalize-turn` payload (AgentRecall makes no
+  network/LLM calls itself); Claude Code's native Stop hook alone has no such
+  field, so `agentrecall devcontainer init` scaffolds `CLAUDE.md` guidance
+  telling the model to produce the verdict itself before the native hook fires.
+- **Source and outcome matter as much as wording.** Documentation, tool
+  instructions, command output, and logs are not captured merely because they
+  were read — only when paired with an observed agent failure, a user
+  correction, an explicit save, or a confirmed repository convention. A bare
+  code fact is never auto-captured (it's recoverable from the repo via search).
+  Repeated corrections raise confidence and favor capture.
+- **Privacy.** The raw transcript is not stored by default — only a content
+  hash, resulting rule ids, and skip reasons (`StoreTurnTranscript: true` to
+  keep it for debugging).
+
+**Ask AgentRecall, don't guess.** The agent should never speculate about
+whether something was captured — it's one command away:
 
 ```bash
-agentrecall seed install career-impact          # install the pack (Active starter guidance)
-agentrecall seed show career-impact             # its rules, defaults, and provenance
-agentrecall career impact --last                # the last turn's career-impact candidate
-agentrecall career impact --last --json         # deterministic JSON for the candidate
-agentrecall career journal --last               # a promotion-ready journal entry (on demand)
-agentrecall career journal --last --file ./career-journal.md   # append it to a Markdown file
-agentrecall career status                       # pack/mode and the last candidate
+agentrecall finalize-turn status      # or: agentrecall capture-status --last-turn
+agentrecall activity last             # what AgentRecall did last, in general
 ```
 
-It is **low-token by design**, using a two-stage approach:
+`agentrecall devcontainer init` scaffolds a `CLAUDE.md` contract requiring the
+agent to check status first and only offer manual capture when nothing was
+captured **and** you explicitly ask. If an agent still says "the Stop hook may
+have captured it", update the tool (`dotnet tool update --global AgentRecall`)
+and re-run `agentrecall devcontainer init` to refresh the Stop hook and
+guidance.
 
-1. A cheap, **deterministic** end-of-turn detector (no LLM calls, no embeddings, no network)
-   analyzes the turn's text with keyword/heuristic signals and decides whether the work was
-   significant.
-2. The full impact/journal detail is generated **only on demand** (the `career` commands) or
-   when a significant candidate already exists.
+**Cleaning up old noise.** For Pending rules created before source/outcome-aware
+capture existed, `cleanup pending-noise` finds and archives them (dry run by
+default, never touches Active/Promoted/user-edited rules):
 
-How it behaves:
-
-- **`SignificantOnly` by default.** When the pack is installed, the detector runs at the end
-  of a turn and prints a **compact** summary only for significant work. For trivial turns
-  (typo fixes, renames, formatting) it says nothing. Set `AgentRecall.CareerImpactMode` to
-  `Silent` (never auto-run) or `Always` (surface lower-confidence candidates too, still
-  bounded).
-- **Never spams.** The automatic summary is at most five bullets plus a pointer; it never
-  prints a full promotion packet. The full journal is generated only when you ask.
-- **Human-visible only.** The automatic summary is not fed back into model context; the Turn
-  Memory Summary carries only a short one-line pointer.
-- **Retrieval is capped.** Career-impact rules are ordinary seed rules — ranked below learned
-  rules and capped so they never flood a prompt.
-
-Configuration:
-
-- `AgentRecall.CareerImpactMode = Silent | SignificantOnly | Always` (default
-  `SignificantOnly`)
-- `AgentRecall.CareerImpactSummaryLevel = Compact | Detailed` (default `Compact`)
-
-Example compact summary (printed automatically for significant work):
-
-```
-🧠 **AgentRecall Career Impact:** possible Staff-level impact detected.
-- Why it matters: This work involves a migration; it targets performance.
-- Evidence: PR, before/after metrics, dashboard, design doc
-- Metrics: latency, error rate, adoption
-- Stakeholders: Platform, Product
-- ADR: probably yes
-
-Run `agentrecall career journal --last` for a promotion-ready entry.
+```bash
+agentrecall cleanup pending-noise            # dry run
+agentrecall cleanup pending-noise --apply    # archive the noisy ones
 ```
 
-The `career-impact` pack is original, paraphrased career-impact coaching guidance. It copies
-no book, article, or third-party text.
+### Interactive memory
 
----
+When the capture judge is unsure (`SuggestCapture`), AgentRecall can **ask**
+instead of silently parking a Pending rule — but only when a terminal is
+attached; hooks, pipes, and MCP never block waiting for input.
 
-## Use it from Claude Code
+```
+🧠 AgentRecall: possible lesson detected.
+[y] Remember   [n] Ignore   [v] View details
+```
 
-AgentRecall ships an MCP server so Claude Code can recall your rules and record
-new feedback while you work. Register it once:
+`AgentRecall.InteractiveMemoryMode` controls this: `Auto` (default — ask only
+for ambiguous suggestions), `Ask` (more conservative), `Silent` (never prompt;
+everything ambiguous becomes Pending). Approve or ignore later the normal way:
+
+```bash
+agentrecall rules list --status Pending
+agentrecall rules approve <id>   # remember
+agentrecall rules archive <id>   # ignore
+```
+
+### Visibility: activity notices & turn summary
+
+AgentRecall tells you what it's doing, but keeps **human-facing** output
+separate from the **model-visible** context so notices never bloat the token
+budget.
+
+- **Activity notices** — per-event, e.g. `🧠 AgentRecall: captured 1 new rule.`
+  Verbosity via `ActivityNoticeLevel` (`Verbose`/`Normal`/`Silent`) for the CLI
+  and `HookNoticeLevel` (`Normal`/`Silent`) for the single line the hook injects
+  alongside rules. Review with `agentrecall activity last` / `activity list
+  [--json] [--limit n]`.
+- **Turn Memory Summary** — one aggregated end-of-turn report of everything
+  that happened (rules used, captured, suggested, skipped, remembered/ignored,
+  errors), instead of scattered notices. Controlled by `TurnSummaryLevel`
+  (`Silent`/`Compact`/`Detailed`, default `Compact`). Review any time:
+
+  ```bash
+  agentrecall turn-summary --last             # at the configured level
+  agentrecall turn-summary --last --detailed  # force grouped detail
+  agentrecall turn-summary --last --json
+  ```
+
+Both are bounded (short titles, capped item counts) and never re-injected into
+model context.
+
+## Claude Code integration
+
+Register the MCP server once:
 
 ```bash
 claude mcp add agentrecall agentrecall mcp
 ```
 
-That exposes these tools to the agent:
-
 | Tool | What it does |
 | --- | --- |
-| `inject_context` | Given a task (and optionally its type, scope, files, changed entities), return the most useful rules — ranked by relevance and confidence, conflict-resolved, and bucketed into **must-follow**, **suggested**, and **warnings**, each with an explanation. |
-| `resolve_rules` | When several rules match a task, decide which to follow and which to ignore — resolving direct conflicts and superseded rules. |
-| `compress_memory` | Find duplicate, near-duplicate, and overlapping rules and merge each group into one canonical rule (dry run by default; originals are preserved for audit). |
-| `get_relevant_context` | Given a task, return the rules to know before starting (keyword-based). |
-| `get_project_rules` | The rules that always apply here (project → promoted → active). |
-| `get_reminders` | A short checklist of high-signal reminders for a kind of work. |
-| `capture_status` | Report the last turn-finalization result (captured/suggested/skipped rule ids, source, timestamp). Call it to answer "did AgentRecall capture anything?" instead of guessing — equivalent to `agentrecall finalize-turn status`. |
+| `inject_context` | Given a task, return ranked/conflict-resolved rules bucketed into must-follow, suggested, warnings. |
+| `resolve_rules` | Decide which of several matching rules to follow, resolving conflicts/supersessions. |
+| `compress_memory` | Merge duplicate/overlapping rules (dry run by default). |
+| `get_relevant_context` | Keyword-based rules to know before starting a task. |
+| `get_project_rules` | Rules that always apply here (project → promoted → active). |
+| `get_reminders` | A short checklist for a kind of work. |
+| `capture_status` | The last turn-finalization result — the answer to "did AgentRecall capture anything?". |
 | `search_rules` | Find rules relevant to a query. |
 | `suggest_feedback_candidate` | Detect whether a message is a reusable correction. |
-| `capture_feedback` | Save a correction in one step (creates an Active rule by default; `pending=true` to require approval). |
+| `capture_feedback` | Save a correction in one step (`pending=true` to require approval). |
 | `add_feedback` | Record feedback with full task/scope context. |
-| `import_pr_comments` | Capture PR review comments as pending rules (skips praise/questions/nits). |
+| `import_pr_comments` | Capture PR review comments as pending rules. |
 
-Each rule comes back as guidance shaped for an agent: `trigger`, `rule`, `do`,
-`do_not`, `reason`, `applies_to`, `confidence`, and `status`. The server speaks
-JSON-RPC 2.0 over stdio and writes only protocol messages to stdout (all logs go
-to stderr), so it behaves identically whether installed or run from source.
+Each rule returns as `trigger`, `rule`, `do`, `do_not`, `reason`, `applies_to`,
+`confidence`, `status`. The server speaks JSON-RPC 2.0 over stdio, logs only to
+stderr, and behaves identically installed or run from source.
 
-A typical agent loop: call `inject_context` before working (it ranks rules and
-flags must-follow guidance and warnings), then run `suggest_feedback_candidate`
-on user corrections and `capture_feedback` to remember the good ones — no manual
-command needed.
-
-### Make the agent use it automatically
-
-Registering the server only makes the tools *available* — the agent still has to
-choose to call them. To make recall part of every task, add a short instruction
-to your project's `CLAUDE.md` (or `AGENTS.md`). Drop this in:
+**Registering the server only makes tools available** — the agent still has to
+call them. Add this to your `CLAUDE.md`/`AGENTS.md` to make it default
+behavior (or let `agentrecall devcontainer init` scaffold it for you):
 
 ```markdown
 ## Memory (AgentRecall)
 
-The `agentrecall` MCP server holds rules learned from past feedback. Use it:
-
-- **Before** coding, refactoring, reviewing, or debugging, call `inject_context`
-  with the task description (and `task_type`, `scope_value`, `file_names`,
-  `changed_entities` when known). Follow every **must-follow** rule and heed the
-  **warnings** before writing code.
-- **When the user corrects you**, call `suggest_feedback_candidate`; if it's a
-  reusable lesson, call `capture_feedback` so the same mistake isn't repeated.
-- **After a PR review**, pass the reviewer's comments to `import_pr_comments` so
-  the actionable ones are remembered as rules.
+- **Before** coding/refactoring/reviewing/debugging, call `inject_context` with
+  the task. Follow must-follow rules and heed warnings.
+- **When the user corrects you**, call `suggest_feedback_candidate`, then
+  `capture_feedback` for reusable lessons.
+- **After a PR review**, pass comments to `import_pr_comments`.
 ```
 
-Because `CLAUDE.md` is loaded into the agent's context each session, this turns
-"recall the relevant rules first" into default behaviour rather than something
-you have to ask for.
-
-### Guarantee it with a hook (deterministic injection)
-
-A `CLAUDE.md` instruction only *nudges* the model — calling an MCP tool is still
-its choice. To make rule injection **deterministic**, wire AgentRecall into a
-Claude Code [UserPromptSubmit hook](https://docs.claude.com/en/docs/claude-code/hooks).
-Hooks are run by Claude Code itself (not the model), so the context is injected
-before the model responds, every time the gate matches.
-
-Add this to your project's `.claude/settings.json`:
+**For deterministic injection**, wire a Claude Code hook instead of relying on
+the model to choose to call a tool — hooks run before the model responds,
+every time the gate matches:
 
 ```json
 {
   "hooks": {
     "UserPromptSubmit": [
       { "hooks": [ { "type": "command", "command": "PATH=$HOME/.dotnet/tools:$PATH agentrecall hook user-prompt-submit" } ] }
-    ]
-  }
-}
-```
-
-> **PATH note.** Claude Code runs hooks through a non-login shell that may not have
-> `~/.dotnet/tools` on `PATH` — so a bare `agentrecall` can fail with
-> `command not found`. The command above prepends the .NET global-tools directory so
-> the hook resolves regardless of how Claude Code was launched. If you still hit
-> "command not found", make sure .NET global tools are on the PATH Claude Code sees:
->
-> ```bash
-> export PATH="$HOME/.dotnet/tools:$PATH"
-> ```
->
-> For hooks specifically, add that through a Claude Code `SessionStart` hook (which
-> Claude Code applies to every session and to the subprocesses it spawns), or launch
-> Claude Code from a shell where the path is already configured. `agentrecall
-> devcontainer init` writes the PATH-prefixed form for you, and re-running it upgrades
-> an older bare command in place.
-
-**How it works.** On each prompt, Claude Code pipes a small JSON payload (the
-prompt text and working directory) to `agentrecall hook user-prompt-submit`. The
-command:
-
-1. checks the prompt against a keyword **gate** — non-development prompts are
-   skipped entirely (no cost, no output);
-2. for a development prompt, retrieves the most relevant rules for the current
-   repository (scope = the repo containing the working directory);
-3. prints a compact block that Claude Code prepends to the model's context:
-
-```
-## AgentRecall Technical Context
-
-Must Follow:
-- ...
-
-Warnings:
-- ...
-
-Preferred Patterns:
-- ...
-
-Anti Patterns:
-- ...
-
-Source Rules:
-- #12, #4
-```
-
-Empty sections are omitted, and only Active/Promoted rules are included. The hook
-**never blocks** — if AgentRecall errors, it logs to stderr and injects nothing.
-
-**Configure it** in `agentrecall.json` (no need to touch `settings.json` to tune):
-
-| Setting | Default | Purpose |
-| --- | --- | --- |
-| `HookEnabled` | `true` | Master switch; `false` makes the hook a no-op. |
-| `HookKeywords` | (see below) | Words/phrases that mark a prompt as dev work. |
-| `HookMaxRules` | `5` | Maximum rules injected (keeps the block small). |
-| `HookIncludePending` | `false` | Whether unapproved (Pending) rules may be injected. |
-
-```json
-{
-  "AgentRecall": {
-    "HookEnabled": true,
-    "HookMaxRules": 5,
-    "HookIncludePending": false,
-    "HookKeywords": [
-      "implement", "write", "create", "fix", "debug", "refactor", "review",
-      "test", "unit test", "integration test", "api", "endpoint", "repository",
-      "service", "controller", "moq", "build", "lint"
-    ]
-  }
-}
-```
-
-- **Disable it** — set `"HookEnabled": false`, or remove the hook from
-  `settings.json`.
-- **Tune gating** — edit `HookKeywords`. Single words match whole words ("api"
-  won't fire on "rapid"); multi-word entries match as phrases.
-- **Troubleshoot** — run it by hand and inspect the output; failures go to stderr:
-
-  ```bash
-  echo '{"prompt":"Write Moq tests for OrderService","cwd":"'"$PWD"'"}' \
-    | agentrecall hook user-prompt-submit
-  ```
-
-  An empty result means the gate didn't match, the hook is disabled, or no rules
-  were relevant. Use `claude --debug` to see hook execution inside Claude Code.
-
-**Verify the flow.** With a Moq rule stored and promoted, the prompt
-*"Write Moq tests for OrderService"* drives:
-
-```
-User prompt
-  → Claude Code fires the UserPromptSubmit hook
-  → agentrecall hook user-prompt-submit  (gate matches "write", "moq", "test", "service")
-  → inject-context retrieves the Moq rule
-  → "## AgentRecall Technical Context …" is prepended to the model context
-  → Claude responds with the rule already in view
-```
-
----
-
-## Turn Finalizer
-
-Recall is deterministic through the UserPromptSubmit hook. **Capture** is decided by a
-**semantic capture judge**: after a turn finishes, AgentRecall finalizes it through a
-single command, and the model — not keyword heuristics — decides what is worth remembering.
-
-```
-Stop hook
-  → agentrecall finalize-turn
-  → build a bounded judge input   (user + assistant text, scope, retrieved rules)
-  → the semantic judge returns a strict-JSON verdict
-  → validate the verdict          (schema, enums, lengths, required fields)
-  → map by confidence thresholds  (Capture / SuggestCapture / Skip / Reinforce / Supersede)
-  → store / suggest / skip / reinforce, then report a structured summary
-```
-
-This makes AgentRecall — not the agent — the owner of the capture decision. The
-agent should **not** guess whether the Stop hook captured something, and should
-**not** ask "want me to save it?". When you want to know, ask AgentRecall:
-
-```bash
-agentrecall finalize-turn status      # the last finalization result
-```
-
-### Semantic Capture Judge
-
-AgentRecall no longer promotes memories from incidental keywords. A word like
-"validation", "scope", or "auth" appearing in a sentence is never enough to capture
-anything. Instead the semantic judge decides whether the turn contains memory-worthy
-content, and the system only validates the judge's structured output and persists it.
-
-- **Explicit save requests are respected.** If the user asks to save/capture/remember a
-  rule, it is saved — even when it is narrow, project-local, stylistic, or a preference.
-  The rule is normalized into clean, bounded form; specific is fine.
-- **Explicit do-not-save requests are respected.** Nothing is stored, active or pending.
-- **Model-discovered lessons are judged for durable value.** Reviewer corrections, observed
-  agent failures, repeated mistakes, confirmed conventions, and stated preferences are strong
-  signals. Rules may be narrow — they do not have to be universal.
-- **Source docs and tool/skill instructions are not saved merely because they were read.**
-  A documentation-backed correction (a documented instruction the agent failed to apply and
-  was corrected on) can be captured.
-- **Uncertain decisions become suggestions.** Confidence `≥ 0.80` captures, `0.55–0.79`
-  suggests a Pending rule, and below `0.55` skips. An explicit save always captures.
-- **Duplicates are reinforced, not duplicated**, and an explicit supersede replaces the
-  prior rule.
-- **If the semantic judge is unavailable, automatic capture is skipped** for the turn.
-  AgentRecall never falls back to keyword capture.
-
-`AgentRecall.CaptureJudgeMode` selects the behavior: `Semantic` (default) or `Off`
-(disable automatic Stop-hook capture entirely). Manual `agentrecall feedback add`
-continues to work through the existing explicit flow.
-
-The verdict is supplied by the host on the `finalize-turn` payload as a `judgment`
-object (AgentRecall itself makes no network or LLM calls) — **the Stop hook alone
-does not produce one.** Claude Code invokes the Stop hook automatically with its own
-standard payload (`cwd`, `transcript_path`, etc.), which has no `judgment` field, so a
-turn where nothing else supplies one is recorded as "judge unavailable" and skipped.
-The model itself is the judge: `agentrecall devcontainer init` scaffolds `CLAUDE.md`
-guidance instructing it to decide the verdict on every substantive turn and pipe it
-into `finalize-turn` directly, before the native Stop hook fires. A finalization with
-a real judged decision always wins over a later "unavailable" one for the same turn,
-so the native hook firing afterward with nothing to add is harmless. Its strict-JSON
-shape is:
-
-```json
-{
-  "decision": "Capture | SuggestCapture | Skip | ReinforceExisting | SupersedeExisting",
-  "memory_type": "EngineeringLesson | RepositoryConvention | UserPreference | CommunicationPreference | DocBackedCorrection | ToolWorkflowConvention | ReviewLesson | CodeFact | NotMemory",
-  "confidence": 0.0,
-  "capture_reason": "ExplicitUserSave | ExplicitUserDoNotSave | ObservedAgentFailure | ReviewerCorrection | UserCorrection | RepositoryConvention | UserPreference | RepeatedMistake | DocBackedCorrection | DuplicateExisting | AssistantProse | SourceDocumentOnly | CommandOutputOnly | LogOutputOnly | CodeFact | NotReusable | Ambiguous | NotMemory",
-  "target_existing_rule_id": null,
-  "normalized_rule": { "title": "", "condition": "", "action": "", "avoid": "", "because": "", "scope": "", "tags": [] },
-  "evidence": "", "why_not_saved": "", "dedupe_notes": ""
-}
-```
-
-`capture-status` and `turn-summary` report the decision source, decision, reason, and
-confidence, so the agent answers "did AgentRecall capture anything?" from the recorded
-verdict — never a guess.
-
-**Use it.** `finalize-turn` reads a Claude Code Stop-hook payload on stdin
-(tolerant of missing fields — `cwd`, `prompt`, `assistant_response`,
-`transcript`/`transcript_path`, `source`):
-
-```bash
-agentrecall finalize-turn < payload.json          # human-readable summary
-agentrecall finalize-turn --json < payload.json   # structured result
-agentrecall finalize-turn status                  # show the last finalization
-agentrecall finalize-turn status --json
-agentrecall capture-status --last-turn            # alias for status
-```
-
-A captured turn reads:
-
-```
-AgentRecall finalized turn.
-
-Decision source: Semantic capture judge
-Decision: Capture (reason: ReviewerCorrection, confidence: 0.86)
-
-Captured:
-- #14 Repository rule: When emitting validator messages, apply the same tenant scope…
-```
-
-When nothing reusable was said, it prints `No lessons found.`
-
-**It never blocks Claude Code.** The command always exits 0, logs errors to stderr,
-makes no network or LLM calls, and is deterministic. Malformed input mutates nothing.
-
-**Duplicates are avoided.** Capture is deduplicated against existing rules (same
-normalized guidance and scope), so:
-
-- if a lesson was already captured this turn (a manual `capture_feedback`, or an
-  earlier candidate), the finalizer records a **duplicate skip** instead of a second
-  rule;
-- re-running the finalizer on the same turn is **idempotent** — it returns the prior
-  result and creates nothing new.
-
-**Privacy.** The raw transcript is **not** stored by default — only a content hash,
-the resulting rule ids, and skip reasons. Set `StoreTurnTranscript: true` to keep
-the transcript for debugging.
-
-**Wiring.** `agentrecall devcontainer init` registers the finalizer as the Stop hook
-and upgrades an older `agentrecall hook capture` registration in place:
-
-```json
-{
-  "hooks": {
+    ],
     "Stop": [
       { "hooks": [ { "type": "command", "command": "PATH=$HOME/.dotnet/tools:$PATH agentrecall finalize-turn --hook" } ] }
     ]
@@ -956,458 +503,29 @@ and upgrades an older `agentrecall hook capture` registration in place:
 }
 ```
 
-> **Stop-hook limitation.** Finalization is only automatic when the Stop hook is
-> installed. The hook payload Claude Code provides may not include the full prompt
-> and assistant response inline; the finalizer falls back to the referenced
-> `transcript_path` when available, and to whatever fields are present otherwise.
-> The command always works when run manually, regardless of the hook.
+On each prompt this gates on `HookKeywords` (dev-shaped prompts only, no cost
+otherwise), retrieves rules scoped to the repository, and prepends a compact
+`## AgentRecall Technical Context` block (Must Follow / Warnings / Preferred
+Patterns / Anti Patterns / Source Rules — empty sections omitted). It never
+blocks Claude Code: on error it logs to stderr and injects nothing.
 
-**Configure it** in `agentrecall.json`:
-
-| Setting | Default | Purpose |
-| --- | --- | --- |
-| `TurnFinalizerEnabled` | `true` | Master switch; `false` makes finalization a no-op. |
-| `StoreTurnTranscript` | `false` | Persist the raw transcript with each finalization. |
-| `MaxCandidatesPerTurn` | `5` | Maximum lessons captured from one turn. |
-| `MaxCandidateCharacters` | `1000` | Per-candidate length cap (bounds a huge turn). |
-| `CaptureAutoConfidence` | `0.5` | Minimum confidence to auto-capture without explicit acceptance. |
-| `FinalizerShowUserNotice` | `true` | Emit a Stop-hook `systemMessage` notice after a turn. |
-| `SuppressDuplicateNotices` | `true` | Stay silent when only a duplicate was reinforced. |
-
-### Asking AgentRecall what it did (don't guess)
-
-AgentRecall records every run and every capture decision, so its state is always
-**queryable** — an agent should never answer a question about it by speculating or by
-reasoning from whether it personally called a tool. Use the command that matches the
-question:
-
-| User asks | Command to run |
-| --- | --- |
-| Did you save anything? / Was anything captured? / Any lesson for AgentRecall? | `agentrecall capture-status --last-turn` |
-| Did AgentRecall run? / What did AgentRecall do? / What rules were fetched? | `agentrecall activity last` |
-| Did the Stop hook capture anything? | `agentrecall finalize-turn status` |
-
-The generated `CLAUDE.md` encodes this as a behavior contract (`agentrecall
-devcontainer init` writes it, and refreshes an older block in place). The agent must
-check status first, report the actual recorded result, and only offer manual capture
-when status shows nothing was captured **and** the user explicitly asks to save.
-
-### Troubleshooting: "the Stop hook may have captured it"
-
-If the agent answers a capture question by guessing — *"the Stop hook may have
-captured it"*, *"I didn't manually call AgentRecall"*, *"I don't control whether it
-fired"*, or *"want me to save it?"* — it is not consulting the recorded decision. Fix
-it deterministically:
-
-1. **Ask AgentRecall, don't guess.** The answer is one command away:
-
-   ```bash
-   agentrecall finalize-turn status      # or: agentrecall capture-status --last-turn
-   ```
-
-   It reports the last finalization — captured rule ids, suggested/pending ids,
-   skipped reasons, and duplicates — or `No finalized AgentRecall capture is
-   recorded for the last turn.`
-
-2. **Verify the Stop hook is installed.** `.claude/settings.json` should contain a
-   `Stop` hook running `…agentrecall finalize-turn --hook`. Re-run `agentrecall
-   devcontainer init` to install or upgrade it (it replaces an older `agentrecall
-   hook capture` registration in place).
-
-3. **Verify the installed tool supports it.** `agentrecall finalize-turn status`
-   must be a known command; if it errors, update the global tool:
-
-   ```bash
-   dotnet tool update --global AgentRecall
-   agentrecall --version
-   ```
-
-4. **Reinforce the guidance.** The scaffolded `CLAUDE.md` block tells the agent to
-   check status before answering and never to speculate. If your project pre-dates the
-   current block, re-run `agentrecall devcontainer init` — it refreshes an older
-   AgentRecall block in place (no duplicate) rather than appending a second copy.
-
-The MCP `capture_status` tool returns the same result for agents that prefer a tool
-call over the CLI.
-
-> **In short:** if Claude still says *"the Stop hook may have captured it"*, update
-> AgentRecall (`dotnet tool update --global AgentRecall`) and re-run `agentrecall
-> devcontainer init` to install the current Stop hook and the guidance that points
-> the agent at `capture_status`.
-
----
-
-## Outcome-aware capture
-
-AgentRecall captures lessons not only from text, but from **evidence that the agent
-actually made a mistake or the user corrected behaviour**. The same words can be worth
-keeping or worth skipping depending on what produced them.
-
-A generic refactoring rule is normally skipped as textbook advice:
-
-> "Preserve else semantics when flattening nested conditionals."
-
-But if the agent really *did* flatten nested template conditionals and changed the
-`{{else}}` behaviour — and the user corrected it — that is no longer generic advice. It
-is an observed agent failure, and AgentRecall captures it as a reusable, conditional
-lesson:
-
-> When flattening nested template conditionals, preserve `{{else}}` semantics. If the
-> inner `if` has an `else`, use an equivalent branch-preserving form such as
-> `{{else if (not …)}}` instead of a plain `(and …)` merge.
-
-This is deterministic and layered on top of the existing decision policy — it never
-replaces it. The text-only worthiness verdict and the capture decision are computed
-first; an **adaptive worthiness policy** then raises or lowers that decision using the
-outcome context (no LLM, no embeddings, same inputs → same output).
-
-The rules are deterministic:
-
-- Generic advice with **no observed mistake** → skipped.
-- Generic advice backed by an **observed agent failure** or **user correction** →
-  captured or suggested (and rewritten into conditional form).
-- A bare **code fact is still rejected**, even when something broke — it is recoverable
-  from the repository with search and is never auto-captured.
-- **Project-specific conventions** are still captured.
-- **Repeated** corrections raise confidence and strongly favour capture.
-- A **duplicate** reinforces the existing rule; a **conflict** is held for review.
-- An explicit **"do not save"** skips; an explicit **"save this"** can capture a worthy
-  low-confidence lesson.
-
-### Capture reasons
-
-Every adaptive capture records *why* it was kept, persisted on the rule and surfaced by
-`agentrecall rules explain <id>`:
-
-| Reason | What it means |
-| --- | --- |
-| `ObservedAgentFailure` | The agent's output broke or changed behaviour this turn. |
-| `UserCorrection` | The user corrected the agent ("no, preserve the else branch"). |
-| `AcceptedReviewComment` | An accepted/applied code-review comment. |
-| `RepeatedCorrection` | The same correction was observed two or more times. |
-| `LessonMined` | Surfaced by lesson mining over repeated historical signals. |
-
-```
-$ agentrecall rules explain 24
-
-Rule:
-When flattening nested template conditionals, preserve `{{else}}` semantics …
-
-Captured because:
-ObservedAgentFailure
-
-Evidence:
-Agent changed `{{else}}` behavior while flattening nested conditionals; user corrected the implementation.
-```
-
-The turn finalizer detects these signals from the turn ("that broke behavior", "no,
-preserve the else branch", "you changed semantics", "the review comment was applied",
-"tests failed because…", "this is the same mistake again") and passes them into the
-adaptive policy, so capture stays deterministic and the agent never has to guess.
-
----
-
-## Interactive Memory
-
-AgentRecall usually captures high-confidence lessons automatically. When it is unsure,
-it can **ask** you whether to remember the lesson — turning an ambiguous capture into a
-quick, visible choice instead of a silent pending rule you forget about. It reuses the
-existing capture decision (`AutoCapture` / `SuggestCapture` / `Skip`); Interactive Memory
-only changes how a `SuggestCapture` is surfaced. It never re-classifies worthiness.
-
-- **AutoCapture** → stored automatically, with a notice. No question.
-- **SuggestCapture** → AgentRecall asks (when a terminal is attached).
-- **Skip** → never asks.
-
-When a terminal is attached, an ambiguous lesson is shown as a prompt:
-
-```
-🧠 **AgentRecall:** possible lesson detected.
-
-Candidate:
-When flattening nested template conditionals, preserve `{{else}}` semantics.
-
-Why:
-This came from an observed agent mistake, but the rule may be broad.
-
-Actions:
-[y] Remember
-[n] Ignore
-[v] View details
-```
-
-- `y` approves the pending rule (it becomes Active): `🧠 **AgentRecall:** remembered rule #31.`
-- `n` archives it: `🧠 **AgentRecall:** ignored suggestion #31.`
-- `v` shows the full rule, reason, confidence, evidence, and scope, then asks again.
-
-### Modes
-
-`AgentRecall.InteractiveMemoryMode` controls whether AgentRecall asks. It is **distinct
-from `ActivityNoticeLevel`** — that controls how loud the notices are; this controls
-whether AgentRecall prompts.
-
-| Mode | Behaviour |
-| --- | --- |
-| `Auto` (default) | Capture high-confidence lessons automatically; ask only for ambiguous `SuggestCapture`. |
-| `Ask` | More conservative; a borderline auto-capture is downgraded to a question. |
-| `Silent` | Never prompts; suggestions become Pending rules to approve later. |
-
-```jsonc
-// agentrecall.json
-{ "AgentRecall": { "InteractiveMemoryMode": "Auto" } }
-```
-
-### Non-interactive surfaces never block
-
-Hooks (`finalize-turn --hook`), pipes, and MCP never wait for input. An ambiguous lesson
-becomes a Pending rule and the output names the follow-up command:
-
-```
-🧠 **AgentRecall:** suggested 1 pending rule.
-Run `agentrecall rules approve 31` to remember it.
-```
-
-Over MCP, the structured `capture_feedback` / `add_feedback` response carries
-`capture_decision: "SuggestCapture"`, `pending_rule_id`, and
-`suggested_actions: ["approve", "reject", "view_details"]` — no terminal prompt text.
-
-Approve or ignore a pending suggestion later with the existing rule commands:
+Troubleshoot by running the hook by hand:
 
 ```bash
-agentrecall rules list --status Pending   # see what is waiting
-agentrecall rules approve <id>            # remember it (becomes Active)
-agentrecall rules archive <id>            # ignore it
-agentrecall capture-status --last-turn    # what the last turn captured / suggested / skipped
+echo '{"prompt":"Write Moq tests for OrderService","cwd":"'"$PWD"'"}' \
+  | agentrecall hook user-prompt-submit
 ```
 
----
-
-## Activity Notices
-
-AgentRecall is **visible by default**. As you work, it tells you what it just did —
-what it fetched, captured, skipped, resolved, mined, and recommended — with a
-recognizable badge:
-
-```
-🧠 **AgentRecall:** captured 1 new rule.
-- #24 Validator auth/scope safety
-```
-
-Crucially, the human-facing notices are kept **separate from the model-visible
-context**. Verbose detail goes to your terminal and the activity log; the hook that
-injects rules into Claude stays compact, so notices never bloat the token budget.
-
-**Verbosity is configurable** with two independent settings:
-
-```json
-{
-  "AgentRecall": {
-    "ActivityNoticeLevel": "Verbose",
-    "HookNoticeLevel": "Normal"
-  }
-}
-```
-
-- **`AgentRecall.ActivityNoticeLevel`** = `Verbose` | `Normal` | `Silent` — controls
-  the human-facing CLI/status notices. Defaults to `Verbose`.
-  - `Verbose` — summary plus useful detail bullets:
-
-    ```
-    🧠 **AgentRecall:** captured 1 new rule.
-    - #24 Validator auth/scope safety
-    ```
-  - `Normal` — a concise summary only:
-
-    ```
-    🧠 **AgentRecall:** fetched 3 rules · captured 1 · skipped 1
-    ```
-  - `Silent` — no user-visible notices (activity is still recorded, and errors still
-    go to stderr/logs).
-- **`AgentRecall.HookNoticeLevel`** = `Normal` | `Silent` — controls the notice the
-  UserPromptSubmit hook injects alongside the rules. Defaults to `Normal`. It is
-  always a single compact line and never carries verbose detail or repeats rule
-  text, so it cannot inflate the injected context:
-
-  ```
-  🧠 **AgentRecall:** fetched 3 rules.
-  ```
-
-  An invalid value for either setting falls back to its default and prints a clear
-  warning rather than failing.
-
-**Review what AgentRecall has done** with the activity log:
-
-```bash
-agentrecall activity last            # the latest notice (verbose)
-agentrecall activity list            # recent notices, newest first
-agentrecall activity list --json     # structured output for tooling
-agentrecall activity list --limit 20 # show more entries
-```
-
-`--json` emits plain fields (no Markdown); the styled badge string lives only in a
-separate `renderedNotice` field. When feeding `inject-context` output to a model,
-pass `--no-notice` to suppress the human notice entirely.
-
----
-
-## Turn Memory Summary
-
-At the end of each turn — after the Stop hook finalizes it — AgentRecall prints **one
-aggregated summary** of everything it did that turn, instead of many scattered notices.
-It answers, proactively and from recorded state, the questions you'd otherwise have to
-ask: which rules were used, what was captured, what was suggested, what was skipped, and
-whether anything went wrong.
-
-It aggregates, per turn:
-
-- **rules used** — retrieved/injected by the UserPromptSubmit hook
-- **rules captured** — auto-captured while finalizing the turn
-- **pending suggestions** — rules parked as `Pending` for review
-- **skipped candidates** — candidates rejected, with the reason
-- **remembered / ignored** — Interactive Memory decisions made this turn
-- **errors** — any recoverable problem the finalizer hit
-
-The summary is **human-visible only**: it is never injected back into the model context,
-and even the detailed form is bounded (short titles only, at most five items per section),
-so it can't bloat a Claude Code session.
-
-This is governed by its own setting, distinct from `ActivityNoticeLevel` (which controls
-per-event notices):
-
-```json
-{ "AgentRecall": { "TurnSummaryLevel": "Compact" } }
-```
-
-`AgentRecall.TurnSummaryLevel` = `Silent` | `Compact` | `Detailed`. Defaults to `Compact`.
-
-- `Silent` — no automatic end-of-turn summary (the `turn-summary` command still works).
-- `Compact` — one short line:
-
-  ```
-  🧠 **AgentRecall:** used 5 rules, captured 1, suggested 0, skipped 1.
-  ```
-- `Detailed` — grouped sections with short titles and reasons (never full rule bodies):
-
-  ```
-  🧠 **AgentRecall Turn Summary**
-
-  Used:
-  - #12 Scope-safe validators
-  - #18 Pass loaded entities instead of re-querying
-
-  Captured:
-  - #28 Preserve else semantics when flattening nested template conditionals
-
-  Suggested:
-  - none
-
-  Skipped:
-  - Generic template refactoring: not reusable enough
-  ```
-
-**Review the last turn** any time:
-
-```bash
-agentrecall turn-summary --last             # human-readable, at the configured level
-agentrecall turn-summary --last --json      # stable, deterministic JSON
-agentrecall turn-summary --last --detailed  # force grouped detail
-agentrecall turn-summary --last --compact   # force the one-line summary
-```
-
-When the last turn had no memory activity:
-
-```
-🧠 **AgentRecall:** no memory activity recorded for the last turn.
-```
-
-`capture-status` answers a narrower question — *what did capture decide?* — and points
-to `agentrecall turn-summary --last` for the full per-turn activity.
-
----
-
-## Source/Outcome-Aware Capture
-
-AgentRecall classifies candidate source and outcome before capture. Documentation, tool
-instructions, command output, and logs are not captured merely because they were read. They
-can become memory only when paired with observed agent failure, explicit save intent, or
-confirmed repository convention.
-
-The classification is deterministic, offline (no LLM, no network), and English-only. It runs
-in two ordered steps before any rule is created:
-
-1. **Structured metadata first.** If the candidate came from structured activity metadata that
-   already names its source — a skill doc, tool doc, command output, or log line — that source
-   is trusted directly.
-2. **Regex classifier fallback.** With no metadata, a small set of compiled, timeout-guarded
-   pattern groups classify the text by shape (a CLI flag, an `ALL_CAPS` placeholder, a command
-   invocation, a log level, correction/save phrasing) — never by matching exact sentences.
-
-Each candidate is labelled one of: `UserFeedback`, `UserExplicitSave`, `UserExplicitDoNotSave`,
-`AssistantMetaProse`, `SourceDocumentInstruction`, `ToolOrSkillInstruction`, `CommandOutput`,
-`LogOutput`, `ReviewFeedback`, `ObservedAgentFailure`, `RepositoryConventionConfirmation`, or
-`Unknown`.
-
-### The decision matrix
-
-| Candidate | Decision |
-| --- | --- |
-| Source document / tool instruction / command output / log output / assistant meta-prose, **on its own** | Skip |
-| Any of the above **+ observed agent failure** | Allow → quality gate |
-| Any of the above **+ explicit save** | Allow → quality gate |
-| Source document **+ confirmed repository convention** | Allow → quality gate |
-| Explicit **do-not-save** | Hard skip (no pairing overrides it) |
-| User/review feedback, correction, repository confirmation, explicit save | Allow → quality gate |
-
-Because a correction ("use X **instead of** Y") and an explicit save ("**save this:** …") are
-recognised before any source-shape, user technical guidance that merely starts with "Use" is
-never mistaken for documentation — the same sentence read from a tool doc *is* skipped, but the
-user's own guidance is not.
-
-### Explicit do-not-save
-
-An explicit do-not-save instruction (`don't save this`, `no need to save`, …) hard-skips
-capture: no rule and no Pending candidate are created. `capture-status` and the Turn Memory
-Summary report the skip ("explicit do-not-save instruction"), and a structured skip activity is
-recorded. If a turn carries both a do-not-save and a save request, the most recent instruction
-wins; ties prefer do-not-save.
-
-### Structure/quality gate
-
-A candidate that clears the source/outcome matrix still passes the existing structure and
-quality gate before it becomes a Pending rule: it must read as a real rule — a condition, an
-action, and (ideally) a reason — not a bare fragment. Rejected candidates are recorded with a
-reason (`SourceDocument`, `ToolOrSkillInstruction`, `CommandOutput`, `LogOutput`,
-`AssistantProse`, `MalformedTrigger`, `TooVague`, `ExplicitDoNotSave`, …) instead of being
-parked for you to clean up later. An explicit "save this" still captures a clean lesson, but
-never stores raw prose.
-
-### Cleaning up existing noise
-
-For Pending rules created before source/outcome-aware capture, `cleanup pending-noise` finds
-and archives the noisy ones using the same filters. It is a dry run by default, never
-hard-deletes, and never
-touches Active/Promoted, user-modified, or clean rules:
-
-```bash
-agentrecall cleanup pending-noise            # dry run: report what would be archived
-agentrecall cleanup pending-noise --apply    # archive the noisy Pending rules
-agentrecall cleanup pending-noise --json     # machine-readable counts by reason
-```
-
-```
-🧠 **AgentRecall:** found 47 noisy pending rules.
-- Assistant prose: 31
-- Malformed trigger: 11
-- Duplicate noise: 5
-Run `agentrecall cleanup pending-noise --apply` to archive them.
-```
-
----
+An empty result means the gate didn't match, the hook is disabled, or nothing
+was relevant. `claude --debug` shows hook execution inside Claude Code.
 
 ## Configuration
 
-AgentRecall reads an optional `agentrecall.json` from the current directory, then
-applies environment-variable overrides prefixed with `AGENTRECALL_`.
+AgentRecall reads an optional `agentrecall.json` from the current directory,
+then environment overrides prefixed `AGENTRECALL_` (e.g.
+`AGENTRECALL_AgentRecall__LogLevel=Debug`). Data lives in one SQLite database
+under `DataDirectory` — backing up or moving your memory is copying that
+folder.
 
 ```json
 {
@@ -1422,71 +540,39 @@ applies environment-variable overrides prefixed with `AGENTRECALL_`.
 }
 ```
 
-Set `AutoApproveFeedback` to `false` to make every captured rule start as
-`Pending` (requiring `rules approve`) instead of going straight to `Active`.
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `DataDirectory` | `~/.agentrecall` | Where the SQLite database lives. |
+| `LogLevel` | `Information` | Log verbosity. |
+| `AutoApproveFeedback` | `true` | `false` makes every capture start `Pending`. |
+| `ActivityNoticeLevel` | `Verbose` | CLI activity notice verbosity: `Verbose`/`Normal`/`Silent`. |
+| `HookNoticeLevel` | `Normal` | Verbosity of the single line the prompt hook injects: `Normal`/`Silent`. |
+| `TurnSummaryLevel` | `Compact` | End-of-turn summary verbosity: `Silent`/`Compact`/`Detailed`. |
+| `HookEnabled` | `true` | Master switch for the `UserPromptSubmit` hook. |
+| `HookKeywords` | dev-task words | Words/phrases that mark a prompt as dev work. |
+| `HookMaxRules` | `5` | Max rules injected per prompt. |
+| `HookIncludePending` | `false` | Whether Pending rules may be injected. |
+| `TurnFinalizerEnabled` | `true` | Master switch for `finalize-turn`. |
+| `CaptureJudgeMode` | `Semantic` | `Off` disables automatic Stop-hook capture entirely. |
+| `StoreTurnTranscript` | `false` | Persist the raw transcript with each finalization. |
+| `MaxCandidatesPerTurn` | `5` | Max lessons captured from one turn. |
+| `MaxCandidateCharacters` | `1000` | Per-candidate length cap. |
+| `CaptureAutoConfidence` | `0.5` | Minimum confidence to auto-capture without explicit acceptance. |
+| `FinalizerShowUserNotice` | `true` | Emit a Stop-hook notice after a turn. |
+| `SuppressDuplicateNotices` | `true` | Stay silent when only a duplicate was reinforced. |
+| `InteractiveMemoryMode` | `Auto` | `Ask`/`Silent` change whether ambiguous captures prompt you. |
+| `CareerImpactMode` | `SignificantOnly` | `Silent`/`Always` for the career-impact pack's auto-summary. |
+| `CareerImpactSummaryLevel` | `Compact` | `Detailed` for the career-impact auto-summary. |
 
-```bash
-# Override a setting for a single run
-AGENTRECALL_AgentRecall__LogLevel=Debug agentrecall status
-```
-
-Data lives in a single SQLite database under `DataDirectory` (default
-`~/.agentrecall/agentrecall.db`), so backing up or moving your memory is just
-copying that folder.
-
----
-
-## Building from source
-
-If you'd rather work from the repository instead of installing the published
-tool:
+## Development
 
 ```bash
 git clone https://github.com/AkbarDizaji/AgentRecall.git
 cd AgentRecall
-
-dotnet build
-dotnet test
-
-# Run any command without installing
-dotnet run --project src/AgentRecall.Cli -- init
+dotnet build && dotnet test
+dotnet run --project src/AgentRecall.Cli -- init   # run without installing
 ```
 
-To build and install your local copy as the global tool:
-
-```bash
-dotnet pack
-dotnet tool install --global --add-source ./nupkg AgentRecall
-```
-
-(`dotnet pack` writes the package to `./nupkg`. If a build is already installed,
-use `dotnet tool update --global --add-source ./nupkg AgentRecall`.)
-
-### Project layout
-
-| Project | Purpose |
-| --- | --- |
-| `AgentRecall.Cli` | Command-line entry point (`agentrecall`) and MCP server. |
-| `AgentRecall.Core` | Domain entities, services, and contracts. |
-| `AgentRecall.Infrastructure` | Configuration, logging, and EF Core SQLite persistence. |
-| `AgentRecall.Tests` | Tests (run against temporary SQLite databases). |
-
-### Releasing
-
-Releases are automated by `.github/workflows/release.yml` on `v*` tags. It
-builds, tests, packs, and publishes to NuGet using **Trusted Publishing** (OIDC)
-— no API key is stored in the repository.
-
-One-time setup: create a Trusted Publishing policy for the `AgentRecall` package
-on NuGet.org (pointing at this repo and `release.yml`), and add a repository
-variable `NUGET_USER` with your NuGet.org username.
-
-To cut a release: bump `VersionPrefix` in `Directory.Build.props`, add an entry
-to [`CHANGELOG.md`](CHANGELOG.md) and update `<PackageReleaseNotes>` in
-`src/AgentRecall.Cli/AgentRecall.Cli.csproj` (this is what NuGet shows for the
-version), then tag:
-
-```bash
-git tag v0.2.0
-git push origin v0.2.0
-```
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for solution layout and design, and
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for the contribution workflow, coding
+conventions, and how to cut a release.
