@@ -1,6 +1,7 @@
 # AgentRecall
 
 [![CI](https://github.com/AkbarDizaji/AgentRecall/actions/workflows/ci.yml/badge.svg)](https://github.com/AkbarDizaji/AgentRecall/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/AkbarDizaji/AgentRecall/branch/main/graph/badge.svg)](https://codecov.io/gh/AkbarDizaji/AgentRecall)
 
 **A local-first memory for AI coding agents.** AgentRecall turns the feedback and
 failures you run into while coding into reusable rules, then serves the right

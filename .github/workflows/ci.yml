@@ -55,6 +55,15 @@ jobs:
           --no-build
           --logger "trx;LogFileName=test-results.trx"
           --results-directory TestResults
+          --collect:"XPlat Code Coverage"
+
+      - name: Upload coverage to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          directory: TestResults
+          fail_ci_if_error: false
 
       - name: Evaluate retrieval quality
         # The CLI multi-targets net8.0 and net10.0; pick the framework the runner
