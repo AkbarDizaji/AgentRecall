@@ -14,14 +14,15 @@ stays on your machine: no cloud sync, no web UI, no API keys.
 - [Quick start](#quick-start)
 - [Using AgentRecall](#using-agentrecall)
 - [Command reference](#command-reference)
-- [Core concepts](#core-concepts)
-  - [User preferences](#user-preferences)
-  - [Standing rules](#standing-rules)
-  - [Project DNA](#project-dna)
-  - [Seed packs](#seed-packs)
-  - [Capture pipeline](#capture-pipeline)
-  - [Interactive memory](#interactive-memory)
-  - [Visibility: activity notices & turn summary](#visibility-activity-notices--turn-summary)
+- [User Preferences](#user-preferences)
+- [Standing Rules](#standing-rules)
+- [Project DNA](#project-dna)
+- [Seed Packs](#seed-packs)
+- [Career Impact Pack](#career-impact-pack)
+- [Capture pipeline](#capture-pipeline)
+- [Interactive Memory](#interactive-memory)
+- [Activity Notices](#activity-notices)
+- [Turn Memory Summary](#turn-memory-summary)
 - [Claude Code integration](#claude-code-integration)
 - [Configuration](#configuration)
 - [Development](#development)
@@ -215,9 +216,7 @@ agentrecall eval retrieval --dataset ./my-eval.json
 
 Run `agentrecall help` any time for the same list.
 
-## Core concepts
-
-### User preferences
+## User Preferences
 
 Explicit, durable statements about how *you* want the assistant to behave
 (*"answer short and simple"*, *"don't ask me too many questions"*) are captured
@@ -240,7 +239,7 @@ agentrecall feedback add --task "how to answer me" \
 agentrecall rules explain <id>   # Type: CommunicationPreference, evidence, scope, confidence
 ```
 
-### Standing rules
+## Standing Rules
 
 Most rules are **contextual** — retrieved by relevance to the task at hand.
 That structurally misses **universal constraints** (*"don't leave unnecessary
@@ -268,7 +267,7 @@ finishing a change"*). Bad ones are contextual guidance in disguise (*"Use
 or vague absolutes (*"Never use inheritance"* → prefer *"favor composition over
 inheritance"*, kept contextual).
 
-### Project DNA
+## Project DNA
 
 A single, onboarding-ready summary of a repository's *engineering
 personality* — conventions, patterns, risks, and recurring lessons — meant to
@@ -292,7 +291,7 @@ agentrecall dna --json                              # stable, snake_case JSON
 Commit the Markdown output as `PROJECT_DNA.md`/`CONTRIBUTING.md`, or paste
 `agentrecall dna` into an agent's context at the start of a session.
 
-### Seed packs
+## Seed Packs
 
 Optional **starter engineering memories** — curated rules that give an agent
 useful instincts before a project has accumulated its own. They're opt-in per
@@ -316,29 +315,39 @@ agentrecall seed remove tidy-first       # archive the pack's rules
 - **Idempotent** — installing only adds rules, never edits/deletes yours;
   reinstalling never duplicates or resurrects a removed rule without `--force`.
 
-Built-in packs:
-
-- **`tidy-first`** — ten rules on separating behavior-preserving cleanup from
-  behavior change (guard clauses, naming, extraction, scoping a tidy).
-- **`career-impact`** — coaching guidance for noticing and documenting
-  promotion-worthy engineering work (impact, evidence, metrics, stakeholders,
-  ADRs). Low-token by design: a cheap deterministic end-of-turn detector decides
-  whether a turn was significant (no LLM/embeddings/network); the full
-  impact/journal detail generates only on demand or when a significant
-  candidate exists. The automatic summary is human-visible only (never fed back
-  into model context), at most five bullets, and only prints for significant
-  work under the default `SignificantOnly` mode.
-
-  ```bash
-  agentrecall seed install career-impact
-  agentrecall career impact --last       # last turn's candidate
-  agentrecall career journal --last      # promotion-ready entry, on demand
-  ```
-
-Both packs are original, paraphrased guidance — no copied book, article, or
+The built-in `tidy-first` pack has ten rules on separating behavior-preserving
+cleanup from behavior change (guard clauses, naming, extraction, scoping a
+tidy). It's original, paraphrased guidance — no copied book, article, or
 third-party text.
 
-### Capture pipeline
+## Career Impact Pack
+
+The `career-impact` seed pack helps you notice and document promotion-worthy
+engineering work — impact, evidence, metrics, stakeholders, ADRs — as coaching
+guidance, not project facts. It installs like any other seed pack:
+
+```bash
+agentrecall seed install career-impact
+agentrecall career impact --last       # last turn's candidate
+agentrecall career journal --last      # promotion-ready entry, on demand
+agentrecall career status              # pack/mode and the last candidate
+```
+
+It's **low-token by design**: a cheap, deterministic end-of-turn detector (no
+LLM, no embeddings, no network) decides whether a turn was significant; full
+impact/journal detail generates only on demand or when a significant candidate
+already exists.
+
+- **`SignificantOnly` by default.** `AgentRecall.CareerImpactMode` can also be
+  `Silent` (never auto-run) or `Always` (surface lower-confidence candidates).
+- **Never spams.** The automatic summary is at most five bullets plus a
+  pointer, and is human-visible only — never fed back into model context.
+- **Retrieval is capped**, like any seed pack — ranked below learned rules.
+
+It's original, paraphrased career-impact coaching guidance — no copied book,
+article, or third-party text.
+
+## Capture pipeline
 
 Recall is deterministic through the `UserPromptSubmit` hook. **Capture** — what
 gets remembered — runs through a separate pipeline each time a turn finishes:
@@ -399,7 +408,7 @@ agentrecall cleanup pending-noise            # dry run
 agentrecall cleanup pending-noise --apply    # archive the noisy ones
 ```
 
-### Interactive memory
+## Interactive Memory
 
 When the capture judge is unsure (`SuggestCapture`), AgentRecall can **ask**
 instead of silently parking a Pending rule — but only when a terminal is
@@ -420,30 +429,39 @@ agentrecall rules approve <id>   # remember
 agentrecall rules archive <id>   # ignore
 ```
 
-### Visibility: activity notices & turn summary
+## Activity Notices
 
-AgentRecall tells you what it's doing, but keeps **human-facing** output
-separate from the **model-visible** context so notices never bloat the token
-budget.
+AgentRecall tells you what it's doing — what it fetched, captured, skipped,
+resolved — with a recognizable badge, e.g. `🧠 AgentRecall: captured 1 new
+rule.` This is kept **human-facing only**, separate from the model-visible
+context, so notices never bloat the token budget.
 
-- **Activity notices** — per-event, e.g. `🧠 AgentRecall: captured 1 new rule.`
-  Verbosity via `ActivityNoticeLevel` (`Verbose`/`Normal`/`Silent`) for the CLI
-  and `HookNoticeLevel` (`Normal`/`Silent`) for the single line the hook injects
-  alongside rules. Review with `agentrecall activity last` / `activity list
-  [--json] [--limit n]`.
-- **Turn Memory Summary** — one aggregated end-of-turn report of everything
-  that happened (rules used, captured, suggested, skipped, remembered/ignored,
-  errors), instead of scattered notices. Controlled by `TurnSummaryLevel`
-  (`Silent`/`Compact`/`Detailed`, default `Compact`). Review any time:
+Verbosity is independently configurable: `ActivityNoticeLevel`
+(`Verbose`/`Normal`/`Silent`, default `Verbose`) for CLI/status notices, and
+`HookNoticeLevel` (`Normal`/`Silent`, default `Normal`) for the single line the
+`UserPromptSubmit` hook injects alongside rules.
 
-  ```bash
-  agentrecall turn-summary --last             # at the configured level
-  agentrecall turn-summary --last --detailed  # force grouped detail
-  agentrecall turn-summary --last --json
-  ```
+```bash
+agentrecall activity last            # the latest notice
+agentrecall activity list            # recent notices, newest first
+agentrecall activity list --json --limit 20
+```
 
-Both are bounded (short titles, capped item counts) and never re-injected into
-model context.
+## Turn Memory Summary
+
+At the end of each turn, AgentRecall prints **one aggregated summary** of
+everything it did — rules used, captured, suggested, skipped, remembered/
+ignored, errors — instead of many scattered notices. It's human-visible only
+(never re-injected into model context) and bounded (short titles, capped item
+counts).
+
+`AgentRecall.TurnSummaryLevel` = `Silent` | `Compact` (default) | `Detailed`.
+
+```bash
+agentrecall turn-summary --last             # at the configured level
+agentrecall turn-summary --last --detailed  # force grouped detail
+agentrecall turn-summary --last --json
+```
 
 ## Claude Code integration
 
