@@ -44,7 +44,7 @@
     <RepositoryUrl>https://github.com/AkbarDizaji/AgentRecall</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>2.2.1 hardens the 2.2.0 PreToolUse recall hook. File- and directory-scoped rules are now rewarded when the file being written is within their scope (previously they scored below a global rule and never surfaced). The hook's turn id is derived from the turn's prompt like the other hooks, so its retrievals join the end-of-turn summary. Rules already surfaced earlier in a turn are no longer re-injected or re-counted as used on every subsequent write. The database uses a busy command timeout and WAL so concurrent hook processes retry instead of silently dropping a write on SQLITE_BUSY. And the "fetched N rules" status line moved from the model's context to the user-facing systemMessage channel. Full notes: https://github.com/AkbarDizaji/AgentRecall/blob/main/CHANGELOG.md</PackageReleaseNotes>
+    <PackageReleaseNotes>2.2.4 adds a Dockerfile for the MCP server and wires test coverage into CI with a Codecov badge. The README is reorganized with a table of contents and consolidated configuration/capture-pipeline sections. The career-impact turn-summary pointer now hints at what triggered detection (e.g. "involves a migration") instead of always reading the same fixed sentence. Full notes: https://github.com/AkbarDizaji/AgentRecall/blob/main/CHANGELOG.md</PackageReleaseNotes>
   </PropertyGroup>
 
   <ItemGroup>

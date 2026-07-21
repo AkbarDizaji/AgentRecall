@@ -4,6 +4,27 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.4] - 2026-07-21
+
+### Added
+- **A `Dockerfile` for the MCP server.** Multi-stage build that publishes `AgentRecall.Cli` for
+  `net10.0` and runs `agentrecall mcp` as the entrypoint, for platforms that build/run the server
+  from a container rather than the published NuGet tool.
+- **Test coverage in CI.** The test step now collects coverage via coverlet's `XPlat Code Coverage`
+  collector and uploads it to Codecov; the README carries a coverage badge alongside CI status.
+
+### Changed
+- **README reorganized.** Added a table of contents, consolidated four scattered configuration
+  tables into one, and merged repeated capture-related sections (Turn Finalizer, Semantic Capture
+  Judge, Outcome-aware capture, Source/Outcome-Aware Capture) into a single Capture pipeline section.
+  No content was dropped, only de-duplicated.
+
+### Fixed
+- **The career-impact turn-summary pointer now hints at what triggered it.** It previously read the
+  same fixed sentence ("possible Staff-level impact detected…") regardless of cause. It now
+  parenthesizes the detector's top matched reason (e.g. "involves a migration", "has a security
+  dimension") — data the candidate already carried but the pointer discarded.
+
 ## [2.2.3] - 2026-07-19
 
 ### Added
