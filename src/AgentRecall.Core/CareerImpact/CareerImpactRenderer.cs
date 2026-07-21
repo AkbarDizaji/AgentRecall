@@ -20,9 +20,17 @@ public static class CareerImpactRenderer
     public const string NoImpactMessage =
         Badge + " no significant engineering impact detected for the last turn.";
 
-    /// <summary>The single-line pointer surfaced inside the Turn Memory Summary.</summary>
-    public const string TurnSummaryPointer =
-        "possible Staff-level impact detected; run `agentrecall career journal --last`";
+    /// <summary>
+    /// Builds the single-line pointer surfaced inside the Turn Memory Summary. <paramref name="hint"/>
+    /// is the detector's top reason (e.g. "involves a migration") and is parenthesized onto the
+    /// pointer when present, so the summary hints at what triggered it without repeating the full
+    /// career-impact detail.
+    /// </summary>
+    public static string BuildTurnSummaryPointer(string? hint)
+    {
+        var suffix = string.IsNullOrWhiteSpace(hint) ? "" : $" ({hint})";
+        return $"possible Staff-level impact detected{suffix}; run `agentrecall career journal --last`";
+    }
 
     /// <summary>Compact one-block summary: at most five bullets plus a journal pointer.</summary>
     public static string RenderCompact(CareerImpactAnalysis analysis)

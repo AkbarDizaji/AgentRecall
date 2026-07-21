@@ -172,7 +172,8 @@ public sealed class TurnSummaryService : ITurnSummaryService
             var candidate = await _careerImpact.FindByTurnAsync(turnId, cancellationToken).ConfigureAwait(false);
             if (candidate is { IsSignificant: true })
             {
-                careerPointer = CareerImpact.CareerImpactRenderer.TurnSummaryPointer;
+                var hint = SplitLines(candidate.Reasons).FirstOrDefault();
+                careerPointer = CareerImpact.CareerImpactRenderer.BuildTurnSummaryPointer(hint);
             }
         }
 
