@@ -31,6 +31,7 @@ public class CaptureDecisionTests
         bool approvePosture = true,
         bool isDuplicate = false,
         bool codeFactOverrideAllowed = false,
+        bool isExplicitUserPreference = false,
         ScopeLevel scopeLevel = ScopeLevel.Repository,
         string? scopeValue = "skedda",
         string worthinessReason = "Captures a reusable engineering lesson.") =>
@@ -42,10 +43,17 @@ public class CaptureDecisionTests
             ApprovePosture = approvePosture,
             IsDuplicate = isDuplicate,
             CodeFactOverrideAllowed = codeFactOverrideAllowed,
+            IsExplicitUserPreference = isExplicitUserPreference,
             ScopeLevel = scopeLevel,
             ScopeValue = scopeValue,
             WorthinessReason = worthinessReason,
         };
+
+    [Fact]
+    public void Decide_NullSignals_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() => Policy().Decide(null!));
+    }
 
     [Fact]
     public void Decide_Duplicate_Skips()
@@ -54,6 +62,7 @@ public class CaptureDecisionTests
 
         Assert.Equal(CaptureOutcome.Skip, decision.Outcome);
         Assert.Contains("already exists", decision.Reason, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("reinforced", decision.Notice, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -66,6 +75,8 @@ public class CaptureDecisionTests
 
         Assert.Equal(CaptureOutcome.Skip, decision.Outcome);
         Assert.Contains("existence fact", decision.Reason, StringComparison.OrdinalIgnoreCase);
+        // A plain code-fact skip carries no notice — only the accepted-override path does.
+        Assert.Equal(string.Empty, decision.Notice);
     }
 
     [Fact]
@@ -79,6 +90,32 @@ public class CaptureDecisionTests
             codeFactOverrideAllowed: true));
 
         Assert.Equal(CaptureOutcome.AutoCapture, decision.Outcome);
+        Assert.Contains("overrides the code-fact filter", decision.Notice, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Decide_NotWorthy_AcceptedButOverrideDisallowed_StillSkips()
+    {
+        // Explicit acceptance alone is not enough: the override flag must also be set.
+        var decision = Policy().Decide(Signals(
+            worthy: false,
+            explicitAcceptance: true,
+            approvePosture: true,
+            codeFactOverrideAllowed: false));
+
+        Assert.Equal(CaptureOutcome.Skip, decision.Outcome);
+    }
+
+    [Fact]
+    public void Decide_NotWorthy_OverrideAllowedButPostureOff_StillSkips()
+    {
+        // The override needs both approve posture on AND the flag — either alone skips.
+        var decision = Policy().Decide(Signals(
+            worthy: false,
+            approvePosture: false,
+            codeFactOverrideAllowed: true));
+
+        Assert.Equal(CaptureOutcome.Skip, decision.Outcome);
     }
 
     [Fact]
@@ -92,6 +129,19 @@ public class CaptureDecisionTests
 
         Assert.Equal(CaptureOutcome.AutoCapture, decision.Outcome);
         Assert.Contains("acceptance signal was strong", decision.Notice, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Decide_Worthy_ExplicitUserPreference_AutoCaptures_EvenWithPostureOff()
+    {
+        // A stated preference is captured on the user's word, independent of posture.
+        var decision = Policy().Decide(Signals(
+            confidence: 0.1,
+            approvePosture: false,
+            isExplicitUserPreference: true));
+
+        Assert.Equal(CaptureOutcome.AutoCapture, decision.Outcome);
+        Assert.Contains("explicitly stated user preference", decision.Notice, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -141,6 +191,30 @@ public class CaptureDecisionTests
     {
         Assert.Equal("Repository:skedda", Policy().Decide(Signals()).ScopeLabel);
         Assert.Equal("Global", Policy().Decide(Signals(scopeLevel: ScopeLevel.Global, scopeValue: null)).ScopeLabel);
+    }
+
+    // A non-Global scope with no value falls back to the bare scope-level name, not
+    // "Repository:" with a missing tail — the null/blank branch is distinct from Global.
+    [Fact]
+    public void ScopeLabel_NonGlobalWithNoValue_FallsBackToScopeLevelName()
+    {
+        Assert.Equal("Repository", Policy().Decide(Signals(scopeLevel: ScopeLevel.Repository, scopeValue: null)).ScopeLabel);
+        Assert.Equal("Repository", Policy().Decide(Signals(scopeLevel: ScopeLevel.Repository, scopeValue: "   ")).ScopeLabel);
+    }
+
+    // Global short-circuits to the plain "Global" label even when a scope value happens to be
+    // set — it must not fall through to the "{ScopeLevel}:{ScopeValue}" branch.
+    [Fact]
+    public void ScopeLabel_GlobalWithNonNullScopeValue_StillShowsPlainGlobal()
+    {
+        Assert.Equal("Global", Policy().Decide(Signals(scopeLevel: ScopeLevel.Global, scopeValue: "skedda")).ScopeLabel);
+    }
+
+    [Fact]
+    public void CaptureSignals_WorthinessReason_DefaultsToEmpty()
+    {
+        var signals = new CaptureSignals { Worthy = true, Confidence = 0.5 };
+        Assert.Equal(string.Empty, signals.WorthinessReason);
     }
 
     // ---- Integration through FeedbackService: each outcome lands correctly -----

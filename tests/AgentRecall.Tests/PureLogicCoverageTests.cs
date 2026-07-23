@@ -153,6 +153,8 @@ public class PureLogicCoverageTests
         Assert.NotNull(lesson);
         Assert.Equal("When flattening nested template conditionals", lesson!.Trigger);
         Assert.Contains("{{else}}", lesson.RuleText, StringComparison.Ordinal);
+        Assert.Contains("branch-preserving form", lesson.RuleText, StringComparison.Ordinal);
+        Assert.Contains("instead of a plain `(and …)` merge", lesson.RuleText, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -162,13 +164,125 @@ public class PureLogicCoverageTests
             "Avoid a re-query of an id the request already loaded and authorized.");
 
         Assert.NotNull(lesson);
-        Assert.Contains("re-querying", lesson!.Mistake, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(
+            "When the current request already loaded, authorized, and tracked an entity", lesson!.Trigger);
+        Assert.Contains(
+            "has already loaded, authorized, and tracked an entity in the same", lesson.RuleText, StringComparison.Ordinal);
+        Assert.Contains(
+            "pass it to downstream logic instead of re-querying the same id", lesson.RuleText, StringComparison.Ordinal);
+        Assert.Contains(
+            "unless the lower layer needs fresh data or must independently enforce authorization/scope",
+            lesson.RuleText, StringComparison.Ordinal);
+        Assert.Contains("re-querying", lesson.Mistake, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public void LessonRewriter_UnrecognisedShape_ReturnsNull()
     {
         Assert.Null(ConditionalLessonRewriter.Rewrite("A plain unrelated note about naming things."));
+    }
+
+    // The nested-template shape requires ALL three signals (nested, else, conditional-form) —
+    // any one or two alone must not fire it, proving the ANDs aren't accidentally ORs.
+    [Theory]
+    [InlineData("We flattened the response shape unexpectedly.")] // nested only
+    [InlineData("The else clause behavior changed in this branch.")] // elseBranch only
+    [InlineData("This is a conditional expression used in the codebase.")] // conditionalForm only
+    [InlineData("We flattened nested blocks and changed the else behavior here.")] // nested+else only
+    [InlineData("The else clause changed in this conditional template check.")] // else+conditionalForm only
+    [InlineData("We flattened the response using a conditional template rewrite.")] // nested+conditionalForm only
+    public void LessonRewriter_NestedShape_RequiresAllThreeSignals(string text)
+    {
+        Assert.Null(ConditionalLessonRewriter.Rewrite(text));
+    }
+
+    // Each signal has multiple independent triggering phrases (nested: "nested"/"flatten"/
+    // "{{#if"; conditional-form: "conditional"/"template"/"{{#if"/"(and"/"if "). Isolating each
+    // one at a time, with the others satisfied by a different phrase, proves the ORs inside
+    // each signal aren't accidentally ANDs.
+    [Theory]
+    [InlineData("We flattened the response and changed the else behavior; this looks like a conditional issue.")] // nested via "flatten"
+    [InlineData("We changed logic inside {{#if}} and modified the {{else}} case for reviewers.")] // nested via "{{#if"
+    [InlineData("We changed the nested loop and modified the else branch using a template rewrite.")] // conditionalForm via "template"
+    public void LessonRewriter_NestedShape_EachSignalHasIndependentTriggerPhrases(string text)
+    {
+        var lesson = ConditionalLessonRewriter.Rewrite(text);
+
+        Assert.NotNull(lesson);
+        Assert.Equal("When flattening nested template conditionals", lesson!.Trigger);
+    }
+
+    // Either "re-query" wording OR "already loaded" wording alone is enough — it's an OR, not
+    // an AND requiring both phrasings in the same text.
+    [Fact]
+    public void LessonRewriter_AlreadyLoadedWording_Alone_EmitsPassDownLesson_WithoutRequeryWording()
+    {
+        var lesson = ConditionalLessonRewriter.Rewrite("The controller already loaded this entity earlier.");
+
+        Assert.NotNull(lesson);
+        Assert.Contains("re-querying", lesson!.Mistake, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void LessonRewriter_RequeryWording_Alone_EmitsPassDownLesson_WithoutAlreadyLoadedWording()
+    {
+        var lesson = ConditionalLessonRewriter.Rewrite("Avoid a requery of the same id in this request.");
+
+        Assert.NotNull(lesson);
+        Assert.Contains("re-querying", lesson!.Mistake, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // "Already been loaded" is its own distinct phrase — not a substring of "already loaded" or
+    // "already load" — so it must independently trigger the lesson.
+    [Fact]
+    public void LessonRewriter_AlreadyBeenLoadedWording_Alone_EmitsPassDownLesson()
+    {
+        var lesson = ConditionalLessonRewriter.Rewrite(
+            "The context already been loaded earlier in this request and was not re-fetched.");
+
+        Assert.NotNull(lesson);
+        Assert.Contains("re-querying", lesson!.Mistake, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ---- InteractiveMemoryModes -------------------------------------------------
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("auto")]
+    [InlineData("AUTO")]
+    [InlineData("Ask")]
+    [InlineData("Silent")]
+    public void InteractiveMemoryModes_IsValid_AcceptsBlankAndKnownModes(string? raw)
+    {
+        Assert.True(InteractiveMemoryModes.IsValid(raw));
+    }
+
+    [Theory]
+    [InlineData("not-a-mode")]
+    [InlineData("5")] // parses as a defined-looking int but isn't a named enum member
+    [InlineData("-1")]
+    public void InteractiveMemoryModes_IsValid_RejectsUnrecognisedValues(string raw)
+    {
+        Assert.False(InteractiveMemoryModes.IsValid(raw));
+    }
+
+    [Theory]
+    [InlineData("Ask", InteractiveMemoryMode.Ask)]
+    [InlineData("silent", InteractiveMemoryMode.Silent)]
+    [InlineData("AUTO", InteractiveMemoryMode.Auto)]
+    public void InteractiveMemoryModes_Resolve_ParsesKnownModes_CaseInsensitively(string raw, InteractiveMemoryMode expected)
+    {
+        Assert.Equal(expected, InteractiveMemoryModes.Resolve(raw));
+    }
+
+    // An in-range-looking numeric string that TryParse accepts is still rejected by
+    // Enum.IsDefined — this is exactly the guard the IsDefined check exists for.
+    [Fact]
+    public void InteractiveMemoryModes_Resolve_UndefinedNumericValue_FallsBackToDefault()
+    {
+        Assert.Equal(InteractiveMemoryMode.Auto, InteractiveMemoryModes.Resolve("99"));
     }
 
     // ---- MemoryWorthinessClassifier -------------------------------------------

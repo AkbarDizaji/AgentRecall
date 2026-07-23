@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 using AgentRecall.Cli;
 using AgentRecall.Cli.Devcontainer;
 using AgentRecall.Core.Abstractions;
+using AgentRecall.Core.Capture;
 using AgentRecall.Core.Capture.Judge;
 using AgentRecall.Core.Domain;
 using AgentRecall.Core.Feedback;
@@ -351,6 +352,354 @@ public class TurnFinalizerTests
         Assert.Single(await Rules(db));
     }
 
+    [Fact]
+    public async Task FinalizeAsync_NullInput_Throws()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+        await using var scope = db.CreateScope();
+        var finalizer = scope.ServiceProvider.GetRequiredService<ITurnFinalizer>();
+
+        await Assert.ThrowsAsync<ArgumentNullException>(() => finalizer.FinalizeAsync(null!));
+    }
+
+    // The finalizer is a no-op (not just "produces nothing") when turned off — no DB row at all.
+    [Fact]
+    public async Task TurnFinalizerDisabled_ReturnsEmptyResult_PersistsNothing()
+    {
+        await using var db = new TestDatabase(o => o.TurnFinalizerEnabled = false);
+        await Init(db);
+
+        var result = await Finalize(db, Turn(Verdict(), prompt: "one turn"));
+
+        Assert.Empty(result.Captured);
+        Assert.Empty(result.Suggested);
+        Assert.Empty(result.Skipped);
+        Assert.Null(result.Id);
+        Assert.Empty(await Rules(db));
+    }
+
+    [Fact]
+    public async Task CaptureJudgeModeOff_ReturnsEmptyResult_PersistsNothing()
+    {
+        await using var db = new TestDatabase(o => o.CaptureJudgeMode = nameof(CaptureJudgeMode.Off));
+        await Init(db);
+
+        var result = await Finalize(db, Turn(Verdict(), prompt: "one turn"));
+
+        Assert.Empty(result.Captured);
+        Assert.Null(result.Id);
+        Assert.Empty(await Rules(db));
+    }
+
+    // ---- Reinforce path (JudgeDecision.ReinforceExisting) -----------------------
+
+    [Fact]
+    public async Task ReinforceExisting_RaisesConfidence_NoNewRuleCreated()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        var first = await Finalize(db, Turn(Verdict(confidence: 0.9), prompt: "first turn"));
+        var existingId = Assert.Single(first.Captured).RuleId;
+        var before = (await Rules(db)).Single(r => r.Id == existingId).Confidence;
+
+        var result = await Finalize(db, Turn(
+            Verdict(decision: JudgeDecision.ReinforceExisting, target: existingId, dedupeNotes: "same guidance"),
+            prompt: "second turn"));
+
+        Assert.Empty(result.Captured);
+        Assert.Contains(existingId, result.Duplicates);
+        Assert.Single(await Rules(db));
+        var after = (await Rules(db)).Single(r => r.Id == existingId).Confidence;
+        Assert.Equal(Math.Round(Math.Min(1.0, before + 0.1), 2), after);
+    }
+
+    // A repeated correction against a not-yet-standing rule promotes it to always-apply, and
+    // the skip message names the promotion specifically.
+    [Fact]
+    public async Task ReinforceExisting_RepeatedCorrection_PromotesToAlwaysApply()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        var first = await Finalize(db, Turn(Verdict(confidence: 0.9), prompt: "first turn"));
+        var existingId = Assert.Single(first.Captured).RuleId;
+        Assert.False((await Rules(db)).Single(r => r.Id == existingId).AlwaysApply);
+
+        var result = await Finalize(db, Turn(
+            Verdict(decision: JudgeDecision.ReinforceExisting, reason: JudgeCaptureReason.RepeatedMistake,
+                target: existingId, dedupeNotes: "same guidance"),
+            prompt: "second turn"));
+
+        Assert.True((await Rules(db)).Single(r => r.Id == existingId).AlwaysApply);
+        Assert.Contains(result.Skipped, s =>
+            s.Reason.Contains("promoted it to a standing rule", StringComparison.OrdinalIgnoreCase));
+    }
+
+    // Reinforcing a rule that is already always-apply does not re-announce a promotion.
+    [Fact]
+    public async Task ReinforceExisting_AlreadyAlwaysApply_DoesNotReannouncePromotion()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        var first = await Finalize(db, Turn(
+            Verdict(reason: JudgeCaptureReason.UserPreference, memoryType: JudgeMemoryType.UserPreference, confidence: 0.9),
+            prompt: "first turn"));
+        var existingId = Assert.Single(first.Captured).RuleId;
+        Assert.True((await Rules(db)).Single(r => r.Id == existingId).AlwaysApply);
+
+        var result = await Finalize(db, Turn(
+            Verdict(decision: JudgeDecision.ReinforceExisting, reason: JudgeCaptureReason.RepeatedMistake,
+                target: existingId, dedupeNotes: "same guidance"),
+            prompt: "second turn"));
+
+        Assert.DoesNotContain(result.Skipped, s =>
+            s.Reason.Contains("promoted", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Skipped, s => s.Reason == $"Reinforced existing rule #{existingId}.");
+    }
+
+    // A reinforce target that no longer exists (deleted between judging and persisting) is a
+    // clean no-op, not a crash — and it does not silently add a bogus duplicate.
+    [Fact]
+    public async Task ReinforceExisting_TargetNoLongerExists_SkipsWithoutDuplicate()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        const int missingId = 999_999;
+        var result = await Finalize(db, Turn(
+            Verdict(decision: JudgeDecision.ReinforceExisting, target: missingId, dedupeNotes: "same guidance"),
+            prompt: "one turn"));
+
+        Assert.Empty(result.Duplicates);
+        Assert.Contains(result.Skipped, s =>
+            s.Reason.Contains("no longer exists", StringComparison.OrdinalIgnoreCase));
+    }
+
+    // ---- Supersede edge cases ----------------------------------------------------
+
+    // Superseding with a target that no longer exists must not attempt to mark it superseded
+    // (that would throw, since the lifecycle service requires the target to exist) — it still
+    // stores the new rule cleanly, with no error recorded.
+    [Fact]
+    public async Task Supersede_TargetNoLongerExists_StillCapturesCleanly_NoError()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        const int missingId = 999_999;
+        var result = await Finalize(db, Turn(Verdict(
+            decision: JudgeDecision.SupersedeExisting, target: missingId, rule: Rule())));
+
+        Assert.Empty(result.Errors);
+        Assert.Single(result.Captured);
+    }
+
+    // The rule the judge wants to supersede with turns out to be a duplicate of an existing
+    // rule: dedupe wins, nothing new is captured or superseded.
+    [Fact]
+    public async Task Supersede_NewRuleIsDuplicate_ReinforcesInsteadOfSuperseding()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        var first = await Finalize(db, Turn(Verdict(confidence: 0.9), prompt: "first turn"));
+        var existingId = Assert.Single(first.Captured).RuleId;
+
+        var result = await Finalize(db, Turn(Verdict(
+            decision: JudgeDecision.SupersedeExisting, target: existingId, rule: Rule()), prompt: "second turn"));
+
+        Assert.Empty(result.Captured);
+        Assert.Contains(existingId, result.Duplicates);
+        Assert.Single(await Rules(db));
+    }
+
+    // ---- AlwaysApply / scope for preference categories --------------------------
+
+    // A user-preference verdict is stored at Global scope even without the judge's
+    // always_apply flag set, because preferences are standing by category, not by flag.
+    [Fact]
+    public async Task UserPreferenceVerdict_IsGlobalScoped_EvenWithoutAlwaysApplyFlag()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        var result = await Finalize(db, Turn(Verdict(
+            reason: JudgeCaptureReason.UserPreference, memoryType: JudgeMemoryType.UserPreference, confidence: 0.9),
+            cwd: "/repo/project"));
+
+        var lesson = Assert.Single(result.Captured);
+        Assert.Equal("Global", lesson.ScopeLabel);
+        Assert.True(lesson.AlwaysApply);
+    }
+
+    // An ordinary engineering lesson (not a preference, not flagged always-apply) keeps the
+    // turn's repository scope rather than being forced Global.
+    [Fact]
+    public async Task OrdinaryLesson_KeepsRepositoryScope_NotForcedGlobal()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        var result = await Finalize(db, Turn(Verdict(confidence: 0.9), cwd: "/repo/project"));
+
+        var lesson = Assert.Single(result.Captured);
+        Assert.Equal("Repository:project", lesson.ScopeLabel);
+    }
+
+    // ---- Cross-turn "last" ordering ----------------------------------------------
+
+    // A second, later turn's finalization outranks an earlier one for GetLastAsync, even
+    // when both land in the same tick (SQLite CreatedAt resolution) — the Id tie-break must
+    // still favor the most recently inserted row.
+    [Fact]
+    public async Task GetLastAsync_SecondTurn_OutranksFirst_AcrossDistinctTurns()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        await Finalize(db, Turn(Verdict(confidence: 0.9), prompt: "first turn"));
+        var second = await Finalize(db, Turn(Verdict(confidence: 0.9), prompt: "second turn"));
+
+        await using var scope = db.CreateScope();
+        var finalizer = scope.ServiceProvider.GetRequiredService<ITurnFinalizer>();
+        var last = await finalizer.GetLastAsync();
+
+        Assert.NotNull(last);
+        Assert.Equal(second.TurnId, last!.TurnId);
+    }
+
+    // When the judge is unavailable (no supplied judgment), the recorded Decision/JudgeReason
+    // are empty and must surface as null on the result — not as an empty string.
+    [Fact]
+    public async Task JudgeUnavailable_DecisionAndJudgeReason_AreNull()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        var result = await Finalize(db, Turn(judgment: null, prompt: "one turn"));
+
+        Assert.Null(result.Decision);
+        Assert.Null(result.JudgeReason);
+        Assert.Contains(result.Skipped, s => s.Reason == TurnFinalizer.JudgeUnavailableMessage);
+    }
+
+    // A judged verdict's Decision/JudgeReason are non-null and carry the judge's actual values.
+    [Fact]
+    public async Task JudgedVerdict_DecisionAndJudgeReason_AreNonNull()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        var result = await Finalize(db, Turn(Verdict(reason: JudgeCaptureReason.ReviewerCorrection)));
+
+        Assert.Equal("Capture", result.Decision);
+        Assert.Equal("ReviewerCorrection", result.JudgeReason);
+    }
+
+    // A Repository-scoped rule with no scope value renders the bare level name, not a
+    // "Repository:" with a dangling colon — the Global short-circuit is distinct from this.
+    [Fact]
+    public async Task RepositoryScope_NoScopeValue_RendersBareLevelName()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+        await using var scope = db.CreateScope();
+        var finalizer = scope.ServiceProvider.GetRequiredService<ITurnFinalizer>();
+
+        var input = new TurnFinalizationInput
+        {
+            Prompt = "one turn",
+            Cwd = "/repo/project",
+            Source = "stop_hook",
+            ScopeLevel = ScopeLevel.Repository,
+            ScopeValue = null,
+            SuppliedJudgment = Verdict(confidence: 0.9),
+        };
+
+        var result = await finalizer.FinalizeAsync(input);
+
+        var lesson = Assert.Single(result.Captured);
+        Assert.Equal("Repository", lesson.ScopeLabel);
+    }
+
+    // Tags from the judge are deduplicated case-insensitively, and the finalizer's own
+    // source tag is always present (and first).
+    [Fact]
+    public async Task CapturedRule_Tags_DedupeCaseInsensitively_AndAlwaysIncludeSourceTag()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        var rule = Rule(tags: ["Payments", "payments", "PAYMENTS", "billing"]);
+        var result = await Finalize(db, Turn(Verdict(rule: rule)));
+
+        var lesson = Assert.Single(result.Captured);
+        var stored = (await Rules(db)).Single(r => r.Id == lesson.RuleId);
+        var tags = stored.Tags.Split(',');
+
+        Assert.Equal(TurnFinalizer.SourceTag, tags[0]);
+        // Only one casing of "payments" survives, plus the distinct "billing" tag.
+        Assert.Equal(3, tags.Length);
+        Assert.Single(tags, t => string.Equals(t, "Payments", StringComparison.OrdinalIgnoreCase));
+    }
+
+    // The idempotency hash folds in the assistant response too: a turn that differs only in
+    // that field is not treated as a replay of a prior turn with the same prompt/cwd/source.
+    [Fact]
+    public async Task ComputeHash_DiffersOnAssistantResponse_NotTreatedAsReplay()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        var withoutAssistant = Turn(Verdict(confidence: 0.9), prompt: "same turn", assistant: null);
+        var withAssistant = Turn(Verdict(confidence: 0.9), prompt: "same turn", assistant: "distinct response text");
+
+        await Finalize(db, withoutAssistant);
+        var second = await Finalize(db, withAssistant);
+
+        Assert.False(second.FromCache);
+    }
+
+    // A turn finalization that was recorded with blank optional fields (a shape that can arise
+    // from data written before some field existed, or a partial/legacy row) reconstructs those
+    // fields as null, not as an empty string that would render literally.
+    [Fact]
+    public async Task GetLastAsync_BlankOptionalFields_ReconstructAsNull()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        await using (var scope = db.CreateScope())
+        {
+            var repo = scope.ServiceProvider.GetRequiredService<ITurnFinalizationRepository>();
+            await repo.AddAsync(new TurnFinalization
+            {
+                Cwd = "/repo/project",
+                Source = "stop_hook",
+                RawHash = "irrelevant-hash-for-this-row",
+                TurnId = string.Empty,
+                DecisionSource = string.Empty,
+                JudgeDecision = string.Empty,
+                JudgeCaptureReason = string.Empty,
+            });
+        }
+
+        await using var scope2 = db.CreateScope();
+        var finalizer = scope2.ServiceProvider.GetRequiredService<ITurnFinalizer>();
+        var last = await finalizer.GetLastAsync();
+
+        Assert.NotNull(last);
+        Assert.Null(last!.TurnId);
+        Assert.Null(last.DecisionSource);
+        Assert.Null(last.Decision);
+        Assert.Null(last.JudgeReason);
+        Assert.Null(last.JudgeConfidence);
+        Assert.Null(last.TargetRuleId);
+    }
+
     // U. The status command returns the last finalization result.
     [Fact]
     public async Task Status_ReturnsLastFinalization()
@@ -535,6 +884,12 @@ public class TurnFinalizerTests
         var home = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".agentrecall");
         Assert.DoesNotContain(home, db.Options.DataDirectory, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TurnFinalizationInput_Source_DefaultsToManual()
+    {
+        Assert.Equal("manual", new TurnFinalizationInput().Source);
     }
 
     /// <summary>A Stop-hook payload carrying a Capture judgment, as the host would supply.</summary>

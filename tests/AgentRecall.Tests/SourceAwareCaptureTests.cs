@@ -164,6 +164,66 @@ public class SourceAwareCaptureTests
         Assert.False(verdict.ShouldSkip);
     }
 
+    // Every read-only kind must actually reach the quality gate when paired — not just
+    // SourceDocument/ToolOrSkill (already covered above by the Doc* tests). Without a
+    // dedicated CommandOutput/LogOutput paired case, a mutant that hard-codes those two
+    // branches to always skip would go unnoticed.
+    [Fact]
+    public void CommandOutputBackedByObservedFailure_IsAllowed()
+    {
+        var classification = CandidateSourceClassifier.Classify(
+            "Run git status --porcelain to list changed files.", CandidateOrigin.CommandOutput);
+
+        var verdict = SourceAwareCaptureDecision.Decide(
+            classification, pairedWithObservedFailure: true, pairedWithExplicitSave: false, pairedWithRepositoryConfirmation: false);
+
+        Assert.False(verdict.ShouldSkip);
+    }
+
+    [Fact]
+    public void LogOutputBackedByRepositoryConfirmation_IsAllowed()
+    {
+        var classification = CandidateSourceClassifier.Classify(
+            "ERROR failed to bind to port 5000, address already in use.", CandidateOrigin.LogOutput);
+
+        var verdict = SourceAwareCaptureDecision.Decide(
+            classification, pairedWithObservedFailure: false, pairedWithExplicitSave: false, pairedWithRepositoryConfirmation: true);
+
+        Assert.False(verdict.ShouldSkip);
+    }
+
+    // Assistant meta-prose only earns its way in on an explicit save OR an observed failure —
+    // a repository confirmation alone is NOT enough (unlike the other read-only kinds above).
+    [Fact]
+    public void AssistantMetaProse_RepositoryConfirmationAlone_StillSkips()
+    {
+        var verdict = SourceAwareCaptureDecision.Decide(
+            CandidateSourceClassifier.Classify("One thing is worth saving here, want me to add it?", CandidateOrigin.AssistantMessage),
+            pairedWithObservedFailure: false, pairedWithExplicitSave: false, pairedWithRepositoryConfirmation: true);
+
+        Assert.True(verdict.ShouldSkip);
+    }
+
+    [Fact]
+    public void AssistantMetaProseBackedByObservedFailure_IsAllowed()
+    {
+        var verdict = SourceAwareCaptureDecision.Decide(
+            CandidateSourceClassifier.Classify("One thing is worth saving here, want me to add it?", CandidateOrigin.AssistantMessage),
+            pairedWithObservedFailure: true, pairedWithExplicitSave: false, pairedWithRepositoryConfirmation: false);
+
+        Assert.False(verdict.ShouldSkip);
+    }
+
+    [Fact]
+    public void AssistantMetaProseBackedByExplicitSave_IsAllowed()
+    {
+        var verdict = SourceAwareCaptureDecision.Decide(
+            CandidateSourceClassifier.Classify("One thing is worth saving here, want me to add it?", CandidateOrigin.AssistantMessage),
+            pairedWithObservedFailure: false, pairedWithExplicitSave: true, pairedWithRepositoryConfirmation: false);
+
+        Assert.False(verdict.ShouldSkip);
+    }
+
     // ---- Explicit save / do-not-save ------------------------------------------------
 
     [Fact]
@@ -297,5 +357,174 @@ public class SourceAwareCaptureTests
     {
         var classification = CandidateSourceClassifier.Classify(text);
         Assert.False(string.IsNullOrEmpty(classification.Reason));
+    }
+
+    // ---- Mutation-hardening: every alternative in every pattern group must be load-bearing --
+
+    // Each InlineData below isolates exactly one alternative of its pattern group — it contains
+    // no phrase that would satisfy any *other* alternative in the same group, nor any pattern
+    // checked earlier in Classify's evidence order. If Stryker deletes that one alternative, the
+    // whole classification changes and these tests fail.
+
+    [Fact]
+    public void ExplicitDoNotSave_NotWorthSavingClause_IsRecognised()
+    {
+        var classification = CandidateSourceClassifier.Classify("This detail is not worth saving as a rule.");
+        Assert.Equal(CandidateSourceKind.UserExplicitDoNotSave, classification.Kind);
+        Assert.Equal("explicit do-not-save intent", classification.Reason);
+    }
+
+    [Fact]
+    public void ExplicitSave_Reason_IsExact()
+    {
+        var classification = CandidateSourceClassifier.Classify("Save this for later.");
+        Assert.Equal(CandidateSourceKind.UserExplicitSave, classification.Kind);
+        Assert.Equal("explicit save intent", classification.Reason);
+    }
+
+    [Theory]
+    [InlineData("You broke the tests with that change.")]
+    [InlineData("This change introduced a regression in the parser.")]
+    [InlineData("This changed the behavior unexpectedly.")]
+    [InlineData("No, preserve the original ordering.")]
+    [InlineData("You should have used the cached client.")]
+    public void ObservedFailureOrCorrection_EachClause_IsRecognised(string text)
+    {
+        var classification = CandidateSourceClassifier.Classify(text);
+        Assert.Equal(CandidateSourceKind.ObservedAgentFailure, classification.Kind);
+        Assert.Equal("observed failure or correction", classification.Reason);
+    }
+
+    // These reach the Classify() repository-confirmation branch directly (unlike the
+    // MatchesRepositoryConfirmation-only and direct-regex coverage elsewhere in this file), so
+    // they also cover that branch's own reason string and kind — previously zero-coverage.
+    [Theory]
+    [InlineData("Use the existing helper for validation.")]
+    [InlineData("That's our convention for handling retries.")]
+    [InlineData("Follow the documented repository convention for migrations.")]
+    [InlineData("We always validate the payload before persisting it.")]
+    public void RepositoryConfirmation_EachClause_IsRecognisedByClassify(string text)
+    {
+        var classification = CandidateSourceClassifier.Classify(text);
+        Assert.Equal(CandidateSourceKind.RepositoryConventionConfirmation, classification.Kind);
+        Assert.Equal("repository-convention confirmation", classification.Reason);
+    }
+
+    [Theory]
+    [InlineData("I didn't explicitly call the memory tool for this.")]
+    [InlineData("The Stop hook may have captured this already.")]
+    [InlineData("Here's what I'd save from this conversation.")]
+    public void AssistantMetaProse_EachClause_IsRecognised(string text)
+    {
+        var classification = CandidateSourceClassifier.Classify(text);
+        Assert.Equal(CandidateSourceKind.AssistantMetaProse, classification.Kind);
+        Assert.Equal("assistant meta-prose shape", classification.Reason);
+    }
+
+    [Fact]
+    public void CommandOutput_DollarPromptClause_IsRecognised()
+    {
+        var classification = CandidateSourceClassifier.Classify("$ ls -la");
+        Assert.Equal(CandidateSourceKind.CommandOutput, classification.Kind);
+        Assert.Equal("command-output shape", classification.Reason);
+    }
+
+    [Theory]
+    [InlineData("Log entry at 2024-05-01 12:30 shows nothing unusual.")]
+    [InlineData("There is a leftover config file to clean up.")]
+    [InlineData("Running both processes will cause a naming conflict.")]
+    public void LogOutput_EachClause_IsRecognised(string text)
+    {
+        var classification = CandidateSourceClassifier.Classify(text);
+        Assert.Equal(CandidateSourceKind.LogOutput, classification.Kind);
+        Assert.Equal("log-output shape", classification.Reason);
+    }
+
+    [Fact]
+    public void ToolOrSkillInstruction_ForNextStepsClause_IsRecognised()
+    {
+        var classification = CandidateSourceClassifier.Classify("Copy the results for the next steps in the pipeline.");
+        Assert.Equal(CandidateSourceKind.ToolOrSkillInstruction, classification.Kind);
+        Assert.Equal("tool/skill instruction shape", classification.Reason);
+    }
+
+    // These reach the Classify() source-document branch directly, covering its own reason
+    // string and kind — previously zero-coverage (the direct-regex test elsewhere in this file
+    // only exercises the first alternative, and only via Regex.IsMatch, not via Classify()).
+    [Theory]
+    [InlineData("As documented above, the retry limit is five.")]
+    [InlineData("Per the migration guide, run the setup script twice.")]
+    public void SourceDocumentInstruction_EachClause_IsRecognisedByClassify(string text)
+    {
+        var classification = CandidateSourceClassifier.Classify(text);
+        Assert.Equal(CandidateSourceKind.SourceDocumentInstruction, classification.Kind);
+        Assert.Equal("source-document instruction shape", classification.Reason);
+    }
+
+    // The structured-metadata branch's reason strings are distinct per origin; a test that only
+    // checks Kind (as StructuredOrigin_WinsOverText does) can't tell "structured metadata:
+    // skill-doc" apart from an empty or Stryker-mutated string.
+    [Theory]
+    [InlineData(CandidateOrigin.SkillDoc, "structured metadata: skill-doc")]
+    [InlineData(CandidateOrigin.ToolDoc, "structured metadata: tool-doc")]
+    [InlineData(CandidateOrigin.CommandOutput, "structured metadata: command-output")]
+    [InlineData(CandidateOrigin.LogOutput, "structured metadata: log-output")]
+    public void StructuredOrigin_ReasonString_IsExact(CandidateOrigin origin, string expectedReason)
+    {
+        var classification = CandidateSourceClassifier.Classify("irrelevant body text", origin);
+        Assert.Equal(expectedReason, classification.Reason);
+    }
+
+    // A null candidate must fall through the null-coalescing empty-string default, not some
+    // other placeholder value, and be labelled exactly "empty candidate".
+    [Fact]
+    public void NullCandidate_IsEmptyCandidate_Exactly()
+    {
+        var classification = CandidateSourceClassifier.Classify(null);
+        Assert.Equal(CandidateSourceKind.Unknown, classification.Kind);
+        Assert.Equal("empty candidate", classification.Reason);
+    }
+
+    // ---- MatchesRepositoryConfirmation: direct coverage of the standalone helper ----
+
+    // This helper is used by callers outside Classify() to test the pairing signal on its own;
+    // it had zero direct coverage before this — every existing use of a repository-confirmation
+    // string went through Classify() instead.
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("just a regular sentence")]
+    public void MatchesRepositoryConfirmation_FalseCases(string? text)
+    {
+        Assert.False(CandidateSourceClassifier.MatchesRepositoryConfirmation(text));
+    }
+
+    [Fact]
+    public void MatchesRepositoryConfirmation_TrueCase()
+    {
+        Assert.True(CandidateSourceClassifier.MatchesRepositoryConfirmation("in this repository we scope by tenant"));
+    }
+
+    // ---- Matches(): the fail-open timeout guard must return false, not true, on a timeout ----
+
+    // Forcing a genuine RegexMatchTimeoutException without touching the source: build a
+    // throwaway Regex with a vanishingly small timeout matched against a large input, then
+    // invoke the classifier's private static timeout-guarded Matches(Regex, string) via
+    // reflection — the only way to exercise the catch block, since none of the classifier's own
+    // named patterns are pathological enough to time out within their real 250ms budget.
+    [Fact]
+    public void Matches_OnTimeout_FailsOpenToFalse()
+    {
+        var method = typeof(CandidateSourceClassifier).GetMethod(
+            "Matches", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var slowPattern = new Regex(".*", RegexOptions.None, TimeSpan.FromTicks(1));
+        var largeInput = new string('a', 2_000_000);
+
+        var result = (bool)method!.Invoke(null, new object[] { slowPattern, largeInput })!;
+
+        Assert.False(result);
     }
 }

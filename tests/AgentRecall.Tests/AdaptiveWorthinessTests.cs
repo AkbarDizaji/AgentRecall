@@ -185,6 +185,316 @@ public class AdaptiveWorthinessTests
         Assert.Equal(a.Explanation, b.Explanation);
     }
 
+    // ---- Pure policy: argument guards, boundaries, and math --------------------
+
+    [Fact]
+    public void CaptureContext_Source_DefaultsToEmpty()
+    {
+        Assert.Equal(string.Empty, new CaptureContext().Source);
+    }
+
+    [Fact]
+    public void Adjust_NullContext_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(
+            () => Policy().Adjust(Worthy(), null!, Base(), isDuplicate: false, conflictExists: false));
+    }
+
+    [Fact]
+    public void Adjust_NullBaseDecision_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(
+            () => Policy().Adjust(Worthy(), new CaptureContext(), null!, isDuplicate: false, conflictExists: false));
+    }
+
+    // The >= 2 / >= 1 thresholds on repeated-correction/prior-mistake evidence: the boundary
+    // value itself must already count as "repeated", not just values strictly above it.
+    [Fact]
+    public void RepeatedCorrectionCount_AtThresholdOfTwo_CountsAsRepeated()
+    {
+        var context = new CaptureContext { RepeatedCorrectionCount = 2 };
+
+        var result = Policy().Adjust(Worthy(0.5), context, Base(), isDuplicate: false, conflictExists: false);
+
+        Assert.Equal(CaptureReason.RepeatedCorrection, result.Reason);
+        Assert.Equal(CaptureOutcome.AutoCapture, result.Outcome);
+    }
+
+    [Fact]
+    public void PriorSimilarMistakeCount_AtThresholdOfOne_CountsAsRepeated()
+    {
+        var context = new CaptureContext { PriorSimilarMistakeCount = 1 };
+
+        var result = Policy().Adjust(Worthy(0.5), context, Base(), isDuplicate: false, conflictExists: false);
+
+        Assert.Equal(CaptureReason.RepeatedCorrection, result.Reason);
+        Assert.Equal(CaptureOutcome.AutoCapture, result.Outcome);
+    }
+
+    // The base confidence comes from the worthiness result when present, not from the base
+    // decision — the two must be able to disagree for this to be observable.
+    [Fact]
+    public void Confidence_PrefersWorthinessConfidence_OverBaseDecisionConfidence()
+    {
+        var context = new CaptureContext { ObservedFailure = true };
+
+        var result = Policy().Adjust(Worthy(0.20), context, Base(confidence: 0.90), isDuplicate: false, conflictExists: false);
+
+        // Adjusted from 0.20 (+0.15 for ObservedFailure), not from 0.90.
+        Assert.Equal(0.35, result.Confidence);
+    }
+
+    [Fact]
+    public void Confidence_FallsBackToBaseDecisionConfidence_WhenWorthinessIsNull()
+    {
+        var context = new CaptureContext { ObservedFailure = true };
+
+        var result = Policy().Adjust(null, context, Base(confidence: 0.20), isDuplicate: false, conflictExists: false);
+
+        Assert.Equal(0.35, result.Confidence);
+    }
+
+    [Fact]
+    public void CodeFact_Skip_ExplanationNamesRepositoryRecoverability()
+    {
+        var context = new CaptureContext { ObservedFailure = true };
+
+        var result = Policy().Adjust(CodeFact(), context, Base(CaptureOutcome.Skip, 0.85), isDuplicate: false, conflictExists: false);
+
+        Assert.Contains("recoverable from the repository", result.Explanation, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void CodeFact_ExplicitSave_ExplanationNamesExplicitAsk()
+    {
+        var context = new CaptureContext { ObservedFailure = true, ExplicitSaveRequest = true };
+
+        var result = Policy().Adjust(CodeFact(), context, Base(CaptureOutcome.Skip, 0.85), isDuplicate: false, conflictExists: false);
+
+        Assert.Contains("explicitly asked to save", result.Explanation, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // The acceptance-signal-or-review-accepted decisiveness check is an OR: either alone is
+    // enough to make the decision decisive without the other.
+    [Fact]
+    public void AcceptanceSignal_Alone_WithoutReviewAccepted_IsDecisive()
+    {
+        var context = new CaptureContext { AcceptanceSignal = true, ObservedFailure = true };
+
+        var result = Policy(autoBar: 0.99).Adjust(Worthy(0.3), context, Base(), isDuplicate: false, conflictExists: false);
+
+        Assert.Equal(CaptureOutcome.AutoCapture, result.Outcome);
+    }
+
+    [Fact]
+    public void ReviewAccepted_Alone_WithoutAcceptanceSignal_IsDecisive()
+    {
+        var context = new CaptureContext { ReviewAccepted = true };
+
+        var result = Policy(autoBar: 0.99).Adjust(Worthy(0.3), context, Base(), isDuplicate: false, conflictExists: false);
+
+        Assert.Equal(CaptureOutcome.AutoCapture, result.Outcome);
+    }
+
+    // Confidence exactly at the auto-capture bar is decisive (>=, not >).
+    [Fact]
+    public void Confidence_ExactlyAtAutoBar_IsDecisive()
+    {
+        var context = new CaptureContext { ObservedFailure = true };
+
+        // Worthy(0.35) + 0.15 (ObservedFailure) = 0.50, exactly the default auto bar.
+        var result = Policy(autoBar: 0.50).Adjust(Worthy(0.35), context, Base(), isDuplicate: false, conflictExists: false);
+
+        Assert.Equal(CaptureOutcome.AutoCapture, result.Outcome);
+    }
+
+    [Fact]
+    public void Confidence_JustBelowAutoBar_IsSuggestedNotCaptured()
+    {
+        var context = new CaptureContext { ObservedFailure = true };
+
+        var result = Policy(autoBar: 0.51).Adjust(Worthy(0.35), context, Base(), isDuplicate: false, conflictExists: false);
+
+        Assert.Equal(CaptureOutcome.SuggestCapture, result.Outcome);
+        Assert.Contains("pending suggestion", result.Explanation, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void AutoCapture_Explanation_NamesReasonAndConfidence()
+    {
+        var context = new CaptureContext { ObservedFailure = true, RepeatedCorrectionCount = 5 };
+
+        var result = Policy().Adjust(Worthy(0.9), context, Base(), isDuplicate: false, conflictExists: false);
+
+        Assert.Equal(CaptureOutcome.AutoCapture, result.Outcome);
+        Assert.Contains("Captured because of a repeated correction", result.Explanation, StringComparison.Ordinal);
+    }
+
+    // ---- Reason priority (ResolveReason) ---------------------------------------
+
+    [Fact]
+    public void Reason_TestFailedThenFixed_Alone_WinsWithNoHigherPriorityEvidence()
+    {
+        var context = new CaptureContext { TestFailedThenFixed = true };
+
+        var result = Policy().Adjust(Worthy(0.5), context, Base(), isDuplicate: false, conflictExists: false);
+
+        Assert.Equal(CaptureReason.TestFailedThenFixed, result.Reason);
+    }
+
+    [Fact]
+    public void Reason_UserCorrection_Alone_WinsWithNoHigherPriorityEvidence()
+    {
+        var context = new CaptureContext { UserCorrection = true };
+
+        var result = Policy().Adjust(Worthy(0.5), context, Base(), isDuplicate: false, conflictExists: false);
+
+        Assert.Equal(CaptureReason.UserCorrection, result.Reason);
+    }
+
+    [Fact]
+    public void Reason_ExplicitContextReason_UsedWhenNoEvidenceOutranksIt()
+    {
+        var context = new CaptureContext { Reason = CaptureReason.ImportedFeedback, ExplicitSaveRequest = true };
+
+        var result = Policy().Adjust(Worthy(0.5), context, Base(), isDuplicate: false, conflictExists: false);
+
+        Assert.Equal(CaptureReason.ImportedFeedback, result.Reason);
+    }
+
+    // ---- Reason priority (SourceReason fallback, reached only via mining/import) ----
+
+    [Theory]
+    [InlineData("lesson-mining", CaptureReason.LessonMined)]
+    [InlineData("MINED-signal", CaptureReason.LessonMined)]
+    [InlineData("pr-import", CaptureReason.ImportedFeedback)]
+    [InlineData("review-log", CaptureReason.ImportedFeedback)]
+    [InlineData("pull-request", CaptureReason.ImportedFeedback)]
+    // These isolate the "import" and "pr" keywords individually, without "pull"/"log" also
+    // present, so an accidental && between them (instead of ||) would be observable.
+    [InlineData("imported-from-slack", CaptureReason.ImportedFeedback)]
+    [InlineData("PR comment", CaptureReason.ImportedFeedback)]
+    [InlineData("cli", CaptureReason.ManualFeedback)]
+    [InlineData(null, CaptureReason.ManualFeedback)]
+    public void Reason_FallsBackToSource_WhenNoOtherEvidenceOrExplicitReason(string? source, CaptureReason expected)
+    {
+        var context = new CaptureContext { Source = source ?? string.Empty, ExplicitSaveRequest = true };
+
+        var result = Policy().Adjust(Worthy(0.5), context, Base(), isDuplicate: false, conflictExists: false);
+
+        Assert.Equal(expected, result.Reason);
+    }
+
+    // ---- Describe()/BuildCaptureExplanation: every reason has its own phrase --------
+
+    [Theory]
+    [InlineData(CaptureReason.ObservedAgentFailure, "an observed agent failure")]
+    [InlineData(CaptureReason.UserCorrection, "a user correction")]
+    [InlineData(CaptureReason.AcceptedReviewComment, "an accepted review comment")]
+    [InlineData(CaptureReason.TestFailedThenFixed, "a test that failed then passed")]
+    [InlineData(CaptureReason.RepeatedCorrection, "a repeated correction")]
+    [InlineData(CaptureReason.LessonMined, "a mined repeated lesson")]
+    [InlineData(CaptureReason.ImportedFeedback, "imported feedback")]
+    [InlineData(CaptureReason.ManualFeedback, "the supplied feedback")]
+    public void AutoCapture_Explanation_NamesTheSpecificReasonPhrase(CaptureReason reason, string expectedPhrase)
+    {
+        var context = ContextForReason(reason);
+
+        var result = Policy(autoBar: 0.1).Adjust(Worthy(0.9), context, Base(), isDuplicate: false, conflictExists: false);
+
+        Assert.Equal(CaptureOutcome.AutoCapture, result.Outcome);
+        Assert.Equal(reason, result.Reason);
+        Assert.Contains(expectedPhrase, result.Explanation, StringComparison.Ordinal);
+    }
+
+    private static CaptureContext ContextForReason(CaptureReason reason) => reason switch
+    {
+        CaptureReason.ObservedAgentFailure => new CaptureContext { ObservedFailure = true },
+        CaptureReason.UserCorrection => new CaptureContext { UserCorrection = true },
+        CaptureReason.AcceptedReviewComment => new CaptureContext { ReviewAccepted = true },
+        CaptureReason.TestFailedThenFixed => new CaptureContext { TestFailedThenFixed = true },
+        CaptureReason.RepeatedCorrection => new CaptureContext { RepeatedCorrectionCount = 2 },
+        CaptureReason.LessonMined => new CaptureContext { Source = "lesson-mining", ExplicitSaveRequest = true },
+        CaptureReason.ImportedFeedback => new CaptureContext { Source = "pr-import", ExplicitSaveRequest = true },
+        CaptureReason.ManualFeedback => new CaptureContext { Source = "cli", ExplicitSaveRequest = true },
+        _ => throw new ArgumentOutOfRangeException(nameof(reason)),
+    };
+
+    // ---- Confidence math (AdjustConfidence) ------------------------------------
+
+    [Theory]
+    [InlineData(true, false, false, false, 0.15)]
+    [InlineData(false, true, false, false, 0.10)]
+    [InlineData(false, false, true, false, 0.15)]
+    [InlineData(false, false, false, true, 0.15)]
+    public void AdjustConfidence_EachEvidenceFlag_AddsItsOwnDelta(
+        bool observedFailure, bool userCorrection, bool reviewAccepted, bool testFailedThenFixed, double expectedDelta)
+    {
+        var context = new CaptureContext
+        {
+            ObservedFailure = observedFailure,
+            UserCorrection = userCorrection,
+            ReviewAccepted = reviewAccepted,
+            TestFailedThenFixed = testFailedThenFixed,
+        };
+
+        var result = Policy().Adjust(Worthy(0.40), context, Base(), isDuplicate: false, conflictExists: false);
+
+        Assert.Equal(Math.Round(0.40 + expectedDelta, 2), result.Confidence);
+    }
+
+    [Fact]
+    public void AdjustConfidence_RepeatsFormula_UsesCorrectionMinusOnePlusPriorMistakes()
+    {
+        // RepeatedCorrectionCount=3 -> Max(0, 3-1)=2; PriorSimilarMistakeCount=1 -> 1. repeats=3.
+        // Delta = min(0.30, 0.10*3) = 0.30.
+        var context = new CaptureContext { RepeatedCorrectionCount = 3, PriorSimilarMistakeCount = 1 };
+
+        var result = Policy().Adjust(Worthy(0.40), context, Base(), isDuplicate: false, conflictExists: false);
+
+        Assert.Equal(0.70, result.Confidence);
+    }
+
+    [Fact]
+    public void AdjustConfidence_RepeatedCorrectionCountOfOne_ContributesNothing()
+    {
+        // Max(0, 1-1) = 0: a single (non-repeated) correction adds no repeat bonus.
+        var context = new CaptureContext { UserCorrection = true, RepeatedCorrectionCount = 1 };
+
+        var result = Policy().Adjust(Worthy(0.40), context, Base(), isDuplicate: false, conflictExists: false);
+
+        // Only the +0.10 UserCorrection delta applies; no repeat bonus from a count of 1.
+        Assert.Equal(0.50, result.Confidence);
+    }
+
+    [Fact]
+    public void AdjustConfidence_RepeatsBonus_IsCappedAtPoint30()
+    {
+        // repeats = Max(0, 9-1) + Max(0, 9) = 17; 0.10*17 = 1.70, capped to 0.30.
+        var context = new CaptureContext { RepeatedCorrectionCount = 9, PriorSimilarMistakeCount = 9 };
+
+        var result = Policy().Adjust(Worthy(0.40), context, Base(), isDuplicate: false, conflictExists: false);
+
+        Assert.Equal(0.70, result.Confidence);
+    }
+
+    [Fact]
+    public void AdjustConfidence_ResultIsClampedToOne()
+    {
+        var context = new CaptureContext
+        {
+            ObservedFailure = true,
+            UserCorrection = true,
+            ReviewAccepted = true,
+            TestFailedThenFixed = true,
+            RepeatedCorrectionCount = 5,
+        };
+
+        var result = Policy().Adjust(Worthy(0.95), context, Base(), isDuplicate: false, conflictExists: false);
+
+        Assert.Equal(1.0, result.Confidence);
+    }
+
     // ---- Integration: FeedbackService -----------------------------------------
 
     private static async Task Init(TestDatabase db)

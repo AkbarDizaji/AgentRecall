@@ -16,9 +16,15 @@ public static class CareerImpactRenderer
     /// <summary>The detailed-mode header.</summary>
     public const string DetailedHeader = "🧠 **AgentRecall Career Impact**";
 
-    /// <summary>Message shown when no significant impact was detected for the last turn.</summary>
+    /// <summary>
+    /// Message shown when the career-impact store holds no candidate at all — the "--last"
+    /// reads surface the most recent candidate across every turn, so an empty result means
+    /// nothing has been recorded yet, not that one specific turn was unremarkable. Points at
+    /// `career status` because the usual cause is the pack being uninstalled or the mode Silent.
+    /// </summary>
     public const string NoImpactMessage =
-        Badge + " no significant engineering impact detected for the last turn.";
+        Badge + " no career-impact candidate recorded yet — run `agentrecall career status` " +
+        "to check the pack is installed and the mode is not Silent.";
 
     /// <summary>
     /// Builds the single-line pointer surfaced inside the Turn Memory Summary. <paramref name="hint"/>

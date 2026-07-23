@@ -369,7 +369,10 @@ public class CareerImpactTests
         await InstallAsync(db);
         var (code, output) = await RunAsync(db, "career", "impact", "--last");
         Assert.Equal(0, code);
-        Assert.Contains("no significant engineering impact detected", output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("no career-impact candidate recorded yet", output, StringComparison.OrdinalIgnoreCase);
+        // The empty-store message must not claim it only inspected the last turn: the read is
+        // whole-store, and mislabelling it that way is what makes a missing candidate look lost.
+        Assert.DoesNotContain("for the last turn", output, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact] // X, Z. `career impact --last` and `--detailed` render a detected candidate.
@@ -440,7 +443,25 @@ public class CareerImpactTests
         var (code, output) = await RunAsync(db, "career", "journal", "--last");
         Assert.Equal(0, code);
         Assert.DoesNotContain("# Career Journal Entry", output, StringComparison.Ordinal);
-        Assert.Contains("no significant engineering impact detected", output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("no career-impact candidate recorded yet", output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact] // A significant candidate stays retrievable via `--last` even after a later trivial
+    // turn records nothing — `--last` is the newest candidate across turns, not the last turn's.
+    public async Task CareerJournal_Last_SurfacesEarlierCandidate_AfterTrivialTurn()
+    {
+        await using var db = await NewDbAsync();
+        await InstallAsync(db);
+
+        // A significant turn records a candidate; a later trivial turn records nothing.
+        await AnalyzeTurnAsync(db, "Led the cross-team database migration and optimized latency", turnId: "big");
+        Assert.Null(await AnalyzeTurnAsync(db, "Fix a typo", turnId: "trivial"));
+
+        var (code, output) = await RunAsync(db, "career", "journal", "--last");
+        Assert.Equal(0, code);
+        // The earlier impact is still found — a trivial latest turn never buries it.
+        Assert.Contains("# Career Journal Entry", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("no career-impact candidate recorded yet", output, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact] // AB. `career journal --last --file` writes then appends safely (never overwrites).
