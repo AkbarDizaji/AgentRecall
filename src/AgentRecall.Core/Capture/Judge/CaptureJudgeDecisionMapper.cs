@@ -11,8 +11,9 @@ namespace AgentRecall.Core.Capture.Judge;
 /// Precedence (first match wins): an invalid verdict skips (or downgrades to a suggestion when
 /// only a non-core field was missing); an explicit do-not-save always skips; an explicit save
 /// of a sound rule always captures; the judge's Skip/Reinforce/Supersede decisions are honored;
-/// read-only/non-memory reasons skip; a code fact skips; otherwise the confidence bands decide
-/// capture (≥0.80) vs suggest (0.55–0.79) vs skip (&lt;0.55).
+/// read-only/non-memory reasons skip; a code fact skips; a self-identified friction point
+/// (reflection, not an observed signal) caps at suggest/skip and never auto-captures; otherwise
+/// the confidence bands decide capture (≥0.80) vs suggest (0.55–0.79) vs skip (&lt;0.55).
 /// </summary>
 public static class CaptureJudgeDecisionMapper
 {
@@ -111,6 +112,16 @@ public static class CaptureJudgeDecisionMapper
             return Outcome(JudgePersistAction.Skip, "Code fact, recoverable from the repository.");
         }
 
+        // A self-identified friction point is the model's own reflection, not an observed
+        // external signal (a correction, a failure, an explicit save) — cap it at Suggest so it
+        // always goes through human review, never AutoCapture, regardless of reported confidence.
+        if (verdict.CaptureReason == JudgeCaptureReason.SelfIdentifiedFriction)
+        {
+            return verdict.Confidence >= SuggestThreshold
+                ? Outcome(JudgePersistAction.Suggest, "Self-identified friction — parked for review, not auto-captured.", RuleStatus.Pending)
+                : Outcome(JudgePersistAction.Skip, "Self-identified friction below the suggestion confidence threshold.");
+        }
+
         // Otherwise the confidence bands decide.
         if (verdict.Confidence >= CaptureThreshold)
         {
@@ -159,6 +170,7 @@ public static class CaptureJudgeDecisionMapper
         JudgeCaptureReason.RepeatedMistake => CaptureReason.RepeatedCorrection,
         JudgeCaptureReason.UserPreference => CaptureReason.ExplicitUserPreference,
         JudgeCaptureReason.DocBackedCorrection => CaptureReason.ObservedAgentFailure,
+        JudgeCaptureReason.SelfIdentifiedFriction => CaptureReason.SelfIdentifiedFriction,
         _ => CaptureReason.None,
     };
 }

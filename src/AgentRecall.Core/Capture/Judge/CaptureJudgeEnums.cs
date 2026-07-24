@@ -118,4 +118,13 @@ public enum JudgeCaptureReason
 
     /// <summary>The turn holds no memory-worthy content.</summary>
     NotMemory,
+
+    /// <summary>
+    /// No explicit correction occurred, but reflecting on the turn ("if I redid this with
+    /// foreknowledge, what would I have needed to be told upfront?") surfaced a lesson that
+    /// would have avoided friction or rework. Always capped at a pending suggestion by the
+    /// decision mapper, regardless of reported confidence — it is the model's own
+    /// self-assessment, not an observed external signal.
+    /// </summary>
+    SelfIdentifiedFriction,
 }

@@ -335,6 +335,17 @@ public class BehaviorContractTests
         Assert.All(reasons, r => Assert.True(Enum.TryParse<JudgeCaptureReason>(r, out _), $"'{r}' is not a JudgeCaptureReason"));
     }
 
+    // The judge must reflect on friction that was never voiced as an explicit correction, not
+    // only scan for explicit signals — and must route what it finds through the same
+    // pending/review gate as any other ambiguous suggestion, never straight to Capture.
+    [Fact]
+    public void Guidance_InstructsReflectiveCheckBeforeDefaultingToSkip()
+    {
+        Assert.Contains("Before defaulting to Skip, reflect", Guidance, StringComparison.Ordinal);
+        Assert.Contains("SelfIdentifiedFriction", Guidance, StringComparison.Ordinal);
+        Assert.Contains("never `Capture`", Guidance, StringComparison.Ordinal);
+    }
+
     // Required-field guidance per decision must be spelled out, not left implicit.
     [Theory]
     [InlineData("why_not_saved` is required")]

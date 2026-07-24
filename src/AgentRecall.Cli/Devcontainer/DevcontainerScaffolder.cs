@@ -165,7 +165,7 @@ public static class DevcontainerScaffolder
                 "decision": "Capture | SuggestCapture | Skip | ReinforceExisting | SupersedeExisting",
                 "memory_type": "EngineeringLesson | RepositoryConvention | UserPreference | CommunicationPreference | DocBackedCorrection | ToolWorkflowConvention | ReviewLesson | CodeFact | NotMemory",
                 "confidence": 0.0,
-                "capture_reason": "ExplicitUserSave | ExplicitUserDoNotSave | ObservedAgentFailure | ReviewerCorrection | UserCorrection | RepositoryConvention | UserPreference | RepeatedMistake | DocBackedCorrection | DuplicateExisting | AssistantProse | SourceDocumentOnly | CommandOutputOnly | LogOutputOnly | CodeFact | NotReusable | Ambiguous | NotMemory",
+                "capture_reason": "ExplicitUserSave | ExplicitUserDoNotSave | ObservedAgentFailure | ReviewerCorrection | UserCorrection | RepositoryConvention | UserPreference | RepeatedMistake | DocBackedCorrection | DuplicateExisting | AssistantProse | SourceDocumentOnly | CommandOutputOnly | LogOutputOnly | CodeFact | NotReusable | Ambiguous | NotMemory | SelfIdentifiedFriction",
                 "target_existing_rule_id": null,
                 "normalized_rule": {
                   "title": "...",
@@ -204,6 +204,18 @@ public static class DevcontainerScaffolder
 
         Do this yourself even when nothing seems worth saving — a `Skip` verdict you report is
         real signal; a turn you never report on just looks unavailable.
+
+        **Before defaulting to Skip, reflect — don't only scan for explicit signals.** An
+        explicit correction, failure, or save request is the common case, but friction that
+        was never voiced as a correction is real too: backtracking, a wrong assumption you had
+        to walk back, rework caused by not knowing a constraint upfront. Before you write
+        `Skip`, ask yourself: "if I redid this turn from scratch knowing what I know now, what
+        would I have needed to be told upfront to avoid that friction?" If that surfaces a
+        concrete, reusable answer, report it as `SuggestCapture` with
+        `capture_reason: SelfIdentifiedFriction` — never `Capture` — since this is your own
+        self-assessment, not an observed external signal, so it always goes through the same
+        pending/human-review gate as any other ambiguous suggestion. If the reflection surfaces
+        nothing concrete, `Skip` as usual.
 
         **Reinforce a matching pending suggestion instead of duplicating it.** Injected
         context can include a rule marked `(pending — not yet approved)` — an earlier

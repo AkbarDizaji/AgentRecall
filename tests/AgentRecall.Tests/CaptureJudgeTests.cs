@@ -438,6 +438,52 @@ public class CaptureJudgeTests
         Assert.Equal("Code fact, recoverable from the repository.", outcome.Reason);
     }
 
+    // ---- Mapper: self-identified friction never auto-captures ----------------
+
+    [Fact]
+    public void Mapper_SelfIdentifiedFriction_HighConfidence_CapsAtSuggestNeverCaptures()
+    {
+        // A reflective finding is the model's own self-assessment, not an observed external
+        // signal — even at a confidence that would normally AutoCapture, it stays a suggestion.
+        var outcome = Map(Verdict(
+            reason: JudgeCaptureReason.SelfIdentifiedFriction, confidence: 0.99, rule: SoundRule()));
+        Assert.Equal(JudgePersistAction.Suggest, outcome.Action);
+        Assert.Equal(RuleStatus.Pending, outcome.Status);
+        Assert.Equal("Self-identified friction — parked for review, not auto-captured.", outcome.Reason);
+    }
+
+    [Fact]
+    public void Mapper_SelfIdentifiedFriction_BelowSuggestThreshold_Skips()
+    {
+        var outcome = Map(Verdict(
+            reason: JudgeCaptureReason.SelfIdentifiedFriction, confidence: 0.2, rule: SoundRule()));
+        Assert.Equal(JudgePersistAction.Skip, outcome.Action);
+        Assert.Equal("Self-identified friction below the suggestion confidence threshold.", outcome.Reason);
+    }
+
+    [Fact]
+    public void Mapper_SelfIdentifiedFriction_AtSuggestThreshold_Suggests()
+    {
+        var outcome = Map(Verdict(
+            reason: JudgeCaptureReason.SelfIdentifiedFriction,
+            confidence: CaptureJudgeDecisionMapper.SuggestThreshold,
+            rule: SoundRule()));
+        Assert.Equal(JudgePersistAction.Suggest, outcome.Action);
+    }
+
+    [Fact]
+    public void Mapper_SelfIdentifiedFriction_WithReinforceDecision_StillReinforces()
+    {
+        // The judge's explicit decision (recognizing a repeat) still takes precedence over the
+        // reason's own confidence cap — reinforcement is a distinct action from a fresh capture.
+        var outcome = Map(Verdict(
+            decision: JudgeDecision.ReinforceExisting,
+            reason: JudgeCaptureReason.SelfIdentifiedFriction,
+            target: 7, dedupeNotes: "same friction point as rule #7"));
+        Assert.Equal(JudgePersistAction.Reinforce, outcome.Action);
+        Assert.Equal(7, outcome.TargetRuleId);
+    }
+
     // ---- Mapper: reinforce / supersede ---------------------------------------
 
     [Fact]
@@ -524,6 +570,7 @@ public class CaptureJudgeTests
     [InlineData(JudgeCaptureReason.UserPreference, CaptureReason.ExplicitUserPreference)]
     [InlineData(JudgeCaptureReason.DocBackedCorrection, CaptureReason.ObservedAgentFailure)]
     [InlineData(JudgeCaptureReason.NotMemory, CaptureReason.None)]
+    [InlineData(JudgeCaptureReason.SelfIdentifiedFriction, CaptureReason.SelfIdentifiedFriction)]
     public void Mapper_DomainReasonMapping(JudgeCaptureReason reason, CaptureReason expected)
     {
         // DomainReason is computed for every outcome regardless of branch, so a plain

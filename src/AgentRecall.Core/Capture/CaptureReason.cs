@@ -49,4 +49,10 @@ public enum CaptureReason
     /// seed rule explains that it came from a pack rather than a local observation.
     /// </summary>
     BuiltInSeed,
+
+    /// <summary>
+    /// The model's own reflection on the turn ("what would I have needed to know upfront?")
+    /// surfaced this lesson — no explicit correction or observed failure occurred.
+    /// </summary>
+    SelfIdentifiedFriction,
 }
