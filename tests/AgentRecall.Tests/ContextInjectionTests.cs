@@ -439,6 +439,44 @@ public class ContextInjectionTests
     }
 
     [Fact]
+    public async Task PendingCap_KeepsOnlyHighestScoringPendingRules()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+        // Identical trigger/text/tags so relevance is equal — confidence is the only
+        // variable driving score, isolating the cap's "highest-scoring" behavior.
+        var lowConfidenceId = await Seed(db, "Use Moq argument matchers in tests.",
+            tags: "moq", confidence: 0.55, status: RuleStatus.Pending);
+        var highConfidenceId = await Seed(db, "Use Moq argument matchers in tests.",
+            tags: "moq", confidence: 0.75, status: RuleStatus.Pending);
+
+        var result = await Build(db, new ContextRequest
+        {
+            Task = "write Moq tests",
+            IncludePending = true,
+            PendingCap = 1,
+        });
+
+        var pendingIds = result.All.Where(r => r.Rule.Status == RuleStatus.Pending).Select(r => r.Rule.Id).ToList();
+        Assert.Single(pendingIds);
+        Assert.Equal(highConfidenceId, pendingIds[0]);
+        Assert.NotEqual(lowConfidenceId, pendingIds[0]);
+    }
+
+    [Fact]
+    public async Task PendingCap_Null_LeavesAllQualifyingPendingRulesInPlace()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+        await Seed(db, "Use Moq argument matchers in tests.", tags: "moq", status: RuleStatus.Pending);
+        await Seed(db, "Prefer It.IsAny<T>() over raw values in Moq setups.", tags: "moq", status: RuleStatus.Pending);
+
+        var result = await Build(db, new ContextRequest { Task = "write Moq tests", IncludePending = true });
+
+        Assert.Equal(2, result.All.Count(r => r.Rule.Status == RuleStatus.Pending));
+    }
+
+    [Fact]
     public async Task Cli_InjectContext_PrintsAgentOptimizedSections()
     {
         await using var db = new TestDatabase();

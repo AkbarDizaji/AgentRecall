@@ -571,7 +571,8 @@ folder.
 | `HookEnabled` | `true` | Master switch for the `UserPromptSubmit` hook. |
 | `HookKeywords` | dev-task words | Words/phrases that mark a prompt as dev work. |
 | `HookMaxRules` | `5` | Max rules injected per prompt. |
-| `HookIncludePending` | `false` | Whether Pending rules may be injected. |
+| `HookIncludePending` | `true` | Whether Pending rules may be injected, so a repeat can be recognized and reinforced. |
+| `HookPendingCap` | `1` | Max Pending rules injected per prompt when `HookIncludePending` is true. |
 | `TurnFinalizerEnabled` | `true` | Master switch for `finalize-turn`. |
 | `CaptureJudgeMode` | `Semantic` | `Off` disables automatic Stop-hook capture entirely. |
 | `StoreTurnTranscript` | `false` | Persist the raw transcript with each finalization. |

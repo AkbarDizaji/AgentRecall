@@ -11,7 +11,11 @@ public static class RuleStatusSets
     /// <summary>
     /// Statuses treated as in force — applied by the policy engine and eligible for
     /// context injection as must-follow guidance. Draft and Pending are deliberately
-    /// excluded: they are surfaced only on explicit request, never auto-applied.
+    /// excluded: they are never auto-applied as authoritative. Pending rules can
+    /// still resurface as a capped, marked-pending Suggested entry (the hook does
+    /// this by default via <see cref="AgentRecall.Core.Context.ContextRequest.PendingCap"/>) so a
+    /// repeated suggestion can be recognized and reinforced; other callers still
+    /// require explicit opt-in and stay uncapped.
     /// </summary>
     public static readonly IReadOnlyCollection<RuleStatus> Effective =
         new HashSet<RuleStatus> { RuleStatus.Active, RuleStatus.Promoted };

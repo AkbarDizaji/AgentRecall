@@ -196,6 +196,9 @@ public sealed class ContextInjectionService : IContextInjectionService
         // itself about tidying/refactoring, where seed rules are the point.
         ranked = CapSeedRules(ranked, taskTokens, request.TaskType);
 
+        // Cap Pending rules so unreviewed suggestions never flood the context.
+        ranked = CapPendingRules(ranked, request.PendingCap);
+
         var result = PackIntoBudget(ranked, request.TokenBudget, request.Limit, prunedByPolicy);
 
         // Resolve conflicts among the rules that survived to injection. This catches
@@ -537,6 +540,33 @@ public sealed class ContextInjectionService : IContextInjectionService
         }
 
         return capped;
+    }
+
+    /// <summary>
+    /// Keeps at most <paramref name="cap"/> Pending (Unapproved) rules — the
+    /// freshest, highest-scoring ones — so an unreviewed suggestion can resurface
+    /// for reinforcement without flooding the context. Null cap (the explicit
+    /// `include_pending` API path) leaves every relevance-qualifying Pending rule
+    /// in place; ties break by rule id descending (freshest first), since the goal
+    /// is surfacing the current turn's newest unresolved suggestion.
+    /// </summary>
+    private static List<Assessment> CapPendingRules(List<Assessment> ranked, int? cap)
+    {
+        if (cap is null)
+        {
+            return ranked;
+        }
+
+        var keep = ranked
+            .Where(a => a.Unapproved)
+            .OrderByDescending(a => a.Score)
+            .ThenByDescending(a => a.Rule.Confidence)
+            .ThenByDescending(a => a.Rule.Id)
+            .Take(cap.Value)
+            .Select(a => a.Rule.Id)
+            .ToHashSet();
+
+        return ranked.Where(a => !a.Unapproved || keep.Contains(a.Rule.Id)).ToList();
     }
 
     private static ContextInjectionResult PackIntoBudget(List<Assessment> ranked, int budget, int limit, int prunedByPolicy)

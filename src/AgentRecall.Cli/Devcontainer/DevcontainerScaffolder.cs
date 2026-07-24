@@ -205,6 +205,14 @@ public static class DevcontainerScaffolder
         Do this yourself even when nothing seems worth saving — a `Skip` verdict you report is
         real signal; a turn you never report on just looks unavailable.
 
+        **Reinforce a matching pending suggestion instead of duplicating it.** Injected
+        context can include a rule marked `(pending — not yet approved)` — an earlier
+        suggestion that hasn't been reviewed yet. If what you are about to capture this
+        turn is the same lesson as one of those, emit `ReinforceExisting` with that
+        rule's `#id` (from its `Source:` line) rather than a new `Capture`/`SuggestCapture` —
+        this is how a repeated suggestion accumulates confidence toward auto-promotion
+        instead of sitting as a duplicate pending rule forever.
+
         ### AgentRecall behavior contract
 
         When the user asks anything about AgentRecall's state — whether it captured,

@@ -50,6 +50,7 @@ public static class UserPromptSubmitHook
                 ScopeValue = repository,
                 Limit = options.HookMaxRules,
                 IncludePending = options.HookIncludePending,
+                PendingCap = options.HookPendingCap,
                 // Rules surfaced to the agent count as retrievals for learning reports.
                 RecordUsage = true,
             };

@@ -112,6 +112,7 @@ public static class PreToolUseHook
                 FileNames = [filePath],
                 Limit = options.HookMaxRules,
                 IncludePending = options.HookIncludePending,
+                PendingCap = options.HookPendingCap,
                 ExcludeRuleIds = alreadySurfaced,
                 // Surfacing (of not-yet-seen rules) counts as a retrieval for learning reports.
                 RecordUsage = true,

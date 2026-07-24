@@ -72,6 +72,15 @@ public sealed record ContextRequest
     public bool IncludePending { get; init; }
 
     /// <summary>
+    /// Max Pending rules to keep when <see cref="IncludePending"/> is true, keeping
+    /// only the freshest/highest-scoring ones. Null (default) leaves every
+    /// relevance-qualifying Pending rule in place — the hook sets this so an
+    /// unreviewed suggestion can resurface for reinforcement without flooding the
+    /// context; other callers stay uncapped.
+    /// </summary>
+    public int? PendingCap { get; init; }
+
+    /// <summary>
     /// When true, records that the selected rules were retrieved: a RuleApplied
     /// event per rule plus a LastUsedAt bump, so learning reports can measure
     /// which rules are actually helping. Off by default so pure ranking (and its

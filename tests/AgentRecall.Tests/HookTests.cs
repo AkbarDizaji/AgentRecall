@@ -130,10 +130,22 @@ public class HookTests
     }
 
     [Fact]
-    public async Task Hook_PendingRules_ExcludedByDefault_IncludedWhenConfigured()
+    public async Task Hook_PendingRules_IncludedByDefault_ExcludedWhenDisabled()
     {
-        // Default: pending rule is not injected.
+        // Default: a relevant pending rule resurfaces, visibly marked pending —
+        // otherwise it can never be recognized as a repeat and reinforced.
         await using (var db = new TestDatabase())
+        {
+            await Init(db);
+            await SeedMoqRule(db, RuleStatus.Pending);
+            var output = await UserPromptSubmitHook.RunAsync(
+                Payload("Write Moq tests for OrderService"), db.Services, new StringWriter());
+            Assert.Contains("AgentRecall Technical Context", output);
+            Assert.Contains("(pending — not yet approved)", output);
+        }
+
+        // Explicitly disabled: pending rule is not injected.
+        await using (var db = new TestDatabase(o => o.HookIncludePending = false))
         {
             await Init(db);
             await SeedMoqRule(db, RuleStatus.Pending);
@@ -141,15 +153,20 @@ public class HookTests
                 Payload("Write Moq tests for OrderService"), db.Services, new StringWriter());
             Assert.Equal(string.Empty, output);
         }
+    }
 
-        // Configured to include pending.
-        await using (var db = new TestDatabase(o => o.HookIncludePending = true))
-        {
-            await Init(db);
-            await SeedMoqRule(db, RuleStatus.Pending);
-            var output = await UserPromptSubmitHook.RunAsync(
-                Payload("Write Moq tests for OrderService"), db.Services, new StringWriter());
-            Assert.Contains("AgentRecall Technical Context", output);
-        }
+    [Fact]
+    public async Task Hook_PendingRules_CappedToHookPendingCap()
+    {
+        await using var db = new TestDatabase(o => o.HookPendingCap = 1);
+        await Init(db);
+        await SeedMoqRule(db, RuleStatus.Pending);
+        await SeedMoqRule(db, RuleStatus.Pending);
+
+        var output = await UserPromptSubmitHook.RunAsync(
+            Payload("Write Moq tests for OrderService"), db.Services, new StringWriter());
+
+        var occurrences = output.Split("(pending — not yet approved)").Length - 1;
+        Assert.Equal(1, occurrences);
     }
 }

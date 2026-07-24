@@ -57,6 +57,10 @@ public static class ConditionalRuleFormatter
         if (includeSource)
         {
             sb.AppendLine().Append(pad).Append("Source: #").Append(rule.Id);
+            if (rule.Status == RuleStatus.Pending)
+            {
+                sb.Append(" (pending — not yet approved)");
+            }
         }
 
         return sb.ToString();

@@ -59,8 +59,20 @@ public sealed class AgentRecallOptions
     /// <summary>Maximum rules the hook injects (keeps the block small).</summary>
     public int HookMaxRules { get; set; } = 5;
 
-    /// <summary>Whether the hook may inject Pending (unapproved) rules.</summary>
-    public bool HookIncludePending { get; set; }
+    /// <summary>
+    /// Whether the hook may inject Pending (unapproved) rules. Default true so a
+    /// capped number of task-relevant Pending suggestions resurface — otherwise a
+    /// Pending rule can never be recognized as a repeat and reinforced toward
+    /// promotion. See <see cref="HookPendingCap"/> for the cap.
+    /// </summary>
+    public bool HookIncludePending { get; set; } = true;
+
+    /// <summary>
+    /// Max Pending rules the hook may surface per turn when
+    /// <see cref="HookIncludePending"/> is true, so unreviewed suggestions never
+    /// flood the context — only the freshest, highest-scoring match(es) resurface.
+    /// </summary>
+    public int HookPendingCap { get; set; } = 1;
 
     /// <summary>
     /// Whether the Stop-hook capture path runs. When true (the default), AgentRecall

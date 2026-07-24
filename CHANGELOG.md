@@ -4,6 +4,30 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.5] - 2026-07-24
+
+### Fixed
+- **Pending rules can now be recognized and reinforced.** The `UserPromptSubmit` and
+  `PreToolUse` hooks now surface a capped number (default 1, `HookPendingCap`) of
+  task-relevant Pending rules by default (`HookIncludePending` now defaults to
+  `true`), each rendered with a `(pending — not yet approved)` marker so it reads
+  distinctly from an approved suggestion. Previously Pending rules were invisible
+  to later turns, so a repeated suggestion could never be recognized and
+  reinforced toward auto-promotion — it just re-suggested a duplicate or sat stuck
+  until manual approval. The semantic judge's own instructions now also say to
+  emit `ReinforceExisting` against a visible pending match instead of duplicating
+  it. Other callers (`inject_context`, `get_project_rules`, `search_rules`) are
+  unaffected — still explicit-opt-in and uncapped where they already were.
+- **The career-impact "no impact" pointer now points at the right place.** It
+  previously read as if the last turn specifically was unremarkable; it now says
+  to run `career status`, since an empty store usually means the pack isn't
+  installed or is running in Silent mode.
+
+### Added
+- **Stryker mutation testing setup** (`.config/dotnet-tools.json`,
+  `stryker-config.json`) plus expanded test coverage across capture,
+  career-impact, and turn-finalization paths.
+
 ## [2.2.4] - 2026-07-21
 
 ### Added
