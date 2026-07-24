@@ -4,6 +4,18 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.6] - 2026-07-24
+
+### Added
+- **The semantic capture judge now reflects on friction, not only explicit signals.** Before
+  defaulting to `Skip`, its own instructions now ask it: "if I redid this turn knowing what I
+  know now, what would I have needed to be told upfront?" Friction that was never voiced as a
+  correction (backtracking, a wrong assumption walked back, avoidable rework) can now surface
+  as a lesson through this reflection alone. A finding from it is always reported with the new
+  `SelfIdentifiedFriction` reason and is always parked as a pending suggestion, never
+  auto-captured — enforced in the decision mapper regardless of reported confidence, since it's
+  the model's own self-assessment rather than an observed external signal.
+
 ## [2.2.5] - 2026-07-24
 
 ### Fixed
