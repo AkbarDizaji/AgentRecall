@@ -351,13 +351,19 @@ public sealed class ContextInjectionService : IContextInjectionService
             reasons.Add($"matches task keyword(s): {string.Join(", ", keywordHits)}");
         }
 
-        // 2. Semantic match via activated concept groups (no shared words needed).
+        // 2. Semantic match via activated concept groups (no shared words needed). A rule token
+        // can relate to more than one activated group at once (e.g. a term shared across
+        // domains) — every relation counts, not just the first one found.
         var semanticGroups = new Dictionary<string, IReadOnlyCollection<string>>();
         var semanticHits = 0;
         foreach (var token in ruleTokens)
         {
-            if (!taskTokens.Contains(token) && !domainTokens.Contains(token) &&
-                concepts.TryRelate(token, out var group, out var viaSeeds))
+            if (taskTokens.Contains(token) || domainTokens.Contains(token))
+            {
+                continue;
+            }
+
+            foreach (var (group, viaSeeds) in concepts.RelateAll(token))
             {
                 semanticHits++;
                 semanticGroups[group] = viaSeeds;

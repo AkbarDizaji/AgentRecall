@@ -37,7 +37,11 @@ public sealed class DomainConceptExpander : IConceptExpander
 
     public ConceptContext Build(IEnumerable<string> seedTokens)
     {
-        var termGroup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        // A term can belong to more than one group, so each newly-activated group's members
+        // are appended to their existing group list rather than overwriting it — otherwise a
+        // term shared by two activated groups would only ever relate back to whichever one
+        // activated last.
+        var termGroups = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         var activatedBy = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var seed in seedTokens)
@@ -54,10 +58,16 @@ public sealed class DomainConceptExpander : IConceptExpander
                     seeds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     activatedBy[groupName] = seeds;
 
-                    // Map every member of this newly-activated group back to it.
+                    // Append every member of this newly-activated group to its term list.
                     foreach (var member in MembersOf(groupName))
                     {
-                        termGroup[member] = groupName;
+                        if (!termGroups.TryGetValue(member, out var memberGroups))
+                        {
+                            memberGroups = [];
+                            termGroups[member] = memberGroups;
+                        }
+
+                        memberGroups.Add(groupName);
                     }
                 }
 
@@ -65,12 +75,16 @@ public sealed class DomainConceptExpander : IConceptExpander
             }
         }
 
+        var termGroupsReadOnly = termGroups.ToDictionary(
+            kv => kv.Key,
+            kv => (IReadOnlyCollection<string>)kv.Value,
+            StringComparer.OrdinalIgnoreCase);
         var activated = activatedBy.ToDictionary(
             kv => kv.Key,
             kv => (IReadOnlyCollection<string>)kv.Value,
             StringComparer.OrdinalIgnoreCase);
 
-        return new ConceptContext(termGroup, activated);
+        return new ConceptContext(termGroupsReadOnly, activated);
     }
 
     private static IEnumerable<string> MembersOf(string groupName) =>

@@ -17,14 +17,14 @@ public interface IConceptExpander
 /// </summary>
 public sealed class ConceptContext
 {
-    private readonly IReadOnlyDictionary<string, string> _termGroup;
+    private readonly IReadOnlyDictionary<string, IReadOnlyCollection<string>> _termGroups;
     private readonly IReadOnlyDictionary<string, IReadOnlyCollection<string>> _activatedBy;
 
     internal ConceptContext(
-        IReadOnlyDictionary<string, string> termGroup,
+        IReadOnlyDictionary<string, IReadOnlyCollection<string>> termGroups,
         IReadOnlyDictionary<string, IReadOnlyCollection<string>> activatedBy)
     {
-        _termGroup = termGroup;
+        _termGroups = termGroups;
         _activatedBy = activatedBy;
     }
 
@@ -32,20 +32,18 @@ public sealed class ConceptContext
     public IReadOnlyCollection<string> ActivatedGroups => _activatedBy.Keys.ToList();
 
     /// <summary>
-    /// Relates a rule token to an activated concept group. Succeeds only when the
-    /// token belongs to a group that the task's seeds actually activated.
+    /// Relates a rule token to every activated concept group it belongs to. A token that is a
+    /// member of more than one activated group (e.g. it names a concept shared across domains)
+    /// relates to all of them, not just one — dropping the others would silently discard a real
+    /// semantic match depending on activation order.
     /// </summary>
-    public bool TryRelate(string token, out string group, out IReadOnlyCollection<string> viaSeeds)
+    public IReadOnlyCollection<(string Group, IReadOnlyCollection<string> ViaSeeds)> RelateAll(string token)
     {
-        if (_termGroup.TryGetValue(token, out var found))
+        if (!_termGroups.TryGetValue(token, out var groups))
         {
-            group = found;
-            viaSeeds = _activatedBy[found];
-            return true;
+            return [];
         }
 
-        group = string.Empty;
-        viaSeeds = [];
-        return false;
+        return groups.Select(group => (group, _activatedBy[group])).ToList();
     }
 }
