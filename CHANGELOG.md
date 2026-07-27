@@ -4,6 +4,22 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] - 2026-07-27
+
+### Added
+- **A host-judged document-opportunity feature.** A new `doc_opportunity` object, a sibling of
+  `judgment` on the `finalize-turn` payload, lets the session model offer generating a durable
+  document — an incident report, RFC, design proposal, ADR, postmortem, or runbook — using the
+  same host-supplied-verdict architecture as the semantic capture judge, so AgentRecall never
+  calls an LLM or the network itself. Offering only surfaces a short, bounded pointer in the
+  Turn Memory Summary; the reason and key points stay out of the model-visible surface until the
+  user explicitly agrees. Only then does `agentrecall document write --type <T> --title
+  "<title>"` (body piped on stdin) generate the file, under a type-based subfolder
+  (`docs/rfcs`, `docs/incidents`, ...) auto-named from the date and a slugified title. A naming
+  collision auto-suffixes (`-2`, `-3`, ...) rather than overwriting; `--force` opts into
+  overwriting in place. `agentrecall document status` reports the mode and last offered
+  candidate on demand.
+
 ## [2.2.6] - 2026-07-24
 
 ### Added
