@@ -275,4 +275,127 @@ public class TurnPayloadTests
 
         Assert.Null(TurnPayload.Parse(payload, Discard)!.SuppliedJudgment);
     }
+
+    // ---- Document-opportunity parsing ------------------------------------------
+
+    [Fact]
+    public void Parse_ValidDocOpportunity_IsRead()
+    {
+        var payload = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            prompt = "a turn",
+            cwd = "/repo/project",
+            doc_opportunity = new
+            {
+                decision = "Offer",
+                document_type = "Rfc",
+                confidence = 0.8,
+                suggested_title = "Adopt the shared caching layer",
+                reason = "A cross-team architecture decision was just made",
+                key_points = new[] { "why now", "alternatives considered" },
+            },
+        });
+
+        var verdict = TurnPayload.Parse(payload, Discard)!.SuppliedDocOpportunity;
+
+        Assert.NotNull(verdict);
+        Assert.Equal(Core.Capture.Judge.DocOpportunityDecision.Offer, verdict!.Decision);
+        Assert.Equal(DocumentType.Rfc, verdict.DocumentType);
+        Assert.Equal(0.8, verdict.Confidence);
+        Assert.Equal("Adopt the shared caching layer", verdict.SuggestedTitle);
+        Assert.Equal(2, verdict.KeyPoints.Count);
+    }
+
+    [Fact]
+    public void Parse_NoDocOpportunity_LeavesVerdictNull()
+    {
+        var payload = System.Text.Json.JsonSerializer.Serialize(new { prompt = "a turn", cwd = "/repo/project" });
+        Assert.Null(TurnPayload.Parse(payload, Discard)!.SuppliedDocOpportunity);
+    }
+
+    [Fact]
+    public void Parse_UnknownDocOpportunityDecisionEnum_LeavesVerdictNull()
+    {
+        var payload = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            prompt = "a turn",
+            cwd = "/repo/project",
+            doc_opportunity = new { decision = "Bogus", document_type = "Rfc", confidence = 0.9 },
+        });
+
+        // A malformed verdict parses to null (judge unavailable → offer nothing), never throwing.
+        Assert.Null(TurnPayload.Parse(payload, Discard)!.SuppliedDocOpportunity);
+    }
+
+    [Fact]
+    public void Parse_UnknownDocumentTypeEnum_LeavesVerdictNull()
+    {
+        var payload = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            prompt = "a turn",
+            cwd = "/repo/project",
+            doc_opportunity = new { decision = "Offer", document_type = "Bogus", confidence = 0.9, suggested_title = "x" },
+        });
+
+        Assert.Null(TurnPayload.Parse(payload, Discard)!.SuppliedDocOpportunity);
+    }
+
+    [Fact]
+    public void Parse_SkipDocOpportunity_DefaultsDocumentTypeAndParses()
+    {
+        var payload = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            prompt = "a turn",
+            cwd = "/repo/project",
+            doc_opportunity = new { decision = "Skip", why_not_offered = "routine change" },
+        });
+
+        var verdict = TurnPayload.Parse(payload, Discard)!.SuppliedDocOpportunity;
+
+        Assert.NotNull(verdict);
+        Assert.Equal(Core.Capture.Judge.DocOpportunityDecision.Skip, verdict!.Decision);
+        Assert.Equal("routine change", verdict.WhyNotOffered);
+    }
+
+    [Fact]
+    public void Parse_OversizedDocOpportunity_IsIgnored()
+    {
+        var payload = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            prompt = "a turn",
+            cwd = "/repo/project",
+            doc_opportunity = new
+            {
+                decision = "Offer",
+                document_type = "Rfc",
+                confidence = 0.9,
+                reason = new string('x', 30000),
+            },
+        });
+
+        Assert.Null(TurnPayload.Parse(payload, Discard)!.SuppliedDocOpportunity);
+    }
+
+    [Fact]
+    public void Parse_DocOpportunityKeyPointsWithBlankEntries_FiltersThem()
+    {
+        var payload = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            prompt = "a turn",
+            cwd = "/repo/project",
+            doc_opportunity = new
+            {
+                decision = "Offer",
+                document_type = "Incident",
+                confidence = 0.7,
+                suggested_title = "Postmortem",
+                key_points = new[] { "real point", "", "   ", "another real point" },
+            },
+        });
+
+        var verdict = TurnPayload.Parse(payload, Discard)!.SuppliedDocOpportunity;
+
+        Assert.NotNull(verdict);
+        Assert.Equal(2, verdict!.KeyPoints.Count);
+    }
 }

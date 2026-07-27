@@ -225,6 +225,53 @@ public static class DevcontainerScaffolder
         this is how a repeated suggestion accumulates confidence toward auto-promotion
         instead of sitting as a duplicate pending rule forever.
 
+        ### Document opportunity — offer a document, never generate one yourself
+
+        Alongside `judgment`, the same `finalize-turn` payload accepts a sibling
+        `doc_opportunity` object. Supply it when the turn is a good moment to offer generating
+        a durable document — an incident just got resolved, an architecture decision was just
+        made, a design was just proposed, a runbook-worthy process just got worked out:
+
+            "doc_opportunity": {
+              "decision": "Offer | Skip",
+              "document_type": "Incident | Rfc | Proposal | Adr | Postmortem | Runbook",
+              "confidence": 0.0,
+              "suggested_title": "...",
+              "reason": "...",
+              "key_points": ["...", "..."],
+              "why_not_offered": "..."
+            }
+
+        Required fields depend on `decision`:
+
+        - **Skip** — `why_not_offered` is required. This is the common case: most turns are
+          not a document-worthy moment, and reporting `Skip` freely is what keeps
+          `agentrecall document status` trustworthy instead of stale.
+        - **Offer** — `document_type` and `suggested_title` are the minimum; fill `reason` and
+          `key_points` too so the eventual document has something to start from.
+
+        **Supplying `Offer` never writes a file by itself.** It only surfaces a one-line
+        pointer in the Turn Memory Summary (`Document Opportunity: ...`) — nothing is generated
+        or saved to disk from the judgment alone.
+
+        **The accept flow is conversational, not a CLI prompt.** When the pointer appears,
+        mention it to the user in plain language and ask whether they want the document
+        generated — never assume yes, never generate automatically. Only on an explicit
+        affirmative should you:
+
+        1. Draft the actual document content yourself — AgentRecall supplies no content, only
+           the type/title/confidence signal.
+        2. Run `agentrecall document write --type <T> --title "<title>"` with the drafted
+           Markdown piped on stdin (add `--turn-id <id>` when you have it, so the offered
+           candidate is marked written instead of staying `Open`).
+
+        There is no blocking prompt on the CLI side — `document write` runs once, writes the
+        file, and returns; the yes/no only ever happens in chat.
+
+        **Do not narrate the mechanism.** When the user asks whether a document was saved,
+        check `agentrecall document status` (or `--json`) and answer from the actual recorded
+        state, the same discipline as capture-status questions above.
+
         ### AgentRecall behavior contract
 
         When the user asks anything about AgentRecall's state — whether it captured,
@@ -242,6 +289,7 @@ public static class DevcontainerScaffolder
         | What did AgentRecall do? | Run `agentrecall activity last` |
         | What rules were fetched? | Run `agentrecall activity last` |
         | Did the Stop hook capture anything? | Run `agentrecall finalize-turn status` |
+        | Did you save that as a doc? | Run `agentrecall document status --json` |
 
         Equivalently, call the `capture_status` MCP tool for capture questions. Always
         follow this pattern:

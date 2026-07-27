@@ -65,6 +65,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ITurnFinalizationRepository, TurnFinalizationRepository>();
         services.AddScoped<IAgentRecallActivityRepository, AgentRecallActivityRepository>();
         services.AddScoped<ICareerImpactCandidateRepository, CareerImpactCandidateRepository>();
+        services.AddScoped<IDocOpportunityCandidateRepository, DocOpportunityCandidateRepository>();
         services.AddScoped<IDatabaseInitializer, DatabaseInitializer>();
         // Atomic multi-step writes over the scoped DbContext.
         services.AddScoped<ITransactionRunner, EfTransactionRunner>();
@@ -112,6 +113,11 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICaptureJudge, HostSuppliedCaptureJudge>();
         services.AddScoped<ITurnFinalizer, TurnFinalizer>();
 
+        // Document-opportunity judge: same host-supplied-verdict architecture as the capture
+        // judge above, scoped to a narrower question (offer a document, or skip). AgentRecall
+        // never writes a file on its own — offering only surfaces a turn-summary pointer.
+        services.AddSingleton<IDocOpportunityJudge, HostSuppliedDocOpportunityJudge>();
+
         // Conflict detection and explainable, deterministic resolution.
         services.AddSingleton<IRuleConflictDetector, RuleConflictDetector>();
         services.AddSingleton<IRuleResolutionService, RuleResolutionService>();
@@ -145,6 +151,11 @@ public static class ServiceCollectionExtensions
         // journal. The detector is pure; the service persists significant candidates.
         services.AddSingleton<Core.CareerImpact.CareerImpactDetector>();
         services.AddScoped<Core.CareerImpact.ICareerImpactService, Core.CareerImpact.CareerImpactService>();
+
+        // Document opportunity: opt-in, host-judged end-of-turn suggestion to generate a
+        // durable document (incident/RFC/proposal/ADR/postmortem/runbook). The service persists
+        // offered candidates; the file itself is only written later via `document write`.
+        services.AddScoped<Core.DocOpportunity.IDocOpportunityService, Core.DocOpportunity.DocOpportunityService>();
 
         return services;
     }

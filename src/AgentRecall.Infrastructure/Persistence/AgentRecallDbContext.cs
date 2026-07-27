@@ -23,6 +23,7 @@ public sealed class AgentRecallDbContext : DbContext
     public DbSet<TurnFinalization> TurnFinalizations => Set<TurnFinalization>();
     public DbSet<AgentRecallActivity> Activities => Set<AgentRecallActivity>();
     public DbSet<CareerImpactCandidate> CareerImpactCandidates => Set<CareerImpactCandidate>();
+    public DbSet<DocOpportunityCandidate> DocOpportunityCandidates => Set<DocOpportunityCandidate>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -147,6 +148,20 @@ public sealed class AgentRecallDbContext : DbContext
             entity.Property(e => e.TurnId).HasDefaultValue(string.Empty);
             entity.Property(e => e.OperationHash).HasDefaultValue(string.Empty);
             entity.Property(e => e.Source).HasDefaultValue("CareerImpactDetector");
+            entity.HasIndex(e => e.CreatedAt);
+            entity.HasIndex(e => e.TurnId);
+            entity.HasIndex(e => e.OperationHash);
+        });
+
+        modelBuilder.Entity<DocOpportunityCandidate>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Status).HasConversion<string>().HasDefaultValue(DocOpportunityStatus.Open);
+            entity.Property(e => e.DocumentType).HasConversion<string>().HasDefaultValue(DocumentType.Incident);
+            entity.Property(e => e.TurnId).HasDefaultValue(string.Empty);
+            entity.Property(e => e.OperationHash).HasDefaultValue(string.Empty);
+            entity.Property(e => e.Source).HasDefaultValue("HostSuppliedDocOpportunityJudge");
+            entity.Property(e => e.WrittenPath).HasDefaultValue(string.Empty);
             entity.HasIndex(e => e.CreatedAt);
             entity.HasIndex(e => e.TurnId);
             entity.HasIndex(e => e.OperationHash);

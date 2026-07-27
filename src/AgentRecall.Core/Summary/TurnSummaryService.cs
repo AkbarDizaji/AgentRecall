@@ -30,17 +30,20 @@ public sealed class TurnSummaryService : ITurnSummaryService
     private readonly ITurnFinalizationRepository _finalizations;
     private readonly IRecallRuleRepository _rules;
     private readonly ICareerImpactCandidateRepository _careerImpact;
+    private readonly IDocOpportunityCandidateRepository _docOpportunity;
 
     public TurnSummaryService(
         IAgentRecallActivityRepository activities,
         ITurnFinalizationRepository finalizations,
         IRecallRuleRepository rules,
-        ICareerImpactCandidateRepository careerImpact)
+        ICareerImpactCandidateRepository careerImpact,
+        IDocOpportunityCandidateRepository docOpportunity)
     {
         _activities = activities ?? throw new ArgumentNullException(nameof(activities));
         _finalizations = finalizations ?? throw new ArgumentNullException(nameof(finalizations));
         _rules = rules ?? throw new ArgumentNullException(nameof(rules));
         _careerImpact = careerImpact ?? throw new ArgumentNullException(nameof(careerImpact));
+        _docOpportunity = docOpportunity ?? throw new ArgumentNullException(nameof(docOpportunity));
     }
 
     public async Task<TurnSummary> BuildForTurnAsync(string? turnId, CancellationToken cancellationToken = default)
@@ -177,6 +180,20 @@ public sealed class TurnSummaryService : ITurnSummaryService
             }
         }
 
+        // A short, model-safe pointer only — never the reason or key points. Present only when
+        // the host-supplied judge offered a document for this turn and it is still Open (once
+        // written, the pointer would be stale — `document status` is the source of truth then).
+        string? docPointer = null;
+        if (!string.IsNullOrEmpty(turnId))
+        {
+            var docCandidate = await _docOpportunity.FindByTurnAsync(turnId, cancellationToken).ConfigureAwait(false);
+            if (docCandidate is { Status: DocOpportunityStatus.Open })
+            {
+                docPointer = DocOpportunity.DocOpportunityRenderer.BuildTurnSummaryPointer(
+                    docCandidate.DocumentType, docCandidate.SuggestedTitle, docCandidate.Confidence);
+            }
+        }
+
         return new TurnSummary
         {
             TurnId = turnId,
@@ -188,6 +205,7 @@ public sealed class TurnSummaryService : ITurnSummaryService
             Ignored = ignored,
             Errors = errors,
             CareerImpact = careerPointer,
+            DocOpportunity = docPointer,
         };
     }
 

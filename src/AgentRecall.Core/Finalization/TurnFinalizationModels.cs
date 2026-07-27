@@ -40,6 +40,12 @@ public sealed record TurnFinalizationInput
     /// unavailable and the turn is skipped (never keyword-captured).
     /// </summary>
     public Capture.Judge.CaptureJudgeVerdict? SuppliedJudgment { get; init; }
+
+    /// <summary>
+    /// The document-opportunity judge's verdict for the turn, when the host supplied it on the
+    /// payload. A <c>null</c> verdict means the judge is unavailable and nothing is offered.
+    /// </summary>
+    public Capture.Judge.DocOpportunityVerdict? SuppliedDocOpportunity { get; init; }
 }
 
 /// <summary>A lesson AgentRecall captured or suggested for the turn.</summary>

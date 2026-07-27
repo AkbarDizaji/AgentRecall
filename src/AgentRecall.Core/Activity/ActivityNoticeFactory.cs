@@ -349,6 +349,44 @@ public static class ActivityNoticeFactory
         };
     }
 
+    /// <summary>
+    /// A notice for an offered document-opportunity candidate, or null when there is none. The
+    /// detail lines carry only the reason/key points — never causes a file to be written.
+    /// </summary>
+    public static ActivityNotice? ForDocOpportunity(Domain.DocOpportunityCandidate? candidate, string source)
+    {
+        if (candidate is null)
+        {
+            return null;
+        }
+
+        var typeName = DocOpportunity.DocumentTypeNames.DisplayName(candidate.DocumentType);
+        var details = new List<string> { $"Title: {candidate.SuggestedTitle}" };
+
+        if (!string.IsNullOrWhiteSpace(candidate.Reason))
+        {
+            details.Add($"Why: {candidate.Reason}");
+        }
+
+        var keyPoints = JoinLines(candidate.KeyPoints);
+        if (!string.IsNullOrWhiteSpace(keyPoints))
+        {
+            details.Add($"Covers: {keyPoints}");
+        }
+
+        details.Add("Ask the user, then run `agentrecall document write` if they agree.");
+
+        return new ActivityNotice
+        {
+            Type = ActivityType.DocOpportunityDetected,
+            Summary = $"possible {typeName} opportunity: \"{Truncate(candidate.SuggestedTitle, LabelLength)}\".",
+            Details = details,
+            Source = source,
+            // Key on the judge's content hash so a repeated Stop hook logs once.
+            OperationHash = string.IsNullOrEmpty(candidate.OperationHash) ? null : candidate.OperationHash,
+        };
+    }
+
     private static string JoinLines(string? value) =>
         string.IsNullOrEmpty(value)
             ? string.Empty

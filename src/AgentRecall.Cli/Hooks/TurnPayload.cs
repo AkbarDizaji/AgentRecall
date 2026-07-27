@@ -66,6 +66,7 @@ public static class TurnPayload
             ScopeValue = repository,
             RawTranscript = rawTranscript,
             SuppliedJudgment = ParseJudgment(obj["judgment"], diagnostics),
+            SuppliedDocOpportunity = ParseDocOpportunity(obj["doc_opportunity"], diagnostics),
         };
     }
 
@@ -147,6 +148,64 @@ public static class TurnPayload
             Scope = AsString(rule["scope"]),
             AlwaysApply = AsBool(rule["always_apply"]) ?? false,
             Tags = tags,
+        };
+    }
+
+    // The document-opportunity judge's verdict is produced by the host and arrives as a
+    // `doc_opportunity` object on the payload, a sibling of `judgment`. Parsing follows the same
+    // tolerant rules: missing/oversized/malformed (including an unrecognised enum value) yields
+    // null — the caller then treats the judge as unavailable and offers nothing.
+    private const int DocOpportunityMaxLength = 20000;
+
+    private static DocOpportunityVerdict? ParseDocOpportunity(JsonNode? node, TextWriter diagnostics)
+    {
+        if (node is not JsonObject opportunity)
+        {
+            return null;
+        }
+
+        // Bound the supplied verdict so a hostile payload cannot blow up memory.
+        if (opportunity.ToJsonString().Length > DocOpportunityMaxLength)
+        {
+            diagnostics.WriteLine("[agentrecall] finalize-turn: ignoring oversized doc_opportunity.");
+            return null;
+        }
+
+        // decision is required and must be recognised; an unknown value is a malformed verdict.
+        if (!TryParseEnum<DocOpportunityDecision>(AsString(opportunity["decision"]), out var decision))
+        {
+            return null;
+        }
+
+        // document_type only matters when offering; default it when absent so a Skip verdict
+        // need not carry one.
+        if (!TryParseEnum<DocumentType>(AsString(opportunity["document_type"]), out var documentType, DocumentType.Incident))
+        {
+            return null;
+        }
+
+        var keyPoints = new List<string>();
+        if (opportunity["key_points"] is JsonArray keyPointArray)
+        {
+            foreach (var point in keyPointArray)
+            {
+                var text = AsString(point);
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    keyPoints.Add(text!);
+                }
+            }
+        }
+
+        return new DocOpportunityVerdict
+        {
+            Decision = decision,
+            DocumentType = documentType,
+            Confidence = AsDouble(opportunity["confidence"]) ?? 0.0,
+            SuggestedTitle = AsString(opportunity["suggested_title"]),
+            Reason = AsString(opportunity["reason"]),
+            KeyPoints = keyPoints,
+            WhyNotOffered = AsString(opportunity["why_not_offered"]),
         };
     }
 

@@ -97,6 +97,7 @@ public static partial class CommandRouter
             ["activity"] = new DelegateCommand((a, s, o, _, ct) => ActivityAsync(a, s, o, ct)),
             ["seed"] = new DelegateCommand((a, s, o, l, ct) => SeedAsync(a, s, o, l, ct)),
             ["career"] = new DelegateCommand((a, s, o, l, ct) => CareerAsync(a, s, o, l, ct)),
+            ["document"] = new DelegateCommand((a, s, o, l, ct) => DocumentAsync(a, s, o, l, ct)),
             ["cleanup"] = new DelegateCommand((a, s, o, l, ct) => CleanupAsync(a, s, o, l, ct)),
             ["mcp"] = new DelegateCommand(async (_, s, o, _, ct) =>
             {
@@ -1676,6 +1677,14 @@ public static partial class CommandRouter
             var career = await AnalyzeCareerImpactAsync(scope.ServiceProvider, input, result, cancellationToken)
                 .ConfigureAwait(false);
 
+            // Optional document-opportunity: a host-supplied judge (same architecture as the
+            // semantic capture judge) that offers generating a durable document. It persists a
+            // candidate and records a notice; it never writes a file itself — only
+            // `agentrecall document write` does, on demand. Compact summary on the CLI path;
+            // the hook path emits only a short pointer via the turn summary.
+            var docOpportunity = await AnalyzeDocOpportunityAsync(scope.ServiceProvider, input, result, cancellationToken)
+                .ConfigureAwait(false);
+
             if (json)
             {
                 WriteJson(output, FinalizationJson(result));
@@ -1694,6 +1703,7 @@ public static partial class CommandRouter
                 PrintNotice(output, notice, level);
                 PrintNotice(output, seedNotice, level);
                 PrintCareerImpact(output, career, services.GetRequiredService<AgentRecallOptions>());
+                PrintDocOpportunity(output, docOpportunity);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -2697,6 +2707,9 @@ public static partial class CommandRouter
         output.WriteLine("  career journal --last");
         output.WriteLine("                       Generate a promotion-ready journal entry (--json, --file <path>)");
         output.WriteLine("  career status        Show career-impact pack/mode and the last candidate (--json)");
+        output.WriteLine("  document write       Write an offered document (--type, --title, --turn-id, --root, --force, --json;");
+        output.WriteLine("                       body read from stdin)");
+        output.WriteLine("  document status      Show document-opportunity mode and the last candidate (--json)");
         output.WriteLine("  cleanup pending-noise");
         output.WriteLine("                       Archive noisy Pending rules from the Stop hook (--apply, --json, --tag, --status)");
         output.WriteLine("  mcp                  Run the MCP server over stdio (for Claude Code)");

@@ -70,6 +70,11 @@ public static class TurnSummaryRenderer
             line.Append("\nCareer Impact:\n- ").Append(summary.CareerImpact);
         }
 
+        if (!string.IsNullOrWhiteSpace(summary.DocOpportunity))
+        {
+            line.Append("\nDocument Opportunity:\n- ").Append(summary.DocOpportunity);
+        }
+
         return line.ToString();
     }
 
@@ -101,6 +106,12 @@ public static class TurnSummaryRenderer
         if (!string.IsNullOrWhiteSpace(summary.CareerImpact))
         {
             sb.Append("\n\nCareer Impact:\n- ").Append(summary.CareerImpact);
+        }
+
+        // Only a short pointer — never the reason or key points — until the user agrees.
+        if (!string.IsNullOrWhiteSpace(summary.DocOpportunity))
+        {
+            sb.Append("\n\nDocument Opportunity:\n- ").Append(summary.DocOpportunity);
         }
 
         return sb.ToString();

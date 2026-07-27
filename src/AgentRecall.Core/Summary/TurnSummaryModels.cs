@@ -59,9 +59,16 @@ public sealed record TurnSummary
     /// </summary>
     public string? CareerImpact { get; init; }
 
+    /// <summary>
+    /// A short document-opportunity pointer for the turn, when the host-supplied judge offered
+    /// generating a document; null otherwise. Deliberately a one-line pointer, never the reason
+    /// or key points — those stay out of model context until the user agrees.
+    /// </summary>
+    public string? DocOpportunity { get; init; }
+
     /// <summary>True when nothing of note happened on the turn.</summary>
     public bool IsEmpty =>
         Used.Count == 0 && Captured.Count == 0 && Suggested.Count == 0 &&
         Skipped.Count == 0 && Remembered.Count == 0 && Ignored.Count == 0 && Errors.Count == 0 &&
-        CareerImpact is null;
+        CareerImpact is null && DocOpportunity is null;
 }

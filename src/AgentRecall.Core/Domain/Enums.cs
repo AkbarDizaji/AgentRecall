@@ -267,6 +267,9 @@ public enum ActivityType
 
     /// <summary>The end-of-turn career-impact detector flagged possible Staff-level impact.</summary>
     CareerImpactDetected = 13,
+
+    /// <summary>The host-supplied document-opportunity judge offered a document to generate.</summary>
+    DocOpportunityDetected = 14,
 }
 
 /// <summary>
@@ -330,6 +333,46 @@ public enum ImpactCategory
     IncidentResponse = 13,
     ProcessImprovement = 14,
     PromotionEvidence = 15,
+}
+
+/// <summary>The kind of durable document the document-opportunity judge can offer to generate.
+/// Stored via a string conversion wherever it is persisted, so ordering is not significant.</summary>
+public enum DocumentType
+{
+    Incident = 0,
+    Rfc = 1,
+    Proposal = 2,
+    Adr = 3,
+    Postmortem = 4,
+    Runbook = 5,
+}
+
+/// <summary>
+/// Whether the host-supplied document-opportunity judge runs at the end of a turn. Unlike
+/// <see cref="CareerImpactMode"/> there is no deterministic detector to grade here — the judge
+/// already returns a final offer-or-skip decision, so this is a bare on/off toggle, mirroring
+/// <see cref="Capture.CaptureJudgeMode"/>.
+/// </summary>
+public enum DocOpportunityMode
+{
+    /// <summary>Never run the judge. The <c>document</c> commands still work.</summary>
+    Off = 0,
+
+    /// <summary>Run the host-supplied judge and surface an offered document as a turn-summary pointer.</summary>
+    Semantic = 1,
+}
+
+/// <summary>Review state of a persisted <see cref="DocOpportunityCandidate"/>.</summary>
+public enum DocOpportunityStatus
+{
+    /// <summary>Offered and awaiting the user (the default).</summary>
+    Open = 0,
+
+    /// <summary>The user declined to generate the document.</summary>
+    Dismissed = 1,
+
+    /// <summary>The document was generated and written to disk.</summary>
+    Written = 2,
 }
 
 /// <summary>Review state of a <see cref="RuleLifecycleRecommendation"/>.</summary>

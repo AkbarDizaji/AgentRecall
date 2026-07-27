@@ -239,11 +239,33 @@ public sealed class AgentRecallOptions
     /// </summary>
     public string CaptureJudgeMode { get; set; } = nameof(Capture.CaptureJudgeMode.Semantic);
 
+    /// <summary>
+    /// Whether the host-supplied document-opportunity judge runs at the end of a turn:
+    /// <c>Semantic</c> (default; the judge decides, AgentRecall only validates + persists its
+    /// verdict) or <c>Off</c>. Parsed defensively so an unrecognised value falls back to
+    /// <c>Semantic</c>. There is no keyword-driven fallback: when the judge is unavailable,
+    /// nothing is offered.
+    /// </summary>
+    public string DocOpportunityMode { get; set; } = nameof(Domain.DocOpportunityMode.Semantic);
+
+    /// <summary>
+    /// Root directory under which type-based document subfolders (<c>docs/rfcs</c>,
+    /// <c>docs/incidents</c>, ...) are created by <c>agentrecall document write</c>. Relative
+    /// paths resolve against the CLI's current working directory at write time.
+    /// </summary>
+    public string DocOpportunityRoot { get; set; } = "docs";
+
     /// <summary>The parsed capture-judge mode, falling back to Semantic when invalid.</summary>
     public CaptureJudgeMode ResolvedCaptureJudgeMode =>
         Enum.TryParse<CaptureJudgeMode>(CaptureJudgeMode, ignoreCase: true, out var mode) && Enum.IsDefined(mode)
             ? mode
             : Capture.CaptureJudgeMode.Semantic;
+
+    /// <summary>The parsed document-opportunity mode, falling back to Semantic when invalid.</summary>
+    public DocOpportunityMode ResolvedDocOpportunityMode =>
+        Enum.TryParse<DocOpportunityMode>(DocOpportunityMode, ignoreCase: true, out var mode) && Enum.IsDefined(mode)
+            ? mode
+            : Domain.DocOpportunityMode.Semantic;
 
     /// <summary>The parsed career-impact mode, falling back to SignificantOnly when invalid.</summary>
     public CareerImpactMode ResolvedCareerImpactMode =>
