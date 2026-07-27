@@ -352,6 +352,44 @@ public class DevcontainerScaffolderTests
         }
     }
 
+    [Fact] // A stale guidance block (an older AgentRecall version's content) is refreshed in
+           // place on re-run — this is what lets `devcontainer init` "upgrade" an existing
+           // project without ever duplicating the block or touching the user's own content.
+    public void EnsureGuidance_RefreshesStaleBlockInPlace_PreservingSurroundingContent()
+    {
+        var root = NewTempProject();
+        try
+        {
+            var path = Path.Combine(root, DevcontainerScaffolder.ClaudeMdRelativePath);
+            const string before = "# My Project\n\nExisting notes above the guidance.\n\n";
+            const string after = "\n## My Own Section\n\nExisting notes below the guidance.\n";
+            var stale = DevcontainerScaffolder.ClaudeMdHeading + "\n\nThis is an outdated guidance block from an older AgentRecall version.\n";
+            File.WriteAllText(path, before + stale + after);
+
+            var outcome = DevcontainerScaffolder.EnsureClaudeMdGuidance(root);
+            Assert.Equal(GuidanceOutcome.Updated, outcome);
+
+            var refreshed = File.ReadAllText(path);
+            // Content on both sides of the block survives untouched...
+            Assert.StartsWith(before, refreshed, StringComparison.Ordinal);
+            Assert.EndsWith(after, refreshed, StringComparison.Ordinal);
+            // ...while the block itself now matches the current guidance, not the stale text.
+            Assert.DoesNotContain("outdated guidance block from an older", refreshed, StringComparison.Ordinal);
+            Assert.Contains("You are the semantic judge", refreshed, StringComparison.Ordinal);
+
+            // Heading appears exactly once — the refresh replaced, never duplicated, the block.
+            var occurrences = refreshed.Split(DevcontainerScaffolder.ClaudeMdHeading).Length - 1;
+            Assert.Equal(1, occurrences);
+
+            // A further re-run is now a true no-op.
+            Assert.Equal(GuidanceOutcome.AlreadyPresent, DevcontainerScaffolder.EnsureClaudeMdGuidance(root));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Fact]
     public void EnsureHook_WithMalformedSettings_LeavesFileUntouched()
     {

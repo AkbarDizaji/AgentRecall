@@ -97,8 +97,11 @@ agentrecall devcontainer init
 ```
 
 This wires the `UserPromptSubmit` hook (see [Claude Code integration](#claude-code-integration))
-and appends the `CLAUDE.md` guidance block — merged in, never overwritten, and
-a re-run is a no-op. Dev-container scaffolding itself is separate and
+and appends the `CLAUDE.md` guidance block — merged in, never overwritten. **Re-run this after
+every AgentRecall upgrade**: if the guidance block has drifted from what the new version ships
+(e.g. a newer capture-judge or document-opportunity contract), the re-run refreshes it in place,
+so existing projects always get the latest instructions without hand-editing `CLAUDE.md`; when
+it's already current, the re-run is a true no-op. Dev-container scaffolding itself is separate and
 **opt-in**: if a `devcontainer.json` already exists it's wired in automatically;
 if not, none is created — pass `--create` to generate one that reinstalls
 AgentRecall, persists data on a named volume, and re-registers the MCP server

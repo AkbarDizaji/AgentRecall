@@ -4,6 +4,20 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.1] - 2026-07-27
+
+### Added
+- **Test coverage for the in-place `CLAUDE.md` guidance refresh.** `EnsureClaudeMdGuidance`
+  already refreshed a stale guidance block in place on re-run (preserving surrounding user
+  content, never duplicating the block), but the `Updated` outcome had no test asserting it.
+  Added one.
+
+### Changed
+- **Clarified the dev-container README section.** It previously read as if re-running
+  `agentrecall devcontainer init` were only ever a no-op; it now says explicitly to re-run it
+  after every AgentRecall upgrade, since that's when a drifted guidance block actually gets
+  refreshed.
+
 ## [2.3.0] - 2026-07-27
 
 ### Added
