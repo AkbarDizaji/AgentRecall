@@ -213,6 +213,7 @@ agentrecall eval retrieval --dataset ./my-eval.json
 | `seed list` / `show <pack>` / `install <pack>` / `remove <pack>` / `status` | Manage seed packs (`--active`, `--suggested`, `--force`, `--json`). |
 | `career impact --last` / `career journal --last` / `career status` | Career-impact pack commands (`--json`, `--detailed`, `--file <path>`). |
 | `cleanup pending-noise` | Archive noisy Pending rules from before source/outcome-aware capture (dry run by default; `--apply`, `--json`, `--tag`, `--status`). |
+| `doctor` | Check database/schema, PATH, Claude Code hook wiring, and the installed version; read-only by default (`--fix`, `--json`, `--offline`, `--project <path>`). |
 | `finalize-turn` / `finalize-turn status` | Run or inspect turn finalization (`--json`, `--hook`). |
 | `capture-status --last-turn` | Alias for `finalize-turn status`. |
 | `mcp` | Run the MCP server over stdio (for Claude Code). |

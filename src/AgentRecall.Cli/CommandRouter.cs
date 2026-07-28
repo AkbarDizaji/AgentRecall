@@ -99,6 +99,7 @@ public static partial class CommandRouter
             ["career"] = new DelegateCommand((a, s, o, l, ct) => CareerAsync(a, s, o, l, ct)),
             ["document"] = new DelegateCommand((a, s, o, l, ct) => DocumentAsync(a, s, o, l, ct)),
             ["cleanup"] = new DelegateCommand((a, s, o, l, ct) => CleanupAsync(a, s, o, l, ct)),
+            ["doctor"] = new DelegateCommand((a, s, o, l, ct) => DoctorAsync(a, s, o, l, ct)),
             ["mcp"] = new DelegateCommand(async (_, s, o, _, ct) =>
             {
                 var server = new Mcp.McpServer(s);
@@ -2712,6 +2713,8 @@ public static partial class CommandRouter
         output.WriteLine("  document status      Show document-opportunity mode and the last candidate (--json)");
         output.WriteLine("  cleanup pending-noise");
         output.WriteLine("                       Archive noisy Pending rules from the Stop hook (--apply, --json, --tag, --status)");
+        output.WriteLine("  doctor               Check database/schema, PATH, Claude Code hook wiring, and the");
+        output.WriteLine("                       installed version (--fix, --json, --offline, --project <path>)");
         output.WriteLine("  mcp                  Run the MCP server over stdio (for Claude Code)");
         output.WriteLine("  status               Show the memory subsystem status");
         output.WriteLine("  help                 Show this help text");
