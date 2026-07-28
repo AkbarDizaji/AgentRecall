@@ -44,7 +44,7 @@
     <RepositoryUrl>https://github.com/AkbarDizaji/AgentRecall</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>2.2.4 adds a Dockerfile for the MCP server and wires test coverage into CI with a Codecov badge. The README is reorganized with a table of contents and consolidated configuration/capture-pipeline sections. The career-impact turn-summary pointer now hints at what triggered detection (e.g. "involves a migration") instead of always reading the same fixed sentence. Full notes: https://github.com/AkbarDizaji/AgentRecall/blob/main/CHANGELOG.md</PackageReleaseNotes>
+    <PackageReleaseNotes>2.4.0 adds an `agentrecall doctor` command that checks database/schema readiness, PATH setup, Claude Code hook wiring (only when a project already opts in), and whether a newer version is published on NuGet. It's read-only by default; `--fix` repairs what's safely repairable and self-upgrades via `dotnet tool update` when out of date. Full notes: https://github.com/AkbarDizaji/AgentRecall/blob/main/CHANGELOG.md</PackageReleaseNotes>
   </PropertyGroup>
 
   <ItemGroup>

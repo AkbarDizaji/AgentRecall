@@ -4,6 +4,20 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] - 2026-07-28
+
+### Added
+- **An `agentrecall doctor` command.** Checks database/schema readiness (running the same
+  additive schema reconciliation `init` uses), whether the .NET tools directory is on PATH,
+  whether a project's Claude Code hooks are fully wired (only checked when the project already
+  has a `.claude` directory or `CLAUDE.md`, so it never reports a false problem outside a
+  Claude Code project), and whether a newer version is published on NuGet. Read-only by
+  default; `--fix` repairs what's safely repairable — adding the tools directory to PATH,
+  rewiring hooks via the existing dev-container scaffolder — and self-upgrades via
+  `dotnet tool update --global AgentRecall` when a newer version is available. `--json` for
+  machine-readable output; `--offline` skips the network version check; `--project <path>`
+  points the hook check at a directory other than the current one.
+
 ## [2.3.1] - 2026-07-27
 
 ### Added
