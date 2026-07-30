@@ -199,13 +199,31 @@ public sealed class ContextInjectionService : IContextInjectionService
         // Cap Pending rules so unreviewed suggestions never flood the context.
         ranked = CapPendingRules(ranked, request.PendingCap);
 
-        var result = PackIntoBudget(ranked, request.TokenBudget, request.Limit, prunedByPolicy);
+        var result = PackIntoBudget(ranked, request.TokenBudget, request.Limit, prunedByPolicy, out var trimmed);
+        var beforeConflictResolution = result.All.Count();
 
         // Resolve conflicts among the rules that survived to injection. This catches
         // competing guidance the polarity-based policy does not (e.g. unit vs
         // integration tests): the loser is dropped and the conflict is recorded, so
         // the agent sees a single chosen rule plus an explanation.
         result = ResolveInjectedConflicts(result);
+
+        // Conflict resolution can drop rules that PackIntoBudget already counted into
+        // TokensUsed/Explanation — recompute both from what actually survived, so the
+        // explanation (surfaced verbatim by the inject_context MCP tool) never overstates
+        // what was injected.
+        var conflictsPruned = beforeConflictResolution - result.All.Count();
+        if (conflictsPruned > 0)
+        {
+            result = result with
+            {
+                TokensUsed = result.All.Sum(r => r.EstimatedTokens),
+                Explanation = BuildExplanation(
+                    result.MustFollow.Count, result.Warnings.Count, result.Suggested.Count,
+                    result.All.Sum(r => r.EstimatedTokens), request.TokenBudget,
+                    prunedByPolicy, trimmed, conflictsPruned),
+            };
+        }
 
         if (request.RecordUsage)
         {
@@ -575,7 +593,7 @@ public sealed class ContextInjectionService : IContextInjectionService
         return ranked.Where(a => !a.Unapproved || keep.Contains(a.Rule.Id)).ToList();
     }
 
-    private static ContextInjectionResult PackIntoBudget(List<Assessment> ranked, int budget, int limit, int prunedByPolicy)
+    private static ContextInjectionResult PackIntoBudget(List<Assessment> ranked, int budget, int limit, int prunedByPolicy, out int trimmed)
     {
         var mustFollow = new List<InjectedRule>();
         var warnings = new List<InjectedRule>();
@@ -587,7 +605,7 @@ public sealed class ContextInjectionService : IContextInjectionService
             .ToList();
 
         var tokensUsed = 0;
-        var trimmed = 0;
+        trimmed = 0;
         var selected = 0;
 
         // Fill in priority order: must-follow, then warnings, then suggested.
@@ -612,9 +630,32 @@ public sealed class ContextInjectionService : IContextInjectionService
             }
         }
 
+        var explanation = BuildExplanation(
+            mustFollow.Count, warnings.Count, suggested.Count, tokensUsed, budget, prunedByPolicy, trimmed, conflictsPruned: 0);
+
+        return new ContextInjectionResult
+        {
+            MustFollow = mustFollow,
+            Suggested = suggested,
+            Warnings = warnings,
+            TokensUsed = tokensUsed,
+            TokenBudget = budget,
+            Explanation = explanation,
+        };
+    }
+
+    /// <summary>
+    /// Builds the human/model-facing summary line. Called once by <see cref="PackIntoBudget"/>
+    /// and again after conflict resolution (with the post-resolution counts/tokens) so the
+    /// explanation never describes rules that were subsequently dropped as a conflict loser.
+    /// </summary>
+    private static string BuildExplanation(
+        int mustFollowCount, int warningsCount, int suggestedCount, int tokensUsed, int budget,
+        int prunedByPolicy, int trimmed, int conflictsPruned)
+    {
         var explanation =
-            $"Selected {mustFollow.Count + warnings.Count + suggested.Count} rule(s) " +
-            $"({mustFollow.Count} must-follow, {warnings.Count} warning(s), {suggested.Count} suggested) " +
+            $"Selected {mustFollowCount + warningsCount + suggestedCount} rule(s) " +
+            $"({mustFollowCount} must-follow, {warningsCount} warning(s), {suggestedCount} suggested) " +
             $"using {tokensUsed}/{budget} tokens.";
         if (prunedByPolicy > 0)
         {
@@ -626,15 +667,12 @@ public sealed class ContextInjectionService : IContextInjectionService
             explanation += $" {trimmed} relevant rule(s) trimmed to fit the token budget.";
         }
 
-        return new ContextInjectionResult
+        if (conflictsPruned > 0)
         {
-            MustFollow = mustFollow,
-            Suggested = suggested,
-            Warnings = warnings,
-            TokensUsed = tokensUsed,
-            TokenBudget = budget,
-            Explanation = explanation,
-        };
+            explanation += $" {conflictsPruned} rule(s) set aside after resolving a conflict among injected rules.";
+        }
+
+        return explanation;
     }
 
     private static InjectedRule ToInjected(Assessment a)

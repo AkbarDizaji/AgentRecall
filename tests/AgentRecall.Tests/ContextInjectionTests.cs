@@ -377,6 +377,29 @@ public class ContextInjectionTests
         Assert.Contains("budget", result.Explanation, StringComparison.OrdinalIgnoreCase);
     }
 
+    // A conflict resolved among already-injected rules (not the policy engine's supersede/polarity
+    // pruning) drops a loser after TokensUsed/Explanation were first computed. Both must reflect
+    // only what actually survived, since inject_context returns them verbatim to the agent.
+    [Fact]
+    public async Task InjectedConflictResolution_RecomputesTokensUsedAndExplanation()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+        await Seed(db, "Always use unit tests for repository classes.",
+            tags: "test,unit", trigger: "testing repository classes", confidence: 0.9);
+        await Seed(db, "Always use integration tests for repository classes.",
+            tags: "test,integration", trigger: "testing repository classes", confidence: 0.9);
+
+        var result = await Build(db, new ContextRequest { Task = "write tests for repository classes" });
+
+        Assert.Single(result.Conflicts);
+        var survivor = Assert.Single(result.All);
+        Assert.Equal(survivor.EstimatedTokens, result.TokensUsed);
+        Assert.Contains($"Selected 1 rule(s)", result.Explanation, StringComparison.Ordinal);
+        Assert.Contains($"using {result.TokensUsed}/", result.Explanation, StringComparison.Ordinal);
+        Assert.Contains("set aside after resolving a conflict", result.Explanation, StringComparison.OrdinalIgnoreCase);
+    }
+
     // ---- MCP tool -------------------------------------------------------------
 
     // ---- Round-trip: store → promote → inject --------------------------------

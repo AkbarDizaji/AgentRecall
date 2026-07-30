@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using AgentRecall.Cli;
 using AgentRecall.Cli.Devcontainer;
 using AgentRecall.Core.Abstractions;
@@ -75,6 +76,77 @@ public class HookInjectionE2ETests
         }
 
         return output.ToString();
+    }
+
+    /// <summary>
+    /// Runs the real CLI command <c>finalize-turn</c> with the payload on stdin, the way the
+    /// Stop hook does.
+    /// </summary>
+    private static async Task<int> RunFinalizeTurnCli(TestDatabase db, string payload, params string[] extraArgs)
+    {
+        var originalIn = Console.In;
+        try
+        {
+            Console.SetIn(new StringReader(payload));
+            return await CommandRouter.RunAsync(["finalize-turn", .. extraArgs], db.Services, new StringWriter());
+        }
+        finally
+        {
+            Console.SetIn(originalIn);
+        }
+    }
+
+    [Fact]
+    public async Task CaptureThenInject_NewlyCapturedRuleIsInjectedOnLaterTurn()
+    {
+        using var repo = new TempRepo();
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        // 1. A turn ends; the host-supplied judge verdict says this is worth remembering.
+        //    This is the "after each answer, what rule would we need?" half of the loop.
+        var finalizePayload = new JsonObject
+        {
+            ["prompt"] = "We got burned mocking DbContext directly in a unit test.",
+            ["cwd"] = repo.Path,
+            ["source"] = "stop_hook",
+            ["judgment"] = new JsonObject
+            {
+                ["decision"] = "Capture",
+                ["memory_type"] = "EngineeringLesson",
+                ["confidence"] = 0.9,
+                ["capture_reason"] = "ObservedAgentFailure",
+                ["normalized_rule"] = new JsonObject
+                {
+                    ["title"] = "Do not mock DbContext directly",
+                    ["condition"] = "when writing unit tests that touch the database",
+                    ["action"] = "use a real in-memory SQLite DbContext instead of mocking DbContext directly",
+                    ["avoid"] = "mocking DbContext directly",
+                    ["because"] = "mocking DbContext directly hides real query bugs",
+                    ["scope"] = "project",
+                    ["tags"] = new JsonArray { "moq", "tests", "database" },
+                },
+            },
+        };
+
+        var finalizeExitCode = await RunFinalizeTurnCli(db, finalizePayload.ToJsonString());
+        Assert.Equal(0, finalizeExitCode);
+
+        await using (var scope = db.CreateScope())
+        {
+            var rules = await scope.ServiceProvider.GetRequiredService<IRecallRuleRepository>().ListAsync();
+            var captured = Assert.Single(rules);
+            Assert.Equal(RuleStatus.Active, captured.Status);
+        }
+
+        // 2. A later turn in the same repository asks about the exact thing the rule covers.
+        //    This is the "before each answer, fetch relevant rules into context" half of the loop.
+        var output = await RunHookCli(
+            db, Payload("Write unit tests for OrderService using Moq that touch the database", repo.Path));
+
+        Assert.Contains("## AgentRecall Technical Context", output);
+        Assert.Contains("real in-memory SQLite DbContext instead of mocking DbContext directly", output);
+        Assert.Contains("Source Rules:", output);
     }
 
     [Fact]
