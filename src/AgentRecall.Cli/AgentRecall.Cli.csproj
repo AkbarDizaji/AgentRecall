@@ -44,7 +44,7 @@
     <RepositoryUrl>https://github.com/AkbarDizaji/AgentRecall</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>2.4.0 adds an `agentrecall doctor` command that checks database/schema readiness, PATH setup, Claude Code hook wiring (only when a project already opts in), and whether a newer version is published on NuGet. It's read-only by default; `--fix` repairs what's safely repairable and self-upgrades via `dotnet tool update` when out of date. Full notes: https://github.com/AkbarDizaji/AgentRecall/blob/main/CHANGELOG.md</PackageReleaseNotes>
+    <PackageReleaseNotes>2.4.1 fixes `inject_context` reporting a stale rule count and token total when conflict resolution among already-injected rules drops a losing rule — both are now recomputed from what actually survived. Full notes: https://github.com/AkbarDizaji/AgentRecall/blob/main/CHANGELOG.md</PackageReleaseNotes>
   </PropertyGroup>
 
   <ItemGroup>

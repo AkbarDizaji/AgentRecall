@@ -4,6 +4,16 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.1] - 2026-07-30
+
+### Fixed
+- **Stale token count/explanation from `inject_context` after conflict resolution.** When two
+  already-injected rules conflicted (e.g. "use unit tests" vs. "use integration tests" for the
+  same subject), the policy that resolves the conflict and drops the losing rule ran *after*
+  the rule count and token total were computed, so the `explanation` and `tokens_used` fields
+  returned by the `inject_context` MCP tool (and the CLI's own printout) still counted the
+  dropped rule. Both are now recomputed from the rules that actually survived.
+
 ## [2.4.0] - 2026-07-28
 
 ### Added
