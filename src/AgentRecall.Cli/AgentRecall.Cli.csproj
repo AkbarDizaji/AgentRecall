@@ -44,7 +44,7 @@
     <RepositoryUrl>https://github.com/AkbarDizaji/AgentRecall</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>2.4.1 fixes `inject_context` reporting a stale rule count and token total when conflict resolution among already-injected rules drops a losing rule — both are now recomputed from what actually survived. Full notes: https://github.com/AkbarDizaji/AgentRecall/blob/main/CHANGELOG.md</PackageReleaseNotes>
+    <PackageReleaseNotes>2.5.0 makes every automatic capture default to pending your approval instead of going straight to Active — reply yes/no in chat, or "yes to all" for the conversation, resolved via the new `resolve_pending_capture` MCP tool or `agentrecall rules approve/archive --all-pending`. `InteractiveMemoryMode: Silent` remains the global bypass. Full notes: https://github.com/AkbarDizaji/AgentRecall/blob/main/CHANGELOG.md</PackageReleaseNotes>
   </PropertyGroup>
 
   <ItemGroup>

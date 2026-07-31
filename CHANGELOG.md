@@ -4,6 +4,28 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] - 2026-07-31
+
+### Changed
+- **Every automatic capture now defaults to pending your approval.** Previously a
+  high-confidence (`>=0.80`) capture from the Stop hook went straight to `Active` with no
+  human review. Now it's parked `Pending` and surfaced in the Turn Memory Summary under
+  "Awaiting your approval" with the rule's description, and resolved by the user's chat
+  reply — yes/no for one rule, or "yes to all" for every rule still pending in the
+  conversation. An explicit user save still bypasses this (no redundant second ask), and
+  `AgentRecall.InteractiveMemoryMode: Silent` remains the global switch back to the old
+  direct-to-Active behavior.
+
+### Added
+- **`resolve_pending_capture` MCP tool.** Lets the model act on the user's reply:
+  `approve`/`reject` for a single `rule_id`, or `approve_all`/`reject_all` for every rule
+  pending in the chat, scoped by the host's `session_id` (now threaded through from the
+  Stop-hook payload and stamped on each pending rule) so "yes to all" only ever resolves
+  the current conversation.
+- **`agentrecall rules approve|archive --all-pending [--session <id>]`.** The CLI-terminal
+  equivalent of "yes to all" / "no to all", for resolving a backlog of pending captures by
+  hand.
+
 ## [2.4.1] - 2026-07-30
 
 ### Fixed
