@@ -74,4 +74,7 @@ public sealed class TurnFinalization
 
     /// <summary>The judge's confidence for the decision.</summary>
     public double JudgeConfidence { get; set; }
+
+    /// <summary>The host conversation/session id for this turn, when supplied. Empty otherwise.</summary>
+    public string SessionId { get; set; } = string.Empty;
 }

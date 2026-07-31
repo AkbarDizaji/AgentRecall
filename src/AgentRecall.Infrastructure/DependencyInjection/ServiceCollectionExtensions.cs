@@ -88,6 +88,7 @@ public static class ServiceCollectionExtensions
 
         // Lifecycle, versioning, and failure ingestion.
         services.AddScoped<IRuleLifecycleService, RuleLifecycleService>();
+        services.AddScoped<IPendingCaptureApprovalService, PendingCaptureApprovalService>();
         services.AddScoped<ILogImportService, LogImportService>();
         services.AddScoped<IPullRequestImportService, PullRequestImportService>();
 

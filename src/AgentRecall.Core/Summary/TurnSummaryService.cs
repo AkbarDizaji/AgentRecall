@@ -239,6 +239,7 @@ public sealed class TurnSummaryService : ITurnSummaryService
             Reason = reason,
             Seed = rule.Source == RuleSource.BuiltInSeed,
             Standing = rule.AlwaysApply,
+            AwaitingApproval = rule.Status == RuleStatus.Pending,
         };
     }
 

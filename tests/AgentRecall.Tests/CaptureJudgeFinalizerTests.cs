@@ -352,9 +352,10 @@ public class CaptureJudgeFinalizerTests
         Assert.Equal(RuleStatus.Pending, (await Rules(db)).Single().Status);
     }
 
-    // S/T/U. Confidence bands: >=0.80 captures, 0.55-0.79 suggests, <0.55 skips.
+    // S/T/U. Confidence bands: >=0.80 captures (now stored Pending awaiting approval by
+    // default), 0.55-0.79 suggests (already Pending), <0.55 skips.
     [Theory]
-    [InlineData(0.80, 1, 0)]
+    [InlineData(0.80, 1, 1)]
     [InlineData(0.60, 0, 1)]
     [InlineData(0.50, 0, 0)]
     public async Task STU_ConfidenceBands(double confidence, int capturedCount, int pendingCount)

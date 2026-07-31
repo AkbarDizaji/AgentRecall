@@ -60,6 +60,8 @@ public static class TurnSummaryRenderer
 
         line.Append('.');
 
+        AppendApprovalPrompt(line, summary.Captured.Concat(summary.Suggested));
+
         foreach (var error in summary.Errors.Take(MaxItems))
         {
             line.Append("\n- Error: ").Append(error);
@@ -92,15 +94,16 @@ public static class TurnSummaryRenderer
 
         // The core four are always shown (with "- none" when empty) so the summary
         // proactively answers "did it use / auto-capture / suggest / skip anything?".
-        AppendRuleSection(sb, "Used", summary.Used, withApprove: false, alwaysShow: true);
-        AppendRuleSection(sb, "Auto-captured", summary.Captured, withApprove: false, alwaysShow: true);
-        AppendRuleSection(sb, "Suggested", summary.Suggested, withApprove: true, alwaysShow: true);
+        AppendRuleSection(sb, "Used", summary.Used, alwaysShow: true);
+        AppendRuleSection(sb, "Auto-captured", summary.Captured, alwaysShow: true);
+        AppendRuleSection(sb, "Suggested", summary.Suggested, alwaysShow: true);
         AppendSkipSection(sb, summary.Skipped);
 
         // Interactive and error sections appear only when there is something to report.
-        AppendRuleSection(sb, "Remembered", summary.Remembered, withApprove: false, alwaysShow: false);
-        AppendRuleSection(sb, "Ignored", summary.Ignored, withApprove: false, alwaysShow: false);
+        AppendRuleSection(sb, "Remembered", summary.Remembered, alwaysShow: false);
+        AppendRuleSection(sb, "Ignored", summary.Ignored, alwaysShow: false);
         AppendErrorSection(sb, summary.Errors);
+        AppendApprovalPrompt(sb, summary.Captured.Concat(summary.Suggested));
 
         // Only a short pointer to the on-demand journal — never the full career summary.
         if (!string.IsNullOrWhiteSpace(summary.CareerImpact))
@@ -121,7 +124,6 @@ public static class TurnSummaryRenderer
         StringBuilder sb,
         string title,
         IReadOnlyList<TurnSummaryRule> rules,
-        bool withApprove,
         bool alwaysShow)
     {
         if (rules.Count == 0 && !alwaysShow)
@@ -149,13 +151,39 @@ public static class TurnSummaryRenderer
                 sb.Append(" [standing]");
             }
 
-            if (withApprove)
+            if (rule.AwaitingApproval)
             {
-                sb.Append("\n  Approve: `agentrecall rules approve ").Append(rule.Id).Append('`');
+                sb.Append("\n  Awaiting approval: `agentrecall rules approve ")
+                    .Append(rule.Id).Append('`').Append(" / `archive ").Append(rule.Id).Append('`');
             }
         }
 
         AppendOverflow(sb, rules.Count);
+    }
+
+    /// <summary>
+    /// A once-per-summary, chat-native instruction covering every rule awaiting approval across
+    /// sections — the default behavior for every automatic capture. Silent when nothing is
+    /// awaiting approval (e.g. <see cref="Capture.InteractiveMemoryMode.Silent"/> bypassed the
+    /// gate, or the turn captured nothing).
+    /// </summary>
+    private static void AppendApprovalPrompt(StringBuilder sb, IEnumerable<TurnSummaryRule> rules)
+    {
+        var pending = rules.Where(r => r.AwaitingApproval).ToList();
+        if (pending.Count == 0)
+        {
+            return;
+        }
+
+        sb.Append("\n\nAwaiting your approval:");
+        foreach (var rule in pending.Take(MaxItems))
+        {
+            sb.Append("\n- #").Append(rule.Id).Append(' ').Append(rule.Title);
+        }
+
+        AppendOverflow(sb, pending.Count);
+        sb.Append("\nReply `yes`/`no` for a rule above, or `yes to all` to approve every rule ")
+            .Append("awaiting approval in this chat.");
     }
 
     private static void AppendSkipSection(StringBuilder sb, IReadOnlyList<TurnSummarySkip> skips)

@@ -181,7 +181,7 @@ public class TurnSummaryTests
         {
             Used = [Rule(12, "Scope-safe validators")],
             Captured = [Rule(28, "Preserve else semantics when flattening conditionals")],
-            Suggested = [Rule(31, "Avoid duplicate DB reads")],
+            Suggested = [Rule(31, "Avoid duplicate DB reads") with { AwaitingApproval = true }],
             Skipped = [new TurnSummarySkip { Reason = "not reusable enough" }],
             Remembered = [Rule(31, "Avoid duplicate DB reads")],
             Ignored = [Rule(32, "Naming preference for one file")],
@@ -199,6 +199,37 @@ public class TurnSummaryTests
         Assert.Contains("Errors:", text, StringComparison.Ordinal);
         // Suggested carries an approve hint.
         Assert.Contains("agentrecall rules approve 31", text, StringComparison.Ordinal);
+    }
+
+    // D2. A capture awaiting approval shows its description and a yes/no/"yes to all" prompt,
+    // in both compact and detailed mode — the default gate applies regardless of level.
+    [Theory]
+    [InlineData(TurnSummaryLevel.Compact)]
+    [InlineData(TurnSummaryLevel.Detailed)]
+    public void AwaitingApprovalCapture_ShowsDescriptionAndYesNoYesToAllPrompt(TurnSummaryLevel level)
+    {
+        var summary = new TurnSummary
+        {
+            Captured = [Rule(42, "Do not mock DbContext directly") with { AwaitingApproval = true }],
+        };
+
+        var text = TurnSummaryRenderer.Render(summary, level)!;
+        Assert.Contains("Do not mock DbContext directly", text, StringComparison.Ordinal);
+        Assert.Contains("Awaiting your approval", text, StringComparison.Ordinal);
+        Assert.Contains("yes to all", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // D3. A capture that bypassed the gate (Silent mode, or an explicit save) shows no prompt.
+    [Fact]
+    public void ApprovedCapture_ShowsNoApprovalPrompt()
+    {
+        var summary = new TurnSummary
+        {
+            Captured = [Rule(42, "Do not mock DbContext directly")],
+        };
+
+        var text = TurnSummaryRenderer.RenderCompact(summary);
+        Assert.DoesNotContain("Awaiting your approval", text, StringComparison.Ordinal);
     }
 
     [Fact] // E. Detailed mode limits each section to max 5 items.

@@ -132,11 +132,22 @@ public class HookInjectionE2ETests
         var finalizeExitCode = await RunFinalizeTurnCli(db, finalizePayload.ToJsonString());
         Assert.Equal(0, finalizeExitCode);
 
+        // By default every automatic capture is parked pending the user's approval — reply
+        // "yes" via the resolve_pending_capture MCP tool before it counts as memory.
+        int capturedRuleId;
         await using (var scope = db.CreateScope())
         {
             var rules = await scope.ServiceProvider.GetRequiredService<IRecallRuleRepository>().ListAsync();
             var captured = Assert.Single(rules);
-            Assert.Equal(RuleStatus.Active, captured.Status);
+            Assert.Equal(RuleStatus.Pending, captured.Status);
+            capturedRuleId = captured.Id;
+        }
+
+        await using (var scope = db.CreateScope())
+        {
+            var approvals = scope.ServiceProvider.GetRequiredService<IPendingCaptureApprovalService>();
+            var approved = await approvals.ApproveAsync(capturedRuleId);
+            Assert.Equal(RuleStatus.Active, approved.Status);
         }
 
         // 2. A later turn in the same repository asks about the exact thing the rule covers.

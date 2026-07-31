@@ -127,4 +127,11 @@ public sealed class RecallRule
 
     /// <summary>When the rule was last applied to a task, if ever.</summary>
     public DateTimeOffset? LastUsedAt { get; set; }
+
+    /// <summary>
+    /// The host conversation/session id this rule was captured under, when the Stop hook
+    /// supplied one. Empty for rules not created through that path (e.g. manual feedback).
+    /// Lets "yes to all" resolve every rule still awaiting approval in the same chat.
+    /// </summary>
+    public string SessionId { get; set; } = string.Empty;
 }

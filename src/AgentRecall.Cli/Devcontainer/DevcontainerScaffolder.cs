@@ -225,6 +225,29 @@ public static class DevcontainerScaffolder
         this is how a repeated suggestion accumulates confidence toward auto-promotion
         instead of sitting as a duplicate pending rule forever.
 
+        ### Every capture defaults to pending your approval — ask, don't assume
+
+        Reporting `Capture` does not mean the rule is active yet. By default (unless the host
+        configured `InteractiveMemoryMode: Silent` to bypass this), every automatic capture,
+        even a high-confidence one, is parked Pending and surfaced in the Turn Memory Summary
+        under **Awaiting your approval**, with the rule's short description and a reply
+        instruction. When you see that section:
+
+        1. Relay it to the user in plain language, mentioning what the rule says, not just that
+           "something is pending." This is a real yes/no question, not a rhetorical one.
+        2. Wait for their reply. Do not assume yes, and do not silently treat a Pending rule as
+           if it were already active guidance.
+        3. On an explicit "yes" (for one rule) or "yes to all" (for every rule still pending in
+           this chat), call `resolve_pending_capture` with `decision: approve` (plus `rule_id`)
+           or `decision: approve_all`. On "no" / "no to all", call it with `decision: reject` /
+           `reject_all` instead so the rule is archived, not left dangling.
+        4. `approve_all`/`reject_all` need no `session_id` from you; omit it and AgentRecall
+           resolves to whichever chat most recently had something pending.
+
+        This follows the same non-blocking pattern as the document-opportunity flow below:
+        nothing on the CLI side halts waiting for input, and a `Skip` decision is never gated
+        (it created nothing to approve).
+
         ### Document opportunity — offer a document, never generate one yourself
 
         Alongside `judgment`, the same `finalize-turn` payload accepts a sibling
@@ -304,8 +327,8 @@ public static class DevcontainerScaffolder
         - "I didn't manually call AgentRecall"
         - "The Stop hook may have captured it."
         - "I don't control whether it fired"
-        - "Want me to save it?" — unless the status says SuggestCapture/Pending and your
-          approval is genuinely required.
+        - "Want me to save it?" — unless the status shows `awaiting_approval: true` (or a
+          Suggested/Pending rule) and your approval is genuinely required.
 
         These are wrong because they speculate instead of reading recorded state. Run the
         status command and answer from it.
@@ -326,10 +349,14 @@ public static class DevcontainerScaffolder
 
         Answer using the recorded decision:
 
-        - **Captured** — "AgentRecall captured rule #X: <summary>."
-        - **Suggested / Pending** — "AgentRecall suggested pending rule #Y: <summary>."
-          Only in this case may you ask the user to confirm it (`agentrecall rules
-          approve Y`).
+        - **Captured, `awaiting_approval: true`** (the default) — "AgentRecall captured rule
+          #X: <summary> — awaiting your approval." Relay it and ask yes/no per the section
+          above; do not call it settled until the user answers.
+        - **Captured, `awaiting_approval: false`** — the gate was bypassed (an explicit save,
+          or `InteractiveMemoryMode: Silent`) — "AgentRecall captured rule #X: <summary>."
+          Already active; nothing to ask.
+        - **Suggested / Pending** — "AgentRecall suggested pending rule #Y: <summary>." Same
+          approval flow as an unapproved capture (`agentrecall rules approve Y`).
         - **Skipped** — "AgentRecall skipped capture: <reason>."
         - **Nothing recorded** — "No finalized AgentRecall capture is recorded for the
           last turn."
@@ -339,8 +366,8 @@ public static class DevcontainerScaffolder
 
         - "The Stop hook may have captured it."
         - "I didn't manually call AgentRecall, so nothing was saved."
-        - "Want me to save it?" — unless the status says SuggestCapture/Pending and your
-          approval is genuinely required.
+        - "Want me to save it?" — unless the status shows `awaiting_approval: true` (or a
+          Suggested/Pending rule) and your approval is genuinely required.
 
         Only call `capture_feedback` yourself when the finalization status shows that no
         capture happened AND the user explicitly asks you to save the lesson. Never create

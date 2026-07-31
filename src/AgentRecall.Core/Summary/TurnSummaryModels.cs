@@ -22,6 +22,12 @@ public sealed record TurnSummaryRule
     /// [standing] marker), so the user sees a correction became a rule that applies every turn.
     /// </summary>
     public bool Standing { get; init; }
+
+    /// <summary>
+    /// True when the rule is stored Pending and needs the user's yes/no (or "yes to all")
+    /// before it counts as approved memory.
+    /// </summary>
+    public bool AwaitingApproval { get; init; }
 }
 
 /// <summary>A skipped capture candidate in a turn summary: why it was not stored.</summary>

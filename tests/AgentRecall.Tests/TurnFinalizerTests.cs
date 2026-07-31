@@ -98,9 +98,10 @@ public class TurnFinalizerTests
         return await scope.ServiceProvider.GetRequiredService<IRecallRuleRepository>().ListAsync();
     }
 
-    // A. A high-confidence Capture verdict auto-captures an active rule.
+    // A. By default, even a high-confidence Capture verdict is parked pending the user's
+    // yes/no/"yes to all" approval instead of stored Active outright.
     [Fact]
-    public async Task CaptureVerdict_AutoCapturesActive()
+    public async Task CaptureVerdict_DefaultRequiresApproval_StoresPending()
     {
         await using var db = new TestDatabase();
         await Init(db);
@@ -108,8 +109,39 @@ public class TurnFinalizerTests
         var result = await Finalize(db, Turn(Verdict(confidence: 0.9)));
 
         var lesson = Assert.Single(result.Captured);
-        Assert.Equal(RuleStatus.Active, (await Rules(db)).Single(r => r.Id == lesson.RuleId).Status);
+        Assert.True(lesson.AwaitingApproval);
+        Assert.Equal(RuleStatus.Pending, (await Rules(db)).Single(r => r.Id == lesson.RuleId).Status);
         Assert.Empty(result.Suggested);
+    }
+
+    // A2. InteractiveMemoryMode=Silent is the global bypass: a high-confidence capture is
+    // stored Active immediately, exactly as before the approval gate existed.
+    [Fact]
+    public async Task CaptureVerdict_SilentMode_BypassesApproval_StoresActive()
+    {
+        await using var db = new TestDatabase(o => o.InteractiveMemoryMode = "Silent");
+        await Init(db);
+
+        var result = await Finalize(db, Turn(Verdict(confidence: 0.9)));
+
+        var lesson = Assert.Single(result.Captured);
+        Assert.False(lesson.AwaitingApproval);
+        Assert.Equal(RuleStatus.Active, (await Rules(db)).Single(r => r.Id == lesson.RuleId).Status);
+    }
+
+    // A3. An explicit user save always bypasses the gate too — the user already said yes.
+    [Fact]
+    public async Task CaptureVerdict_ExplicitUserSave_BypassesApproval_StoresActive()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        var result = await Finalize(db, Turn(Verdict(
+            confidence: 0.9, reason: JudgeCaptureReason.ExplicitUserSave)));
+
+        var lesson = Assert.Single(result.Captured);
+        Assert.False(lesson.AwaitingApproval);
+        Assert.Equal(RuleStatus.Active, (await Rules(db)).Single(r => r.Id == lesson.RuleId).Status);
     }
 
     // C. A Skip verdict stores nothing.

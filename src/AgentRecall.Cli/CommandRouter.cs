@@ -474,9 +474,34 @@ public static partial class CommandRouter
             case "promote":
             case "archive":
             {
+                // Bulk form: resolve every rule still awaiting the capture-approval gate's
+                // yes/no, scoped to one chat (the CLI-terminal equivalent of "yes to all").
+                if (sub != "promote" && args.Length > 1 && string.Equals(args[1], "--all-pending", StringComparison.Ordinal))
+                {
+                    var bulkOptions = ParseOptions(args[2..]);
+                    bulkOptions.TryGetValue("session", out var sessionId);
+
+                    var approvals = scope.ServiceProvider.GetRequiredService<IPendingCaptureApprovalService>();
+                    var batch = sub == "approve"
+                        ? await approvals.ApproveAllAsync(sessionId, cancellationToken).ConfigureAwait(false)
+                        : await approvals.RejectAllAsync(sessionId, cancellationToken).ConfigureAwait(false);
+
+                    if (batch.RuleIds.Count == 0)
+                    {
+                        output.WriteLine("Nothing is awaiting approval.");
+                        return 0;
+                    }
+
+                    var verb = sub == "approve" ? "approved" : "archived";
+                    var ids = string.Join(", ", batch.RuleIds.Select(id => $"#{id}"));
+                    output.WriteLine($"{batch.RuleIds.Count} rule(s) {verb}: {ids}.");
+                    return 0;
+                }
+
                 if (args.Length < 2 || !int.TryParse(args[1], out var id))
                 {
-                    output.WriteLine($"Usage: agentrecall rules {sub} <id>");
+                    var allPendingHint = sub == "promote" ? "" : $" | agentrecall rules {sub} --all-pending [--session <id>]";
+                    output.WriteLine($"Usage: agentrecall rules {sub} <id>{allPendingHint}");
                     return 1;
                 }
 

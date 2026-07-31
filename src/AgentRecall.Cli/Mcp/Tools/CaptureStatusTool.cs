@@ -84,6 +84,7 @@ public sealed class CaptureStatusTool : IMcpTool
                 ["confidence"] = lesson.Confidence,
                 ["text"] = lesson.Text,
                 ["note"] = lesson.Note,
+                ["awaiting_approval"] = lesson.AwaitingApproval,
             });
         }
 

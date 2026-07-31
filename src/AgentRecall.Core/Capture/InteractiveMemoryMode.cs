@@ -8,20 +8,31 @@ namespace AgentRecall.Core.Capture;
 public enum InteractiveMemoryMode
 {
     /// <summary>
-    /// Default. Auto-capture high-confidence lessons silently (a notice only) and ask
-    /// interactively only for ambiguous <c>SuggestCapture</c> candidates. Skips never ask.
+    /// Default. For manual feedback (<c>feedback add</c>), auto-captures high-confidence
+    /// lessons silently (a notice only) and asks interactively only for ambiguous
+    /// <c>SuggestCapture</c> candidates. For the Stop-hook/semantic-judge capture path, every
+    /// would-be auto-capture is parked Pending and surfaced with a yes/no/"yes to all" prompt
+    /// instead of being stored immediately — see <see cref="Silent"/> to bypass that. Skips
+    /// never ask, in either path.
     /// </summary>
     Auto,
 
     /// <summary>
-    /// More conservative. Still auto-captures a very strong signal, but a borderline
-    /// auto-capture is downgraded to a suggestion and the user is asked. Skips never ask.
+    /// More conservative for manual feedback (<c>feedback add</c>): still auto-captures a very
+    /// strong signal, but a borderline auto-capture is downgraded to a suggestion and the user
+    /// is asked. Behaves exactly like <see cref="Auto"/> for the Stop-hook capture-approval
+    /// gate (there is nothing more conservative to add — every capture already requires
+    /// approval). Skips never ask.
     /// </summary>
     Ask,
 
     /// <summary>
     /// Never prompts. Auto-captures per policy and parks suggestions as Pending, but asks
-    /// nothing — activity and status commands still show what happened.
+    /// nothing — activity and status commands still show what happened. This is also the
+    /// global bypass for the Stop-hook capture-approval gate: with any other mode, a would-be
+    /// auto-capture is parked Pending until the user replies yes/no (or "yes to all" for
+    /// everything pending in the chat); under <c>Silent</c> it is stored immediately per the
+    /// judge's own decision, exactly as before that gate existed.
     /// </summary>
     Silent,
 }

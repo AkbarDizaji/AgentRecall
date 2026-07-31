@@ -241,7 +241,7 @@ public sealed class TurnFinalizer : ITurnFinalizer
         TurnJudgeDecision summary,
         CancellationToken cancellationToken)
     {
-        var request = BuildRequest(input, outcome);
+        var request = BuildRequest(input, outcome, requiresApproval: RequiresApprovalGate(outcome));
         var result = await _feedback.AddJudgedAsync(request, cancellationToken).ConfigureAwait(false);
 
         if (result.ReusedExistingRule && result.Rule is { } existing)
@@ -271,6 +271,20 @@ public sealed class TurnFinalizer : ITurnFinalizer
 
         return summary;
     }
+
+    /// <summary>
+    /// True when a would-be auto-capture must be parked pending the user's approval instead of
+    /// stored <see cref="RuleStatus.Active"/> outright. This is the default (every automatic
+    /// capture needs a yes/no, or "yes to all" for everything pending in the chat) — an explicit
+    /// user save always bypasses it (the user already said yes), and so does
+    /// <see cref="InteractiveMemoryMode.Silent"/> (the global "never ask, just save it" switch).
+    /// A <c>Suggest</c> outcome is unaffected: it is already stored Pending on its own account
+    /// and goes through the same approval prompt either way.
+    /// </summary>
+    private bool RequiresApprovalGate(CaptureJudgeOutcome outcome) =>
+        outcome.Action == JudgePersistAction.AutoCapture &&
+        outcome.DomainReason != CaptureReason.ManualFeedback &&
+        _options.ResolvedInteractiveMemoryMode != InteractiveMemoryMode.Silent;
 
     private async Task<TurnJudgeDecision> SupersedeAsync(
         TurnFinalizationInput input,
@@ -346,13 +360,14 @@ public sealed class TurnFinalizer : ITurnFinalizer
         return summary with { TargetRuleId = targetId };
     }
 
-    private JudgedCaptureRequest BuildRequest(TurnFinalizationInput input, CaptureJudgeOutcome outcome)
+    private JudgedCaptureRequest BuildRequest(TurnFinalizationInput input, CaptureJudgeOutcome outcome, bool requiresApproval = false)
     {
         var rule = BuildRule(input, outcome);
+        rule.SessionId = input.SessionId ?? string.Empty;
         return new JudgedCaptureRequest
         {
             Rule = rule,
-            Status = outcome.Status,
+            Status = requiresApproval ? RuleStatus.Pending : outcome.Status,
             DomainReason = outcome.DomainReason,
             EvidenceSummary = string.IsNullOrWhiteSpace(rule.TechnicalContext) ? null : rule.TechnicalContext,
             TaskContext = BuildTask(input),
@@ -553,6 +568,7 @@ public sealed class TurnFinalizer : ITurnFinalizer
             Confidence = rule.Confidence,
             AlwaysApply = rule.AlwaysApply,
             Note = note,
+            AwaitingApproval = rule.Status == RuleStatus.Pending,
         };
 
     private static string ScopeLabel(ScopeLevel level, string? value) =>

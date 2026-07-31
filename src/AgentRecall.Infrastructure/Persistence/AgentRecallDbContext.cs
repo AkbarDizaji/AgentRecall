@@ -50,9 +50,13 @@ public sealed class AgentRecallDbContext : DbContext
             // Universal-constraint delivery flag. Stored with a default so the additive schema
             // reconciler can backfill the column on databases created before always-apply rules.
             entity.Property(e => e.AlwaysApply).HasDefaultValue(false);
+            // Chat/session correlation for the capture-approval gate. Stored with a default so
+            // the additive schema reconciler can backfill the column on older databases.
+            entity.Property(e => e.SessionId).HasDefaultValue(string.Empty);
             entity.HasIndex(e => new { e.ScopeLevel, e.ScopeValue });
             entity.HasIndex(e => e.Status);
             entity.HasIndex(e => e.Deprecated);
+            entity.HasIndex(e => e.SessionId);
             // Non-unique: every non-seed rule shares the empty (pack, key) pair, so this
             // is a lookup index for idempotent seed installs, not a uniqueness constraint.
             entity.HasIndex(e => new { e.SeedPack, e.SeedRuleKey });
@@ -124,10 +128,12 @@ public sealed class AgentRecallDbContext : DbContext
             entity.Property(e => e.JudgeDecision).HasDefaultValue(string.Empty);
             entity.Property(e => e.JudgeCaptureReason).HasDefaultValue(string.Empty);
             entity.Property(e => e.JudgeConfidence).HasDefaultValue(0d);
+            entity.Property(e => e.SessionId).HasDefaultValue(string.Empty);
             entity.HasIndex(e => e.CreatedAt);
             entity.HasIndex(e => e.RawHash);
             entity.HasIndex(e => e.Cwd);
             entity.HasIndex(e => e.TurnId);
+            entity.HasIndex(e => e.SessionId);
         });
 
         modelBuilder.Entity<AgentRecallActivity>(entity =>

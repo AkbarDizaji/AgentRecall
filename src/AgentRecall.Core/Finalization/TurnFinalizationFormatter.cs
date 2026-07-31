@@ -52,6 +52,11 @@ public static class TurnFinalizationFormatter
             {
                 var standing = lesson.AlwaysApply ? " [standing — applies every turn]" : string.Empty;
                 sb.Append($"\n- #{lesson.RuleId} {CategoryLabel(lesson.Category)}: {lesson.Text}{standing}");
+                if (lesson.AwaitingApproval)
+                {
+                    sb.Append($"\n  Awaiting your approval — reply yes/no, or run `agentrecall rules approve {lesson.RuleId}` " +
+                              $"to remember it, or `agentrecall rules archive {lesson.RuleId}` to discard it.");
+                }
             }
         }
 
@@ -103,6 +108,12 @@ public static class TurnFinalizationFormatter
         {
             var lesson = result.Captured[0];
             var extra = result.Captured.Count > 1 ? $" (+{result.Captured.Count - 1} more)" : string.Empty;
+            if (lesson.AwaitingApproval)
+            {
+                return $"AgentRecall captured rule #{lesson.RuleId}: {Summarize(lesson.Text)}.{extra} " +
+                       $"Awaiting your approval — reply yes/no, or run `agentrecall rules approve {lesson.RuleId}` to remember it.";
+            }
+
             return $"AgentRecall captured rule #{lesson.RuleId}: {Summarize(lesson.Text)}.{extra}";
         }
 

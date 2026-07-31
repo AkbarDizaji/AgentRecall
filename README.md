@@ -201,9 +201,11 @@ agentrecall eval retrieval --dataset ./my-eval.json
 | `rules list` | List all rules (`--status <status>`). |
 | `rules show <id>` | Show a single rule in detail. |
 | `rules approve <id>` | Move a Pending rule to Active. |
+| `rules approve --all-pending [--session <id>]` | Approve every rule awaiting capture approval in one chat (defaults to the most recent). |
 | `rules promote <id>` | Promote a rule. |
 | `rules supersede <oldId> <newId>` | Replace one rule with another (versioned). |
 | `rules archive <id>` | Archive a rule (excluded from search). |
+| `rules archive --all-pending [--session <id>]` | Reject (archive) every rule awaiting capture approval in one chat. |
 | `import build-log / test-log / lint-log <file>` | Ingest failures. |
 | `import pr-comments <file>` | Capture PR review comments as rules (`--task`, `--scope-level`, `--scope-value`, `--tags`, `--accepted`). |
 | `inject-context "<task>"` | Build agent-ready context (must-follow, warnings, preferred/anti-patterns). |
@@ -370,7 +372,8 @@ Stop hook → finalize-turn → semantic capture judge verdict → validate
 capture anything.
 
 - **Explicit save/do-not-save requests are always respected**, even for narrow
-  or stylistic rules.
+  or stylistic rules — and always bypass the approval gate below (the user
+  already said yes).
 - **Confidence maps to outcome:** `≥0.80` captures, `0.55–0.79` suggests a
   Pending rule, `<0.55` skips.
 - **Duplicates are reinforced, not duplicated**; an explicit supersede replaces
@@ -390,6 +393,30 @@ capture anything.
 - **Privacy.** The raw transcript is not stored by default — only a content
   hash, resulting rule ids, and skip reasons (`StoreTurnTranscript: true` to
   keep it for debugging).
+
+**Every capture defaults to pending your approval.** Even a `≥0.80` capture
+isn't stored Active outright — it's parked Pending and surfaced in the Turn
+Memory Summary under **Awaiting your approval**, with the rule's description
+and a reply instruction:
+
+```
+Awaiting your approval:
+- #42 Do not mock DbContext directly
+Reply `yes`/`no` for a rule above, or `yes to all` to approve every rule
+awaiting approval in this chat.
+```
+
+Reply in chat and Claude calls `resolve_pending_capture` (`approve`/`reject`
+for one rule, `approve_all`/`reject_all` for everything still pending in the
+conversation — scoped by the host's session id, so "yes to all" only ever
+resolves the current chat, not an unrelated one). No terminal prompt, no
+blocking: this is the same conversational pattern as the document-opportunity
+flow. Prefer the CLI directly? `agentrecall rules approve <id>` /
+`archive <id>`, or `--all-pending [--session <id>]` for the bulk form.
+
+Set `AgentRecall.InteractiveMemoryMode: Silent` to skip this gate globally —
+every capture is then stored per the judge's own decision immediately, exactly
+as before this gate existed. See [Interactive Memory](#interactive-memory).
 
 **Ask AgentRecall, don't guess.** The agent should never speculate about
 whether something was captured — it's one command away:
@@ -417,23 +444,37 @@ agentrecall cleanup pending-noise --apply    # archive the noisy ones
 
 ## Interactive Memory
 
-When the capture judge is unsure (`SuggestCapture`), AgentRecall can **ask**
-instead of silently parking a Pending rule — but only when a terminal is
-attached; hooks, pipes, and MCP never block waiting for input.
+One config option, `AgentRecall.InteractiveMemoryMode`, governs asking the
+user across two different surfaces:
 
-```
-🧠 AgentRecall: possible lesson detected.
-[y] Remember   [n] Ignore   [v] View details
-```
+- **The Stop-hook capture-approval gate** (see
+  [Capture pipeline](#capture-pipeline)) — the default for every automatic
+  capture, chat-relayed since a hook can't block for a keystroke: yes/no per
+  rule, or "yes to all" for the chat.
+- **Manual `feedback add`** — when the capture judge is unsure
+  (`SuggestCapture`), AgentRecall can **ask** right there instead of silently
+  parking a Pending rule — but only when a terminal is attached; hooks, pipes,
+  and MCP never block waiting for input:
 
-`AgentRecall.InteractiveMemoryMode` controls this: `Auto` (default — ask only
-for ambiguous suggestions), `Ask` (more conservative), `Silent` (never prompt;
-everything ambiguous becomes Pending). Approve or ignore later the normal way:
+  ```
+  🧠 AgentRecall: possible lesson detected.
+  [y] Remember   [n] Ignore   [v] View details
+  ```
+
+Values: `Auto` (default — asks for every Stop-hook capture; asks only
+ambiguous suggestions for manual `feedback add`), `Ask` (manual `feedback add`
+only: also downgrades a borderline auto-capture to a prompt; identical to
+`Auto` for the Stop-hook gate, since everything there is already asked),
+`Silent` (never prompt anywhere — **the global bypass**: a Stop-hook capture
+is stored immediately per the judge's decision, and a manual suggestion is
+parked Pending with no prompt). Approve or ignore later the normal way:
 
 ```bash
 agentrecall rules list --status Pending
-agentrecall rules approve <id>   # remember
-agentrecall rules archive <id>   # ignore
+agentrecall rules approve <id>                        # remember one
+agentrecall rules archive <id>                         # ignore one
+agentrecall rules approve --all-pending [--session <id>]  # "yes to all" from a terminal
+agentrecall rules archive --all-pending [--session <id>]  # "no to all" from a terminal
 ```
 
 ## Activity Notices
@@ -487,6 +528,7 @@ claude mcp add agentrecall agentrecall mcp
 | `get_project_rules` | Rules that always apply here (project → promoted → active). |
 | `get_reminders` | A short checklist for a kind of work. |
 | `capture_status` | The last turn-finalization result — the answer to "did AgentRecall capture anything?". |
+| `resolve_pending_capture` | Approve/reject one rule awaiting capture approval, or every rule pending in the chat (`approve_all`/`reject_all`). |
 | `search_rules` | Find rules relevant to a query. |
 | `suggest_feedback_candidate` | Detect whether a message is a reusable correction. |
 | `capture_feedback` | Save a correction in one step (`pending=true` to require approval). |
@@ -509,6 +551,8 @@ behavior (or let `agentrecall devcontainer init` scaffold it for you):
 - **When the user corrects you**, call `suggest_feedback_candidate`, then
   `capture_feedback` for reusable lessons.
 - **After a PR review**, pass comments to `import_pr_comments`.
+- **When a capture shows "Awaiting your approval"**, relay it to the user and
+  wait for yes/no (or "yes to all"), then call `resolve_pending_capture`.
 ```
 
 **For deterministic injection**, wire a Claude Code hook instead of relying on

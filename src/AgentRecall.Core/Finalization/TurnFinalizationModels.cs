@@ -35,6 +35,13 @@ public sealed record TurnFinalizationInput
     public string? RawTranscript { get; init; }
 
     /// <summary>
+    /// The host's conversation/session id, when supplied (e.g. Claude Code's Stop-hook
+    /// <c>session_id</c>). Stamped onto any rule this turn parks pending approval, so
+    /// "yes to all" can later resolve every rule awaiting approval in this same chat.
+    /// </summary>
+    public string? SessionId { get; init; }
+
+    /// <summary>
     /// The semantic judge's verdict for the turn, when the host supplied it on the payload. The
     /// default host-supplied judge returns exactly this; a <c>null</c> verdict means the judge is
     /// unavailable and the turn is skipped (never keyword-captured).
@@ -65,6 +72,14 @@ public sealed record FinalizedLesson
 
     /// <summary>An optional note (e.g. why it was suggested rather than captured).</summary>
     public string? Note { get; init; }
+
+    /// <summary>
+    /// True when the rule is stored <see cref="RuleStatus.Pending"/> and needs the user's
+    /// yes/no (or "yes to all") before it counts as approved memory — either because the
+    /// judge itself was only confident enough to suggest it, or because it would have been
+    /// auto-captured but the default approval gate parked it instead.
+    /// </summary>
+    public bool AwaitingApproval { get; init; }
 }
 
 /// <summary>A candidate AgentRecall stored nothing for, with the reason.</summary>

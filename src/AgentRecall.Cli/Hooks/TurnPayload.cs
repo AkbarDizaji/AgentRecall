@@ -51,6 +51,7 @@ public static class TurnPayload
         var cwd = NonEmpty(AsString(obj["cwd"])) ?? SafeCurrentDirectory();
         var source = NonEmpty(AsString(obj["source"])) ?? "stop_hook";
         var accepted = AsBool(obj["accepted"]);
+        var sessionId = NonEmpty(AsString(obj["session_id"]));
 
         var (userText, assistantText, rawTranscript) = ResolveText(obj, diagnostics);
         var repository = RepositoryName(cwd);
@@ -65,6 +66,7 @@ public static class TurnPayload
             ScopeLevel = repository is null ? ScopeLevel.Global : ScopeLevel.Repository,
             ScopeValue = repository,
             RawTranscript = rawTranscript,
+            SessionId = sessionId,
             SuppliedJudgment = ParseJudgment(obj["judgment"], diagnostics),
             SuppliedDocOpportunity = ParseDocOpportunity(obj["doc_opportunity"], diagnostics),
         };
