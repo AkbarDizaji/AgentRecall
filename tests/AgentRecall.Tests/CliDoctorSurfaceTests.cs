@@ -97,7 +97,30 @@ public class CliDoctorSurfaceTests
             Assert.Equal(0, code);
             Assert.Contains("Claude Code hooks", output, StringComparison.Ordinal);
             Assert.Contains("not fully wired", output, StringComparison.Ordinal);
-            Assert.Contains("agentrecall devcontainer init", output, StringComparison.Ordinal);
+            Assert.Contains("agentrecall claude-code init", output, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Doctor_GitRepoNeverOptedIn_WarnsInsteadOfSkipping()
+    {
+        var root = NewTempProject();
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(root, ".git"));
+
+            await using var db = await NewDbAsync();
+
+            var (code, output) = await RunAsync(db, "doctor", "--offline", "--project", root);
+
+            Assert.Equal(0, code);
+            Assert.Contains("Claude Code hooks", output, StringComparison.Ordinal);
+            Assert.Contains("not wired for this project", output, StringComparison.Ordinal);
+            Assert.Contains("agentrecall claude-code init", output, StringComparison.Ordinal);
         }
         finally
         {

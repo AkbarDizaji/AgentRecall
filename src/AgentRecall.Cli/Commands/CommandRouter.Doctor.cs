@@ -143,15 +143,19 @@ public static partial class CommandRouter
     }
 
     /// <summary>
-    /// Checks Claude Code hook wiring, but only for a project that has already opted in
-    /// (a <c>.claude</c> directory or <c>CLAUDE.md</c> present) — otherwise returns null so
-    /// running <c>doctor</c> outside a Claude Code project doesn't report a false problem.
+    /// Checks Claude Code hook wiring. Reported for any project that has either already
+    /// opted in (a <c>.claude</c> directory or <c>CLAUDE.md</c> present) or looks like one
+    /// that could (a <c>.git</c> directory present) — a repo is the common case where a
+    /// missing wire-up would otherwise go unnoticed. Returns null only outside any
+    /// recognizable project (e.g. a scratch directory), so `doctor` there doesn't report a
+    /// false problem.
     /// </summary>
     private static DoctorCheck? CheckHooks(string projectRoot, bool fix)
     {
-        var claudeDirPresent = Directory.Exists(Path.Combine(projectRoot, ".claude"));
-        var claudeMdPresent = File.Exists(Path.Combine(projectRoot, Devcontainer.DevcontainerScaffolder.ClaudeMdRelativePath));
-        if (!claudeDirPresent && !claudeMdPresent)
+        var everOptedIn = Directory.Exists(Path.Combine(projectRoot, ".claude"))
+            || File.Exists(Path.Combine(projectRoot, Devcontainer.DevcontainerScaffolder.ClaudeMdRelativePath));
+        var looksLikeAProject = everOptedIn || Directory.Exists(Path.Combine(projectRoot, ".git"));
+        if (!looksLikeAProject)
         {
             return null;
         }
@@ -185,8 +189,10 @@ public static partial class CommandRouter
                 : new DoctorCheck("Claude Code hooks", DoctorStatus.Fail, $"could not wire hooks in {settingsPath}");
         }
 
-        return new DoctorCheck("Claude Code hooks", DoctorStatus.Warn, $"not fully wired in {settingsPath}",
-            "agentrecall devcontainer init");
+        var message = everOptedIn
+            ? $"not fully wired in {settingsPath}"
+            : "not wired for this project — automatic recall/capture won't run";
+        return new DoctorCheck("Claude Code hooks", DoctorStatus.Warn, message, "agentrecall claude-code init");
     }
 
     private static async Task<DoctorCheck> CheckVersionAsync(bool fix, CancellationToken cancellationToken)

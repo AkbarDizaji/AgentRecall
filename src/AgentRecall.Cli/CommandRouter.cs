@@ -78,6 +78,7 @@ public static partial class CommandRouter
             ["-h"] = help,
             ["init"] = new DelegateCommand((_, s, o, l, ct) => InitAsync(s, o, l, ct)),
             ["devcontainer"] = new DelegateCommand((a, _, o, _, _) => Task.FromResult(DevcontainerInit(a, o))),
+            ["claude-code"] = new DelegateCommand((a, _, o, _, _) => Task.FromResult(ClaudeCodeInit(a, o))),
             ["setup"] = new DelegateCommand((_, _, o, _, _) => Task.FromResult(SetupPath(o))),
             ["feedback"] = new DelegateCommand((a, s, o, l, ct) => FeedbackAsync(a, s, o, l, ct)),
             ["rules"] = new DelegateCommand((a, s, o, l, ct) => RulesAsync(a, s, o, l, ct)),
@@ -127,6 +128,7 @@ public static partial class CommandRouter
         {
             var path = await initializer.InitializeAsync(cancellationToken).ConfigureAwait(false);
             output.WriteLine($"Initialized AgentRecall database at: {path}");
+            output.WriteLine("Using Claude Code? Run `agentrecall claude-code init` here to enable automatic recall + capture.");
             return 0;
         }
         catch (Exception ex)
@@ -166,6 +168,8 @@ public static partial class CommandRouter
             output.WriteLine("Usage: agentrecall devcontainer init [path] [--create]");
             output.WriteLine("(wires AgentRecall's recall/capture hooks and CLAUDE.md guidance;");
             output.WriteLine(" --create also scaffolds a dev container that reinstalls it on every rebuild)");
+            output.WriteLine("Not using a dev container? `agentrecall claude-code init` does the same");
+            output.WriteLine("hook/CLAUDE.md wiring with no container scaffolding.");
             return 1;
         }
 
@@ -175,6 +179,28 @@ public static partial class CommandRouter
             ?? Directory.GetCurrentDirectory();
         var createDevcontainer = args.Any(a => string.Equals(a, "--create", StringComparison.Ordinal));
 
+        return RunScaffold(projectRoot, createDevcontainer, output);
+    }
+
+    private static int ClaudeCodeInit(string[] args, TextWriter output)
+    {
+        var sub = args.Length > 0 ? args[0] : string.Empty;
+        if (sub != "init")
+        {
+            output.WriteLine("Usage: agentrecall claude-code init [path]");
+            output.WriteLine("(wires AgentRecall's recall/capture hooks and CLAUDE.md guidance for Claude Code —");
+            output.WriteLine(" no dev container scaffolding; use `agentrecall devcontainer init --create` for that)");
+            return 1;
+        }
+
+        var projectRoot = args.Skip(1).FirstOrDefault(a => !a.StartsWith("--", StringComparison.Ordinal))
+            ?? Directory.GetCurrentDirectory();
+
+        return RunScaffold(projectRoot, createDevcontainer: false, output);
+    }
+
+    private static int RunScaffold(string projectRoot, bool createDevcontainer, TextWriter output)
+    {
         try
         {
             var result = Devcontainer.DevcontainerScaffolder.Init(projectRoot, createDevcontainer);
@@ -2675,9 +2701,10 @@ public static partial class CommandRouter
         output.WriteLine("Commands:");
         output.WriteLine("  init                 Create the local data directory and database");
         output.WriteLine("  setup                Ensure the .NET tools directory is on your PATH");
-        output.WriteLine("  devcontainer init    Wire AgentRecall's hooks + CLAUDE.md guidance; pass");
-        output.WriteLine("                       --create to also scaffold a dev container that");
-        output.WriteLine("                       reinstalls it on every rebuild");
+        output.WriteLine("  claude-code init     Wire AgentRecall's hooks + CLAUDE.md guidance for");
+        output.WriteLine("                       Claude Code (no dev container scaffolding)");
+        output.WriteLine("  devcontainer init    Same wiring, plus --create scaffolds a dev container");
+        output.WriteLine("                       that reinstalls it on every rebuild");
         output.WriteLine("  feedback add         Record feedback and extract a pending rule");
         output.WriteLine("  rules list           List all rules (--status <status>, e.g. Pending)");
         output.WriteLine("  rules show <id>      Show a single rule in detail");

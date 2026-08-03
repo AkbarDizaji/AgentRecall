@@ -863,9 +863,36 @@ public class CliCommandSurfaceTests
         Directory.CreateDirectory(Path.Combine(dir, ".git"));
         try
         {
-            var (code, output) = await RunAsync(db, "devcontainer", "init", dir);
+    var (code, output) = await RunAsync(db, "devcontainer", "init", dir);
             Assert.Equal(0, code);
             Assert.False(string.IsNullOrWhiteSpace(output));
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    // ---- claude-code ------------------------------------------------------------
+
+    [Fact]
+    public async Task ClaudeCode_Usage_And_Init_NeverScaffoldsADevcontainer()
+    {
+        await using var db = await NewDbAsync();
+
+        var (usageCode, usageOut) = await RunAsync(db, "claude-code");
+        Assert.Equal(1, usageCode);
+        Assert.Contains("Usage: agentrecall claude-code init", usageOut);
+
+        var dir = Path.Combine(Path.GetTempPath(), $"agentrecall-cc-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var (code, output) = await RunAsync(db, "claude-code", "init", dir);
+            Assert.Equal(0, code);
+            Assert.True(Directory.Exists(Path.Combine(dir, ".claude")));
+            Assert.True(File.Exists(Path.Combine(dir, "CLAUDE.md")));
+            Assert.False(Directory.Exists(Path.Combine(dir, ".devcontainer")));
         }
         finally
         {
