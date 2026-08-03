@@ -4,6 +4,29 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0] - 2026-08-03
+
+### Added
+- **`agentrecall claude-code init`.** A plain alias for wiring AgentRecall's
+  recall/capture hooks and `CLAUDE.md` guidance into a Claude Code project —
+  the same wiring `devcontainer init` already did, but under a name that
+  doesn't read as container-specific and is easy to skip in a project that
+  isn't containerized. `devcontainer init` is unchanged and still does this
+  wiring too, plus dev container scaffolding with `--create`.
+- **`agentrecall init` now points at `claude-code init`.** A one-line hint
+  printed right after the database is created, so the very first command a
+  new user runs surfaces the follow-up step Claude Code integration needs.
+
+### Changed
+- **`doctor` now warns about missing hook wiring in any git repository**, not
+  only in projects that had already partially opted in. Previously, a project
+  that had never created a `.claude` directory or `CLAUDE.md` got a clean "All
+  checks passed" from `doctor` even though recall/capture were never wired —
+  the check silently skipped itself precisely in the situation a project in
+  that state would never escape on its own. It now reports a warning (pointing
+  at `claude-code init`) inside any git repository instead, and `--fix` wires
+  it automatically as before.
+
 ## [2.5.0] - 2026-07-31
 
 ### Changed
