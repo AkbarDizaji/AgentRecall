@@ -10,6 +10,8 @@ failures you run into while coding into reusable rules, then serves the right
 ones back — on the command line or directly to Claude Code over MCP. Everything
 stays on your machine: no cloud sync, no web UI, no API keys.
 
+![agentrecall feedback add, then agentrecall search finding it again](https://raw.githubusercontent.com/AkbarDizaji/AgentRecall/main/docs/assets/quickstart.png)
+
 ## Contents
 
 - [What it does](#what-it-does)
@@ -57,6 +59,8 @@ stays on your machine: no cloud sync, no web UI, no API keys.
   rules to context on every matching prompt — not just when the model
   remembers to ask.
 
+![Two rules disagree; the policy engine picks the higher-confidence, more recent one and explains why](https://raw.githubusercontent.com/AkbarDizaji/AgentRecall/main/docs/assets/conflict-resolution.png)
+
 ## Install
 
 AgentRecall is a .NET global tool. Install the [.NET SDK](https://dotnet.microsoft.com/download)
@@ -87,26 +91,46 @@ iwr -useb https://raw.githubusercontent.com/AkbarDizaji/AgentRecall/main/scripts
 You can also fix PATH any time with `agentrecall setup`. Update/remove later
 with `dotnet tool update -g AgentRecall` / `dotnet tool uninstall -g AgentRecall`.
 
+### Enable Claude Code integration
+
+`agentrecall init` only creates the database. **Recall and capture inside Claude
+Code need a separate, one-time step in each project** — it wires the
+`UserPromptSubmit`/`PreToolUse`/`Stop` hooks into `.claude/settings.json` and
+appends the `CLAUDE.md` guidance block (merged in, never overwritten):
+
+```bash
+agentrecall claude-code init
+```
+
+**Re-run this after every AgentRecall upgrade**: if the guidance block has
+drifted from what the new version ships (e.g. a newer capture-judge or
+document-opportunity contract), the re-run refreshes it in place — a no-op
+when it's already current.
+
+Forgot to run it? `agentrecall doctor` checks for this in any git repository
+and tells you how to fix it (`--fix` wires it automatically):
+
+```
+⚠ Claude Code hooks: not wired for this project — automatic recall/capture won't run
+    fix: agentrecall claude-code init
+```
+
 ### Dev containers
 
 A global tool lives under `~/.dotnet/tools`, which is wiped on container
-rebuild. Run once per project to make the install and hook wiring survive
-rebuilds:
+rebuild. `agentrecall devcontainer init` does everything `claude-code init`
+does, plus keeps a dev container's reinstall step in sync — run it instead
+when you use one:
 
 ```bash
 agentrecall devcontainer init
 ```
 
-This wires the `UserPromptSubmit` hook (see [Claude Code integration](#claude-code-integration))
-and appends the `CLAUDE.md` guidance block — merged in, never overwritten. **Re-run this after
-every AgentRecall upgrade**: if the guidance block has drifted from what the new version ships
-(e.g. a newer capture-judge or document-opportunity contract), the re-run refreshes it in place,
-so existing projects always get the latest instructions without hand-editing `CLAUDE.md`; when
-it's already current, the re-run is a true no-op. Dev-container scaffolding itself is separate and
-**opt-in**: if a `devcontainer.json` already exists it's wired in automatically;
-if not, none is created — pass `--create` to generate one that reinstalls
-AgentRecall, persists data on a named volume, and re-registers the MCP server
-on every rebuild.
+Dev-container scaffolding itself is separate and **opt-in**: if a
+`devcontainer.json` already exists it's wired in automatically; if not, none
+is created — pass `--create` to generate one that reinstalls AgentRecall,
+persists data on a named volume, and re-registers the MCP server on every
+rebuild.
 
 ## Quick start
 
@@ -147,9 +171,17 @@ agentrecall rules list
 agentrecall rules show 1
 ```
 
-**Curate.** Captured rules are **Active** by default. Lifecycle states are
-`Draft → Pending → Active → Promoted`, plus dead-end states `Superseded`,
-`Retired`, `Archived` (excluded from search and dedup):
+**Curate.** Captured rules are **Active** by default. Rules move through a
+small set of lifecycle states:
+
+| State | Meaning |
+| --- | --- |
+| `Draft` | Not yet validated. |
+| `Pending` | Awaiting your approval (see [Capture pipeline](#capture-pipeline)). |
+| `Active` | Live and searchable — the default for captured rules. |
+| `Promoted` | Active and elevated in ranking. |
+| `Superseded` | Replaced by a newer rule (kept for the audit trail). |
+| `Retired` / `Archived` | Excluded from search and dedup. |
 
 ```bash
 agentrecall rules promote 1     # Active   → Promoted
@@ -195,7 +227,8 @@ agentrecall eval retrieval --dataset ./my-eval.json
 | --- | --- |
 | `init` | Create the local data directory and database. |
 | `setup` | Ensure the .NET tools directory is on your PATH (runs automatically on first use). |
-| `devcontainer init` | Wire AgentRecall's hooks + CLAUDE.md guidance; `--create` also scaffolds a dev container (optional `[path]`). |
+| `claude-code init` | Wire AgentRecall's hooks + CLAUDE.md guidance for Claude Code — no dev container involved (optional `[path]`). |
+| `devcontainer init` | Same wiring as `claude-code init`; `--create` also scaffolds a dev container (optional `[path]`). |
 | `feedback add` | Record feedback and extract a rule from it. |
 | `search "<query>"` | Search rules by keyword (`--scope-level`, `--scope-value`, `--limit`). |
 | `rules list` | List all rules (`--status <status>`). |
@@ -291,6 +324,8 @@ Unlike `search` (which rule matches *this* task?) or `report` (metrics), DNA is
 a **curated, deterministic narrative** of the whole corpus — no LLM calls, no
 embeddings, same inputs always produce the same output.
 
+![agentrecall dna --top 2, showing Core Principles, Repository Conventions, Testing Patterns and Agent Warnings](https://raw.githubusercontent.com/AkbarDizaji/AgentRecall/main/docs/assets/project-dna.png)
+
 ```bash
 agentrecall dna                                    # human-readable
 agentrecall dna --markdown --output PROJECT_DNA.md # for onboarding docs
@@ -374,8 +409,13 @@ capture anything.
 - **Explicit save/do-not-save requests are always respected**, even for narrow
   or stylistic rules — and always bypass the approval gate below (the user
   already said yes).
-- **Confidence maps to outcome:** `≥0.80` captures, `0.55–0.79` suggests a
-  Pending rule, `<0.55` skips.
+- **Confidence maps to outcome:**
+
+  | Confidence | Outcome |
+  | --- | --- |
+  | `≥ 0.80` | Captures (still Pending your approval — see below) |
+  | `0.55 – 0.79` | Suggests a Pending rule |
+  | `< 0.55` | Skips |
 - **Duplicates are reinforced, not duplicated**; an explicit supersede replaces
   the prior rule.
 - **If the judge is unavailable, automatic capture is skipped** for that turn —
@@ -405,6 +445,8 @@ Awaiting your approval:
 Reply `yes`/`no` for a rule above, or `yes to all` to approve every rule
 awaiting approval in this chat.
 ```
+
+![agentrecall finalize-turn output showing a captured rule awaiting approval](https://raw.githubusercontent.com/AkbarDizaji/AgentRecall/main/docs/assets/approval-gate.png)
 
 Reply in chat and Claude calls `resolve_pending_capture` (`approve`/`reject`
 for one rule, `approve_all`/`reject_all` for everything still pending in the
@@ -461,13 +503,13 @@ user across two different surfaces:
   [y] Remember   [n] Ignore   [v] View details
   ```
 
-Values: `Auto` (default — asks for every Stop-hook capture; asks only
-ambiguous suggestions for manual `feedback add`), `Ask` (manual `feedback add`
-only: also downgrades a borderline auto-capture to a prompt; identical to
-`Auto` for the Stop-hook gate, since everything there is already asked),
-`Silent` (never prompt anywhere — **the global bypass**: a Stop-hook capture
-is stored immediately per the judge's decision, and a manual suggestion is
-parked Pending with no prompt). Approve or ignore later the normal way:
+| Value | Stop-hook capture gate | Manual `feedback add` |
+| --- | --- | --- |
+| `Auto` (default) | Asks for every capture | Asks only on ambiguous (`SuggestCapture`) results |
+| `Ask` | Same as `Auto` — everything there is already asked | Same as `Auto`, plus downgrades a borderline auto-capture to a prompt |
+| `Silent` (**global bypass**) | Stores immediately per the judge's decision, no prompt | Parks Pending with no prompt |
+
+Approve or ignore later the normal way:
 
 ```bash
 agentrecall rules list --status Pending
@@ -577,6 +619,8 @@ otherwise), retrieves rules scoped to the repository, and prepends a compact
 `## AgentRecall Technical Context` block (Must Follow / Warnings / Preferred
 Patterns / Anti Patterns / Source Rules — empty sections omitted). It never
 blocks Claude Code: on error it logs to stderr and injects nothing.
+
+![The UserPromptSubmit hook prepending Must Follow, Warnings and Preferred Patterns sections to context](https://raw.githubusercontent.com/AkbarDizaji/AgentRecall/main/docs/assets/context-injection.png)
 
 Troubleshoot by running the hook by hand:
 
