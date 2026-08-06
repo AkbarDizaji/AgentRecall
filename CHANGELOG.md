@@ -4,6 +4,20 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.0] - 2026-08-06
+
+### Added
+- **`report_bad_rule` MCP tool and `agentrecall rules report-bad <id>`.** Lets a client
+  archive a rule on the spot the moment it turns out to be wrong, corrupted, or otherwise
+  unusable, instead of waiting on the outcome-tracking pipeline's gradual confidence decay
+  to eventually retire it.
+
+### Changed
+- **Capture-suggestion prompts are harder to miss.** The Turn Memory Summary's "Awaiting
+  your approval" section and the interactive "possible lesson detected" prompt are now
+  wrapped in `---` separators with a single leading 🚨, instead of blending into surrounding
+  text.
+
 ## [2.6.0] - 2026-08-03
 
 ### Added
