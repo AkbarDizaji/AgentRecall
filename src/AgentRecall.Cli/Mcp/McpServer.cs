@@ -34,6 +34,7 @@ public sealed class McpServer
         new SearchRulesTool(),
         new GetRuleTool(),
         new DeleteRuleTool(),
+        new ReportBadRuleTool(),
         new AddFeedbackTool(),
         new GetProjectRulesTool(),
         new GetRelevantContextTool(),

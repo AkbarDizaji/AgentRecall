@@ -101,6 +101,28 @@ public sealed class RuleLifecycleService : IRuleLifecycleService
         return archived;
     }
 
+    public async Task<RecallRule> ReportBadAsync(int id, string? reason = null, CancellationToken cancellationToken = default)
+    {
+        var rule = await GetOrThrowAsync(id, cancellationToken).ConfigureAwait(false);
+
+        rule.Status = RuleStatus.Archived;
+        var archived = await _rules.UpdateAsync(rule, cancellationToken).ConfigureAwait(false);
+
+        var details = string.IsNullOrWhiteSpace(reason)
+            ? $"Rule #{archived.Id} reported as bad and archived."
+            : $"Rule #{archived.Id} reported as bad and archived: {reason}";
+
+        await _events.AddAsync(new RecallEvent
+        {
+            Type = RecallEventType.RuleReportedBad,
+            RuleId = archived.Id,
+            Trigger = "report-bad",
+            Details = details,
+        }, cancellationToken).ConfigureAwait(false);
+
+        return archived;
+    }
+
     public async Task<RecallRule> DeleteAsync(int id, bool force = false, CancellationToken cancellationToken = default)
     {
         var rule = await GetOrThrowAsync(id, cancellationToken).ConfigureAwait(false);

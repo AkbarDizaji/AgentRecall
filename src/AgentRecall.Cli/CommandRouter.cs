@@ -550,6 +550,31 @@ public static partial class CommandRouter
                 }
             }
 
+            case "report-bad":
+            {
+                if (args.Length < 2 || !int.TryParse(args[1], out var id))
+                {
+                    output.WriteLine("Usage: agentrecall rules report-bad <id> [--reason <text>]");
+                    return 1;
+                }
+
+                var reportOptions = ParseOptions(args[2..]);
+                reportOptions.TryGetValue("reason", out var reason);
+
+                var lifecycle = scope.ServiceProvider.GetRequiredService<IRuleLifecycleService>();
+                try
+                {
+                    var archived = await lifecycle.ReportBadAsync(id, reason, cancellationToken).ConfigureAwait(false);
+                    output.WriteLine($"Rule #{archived.Id} reported as bad and is now {archived.Status}.");
+                    return 0;
+                }
+                catch (KeyNotFoundException ex)
+                {
+                    output.WriteLine(ex.Message);
+                    return 1;
+                }
+            }
+
             case "delete":
             {
                 if (args.Length < 2 || !int.TryParse(args[1], out var id))
@@ -607,6 +632,7 @@ public static partial class CommandRouter
                 output.WriteLine("  agentrecall rules promote <id>");
                 output.WriteLine("  agentrecall rules supersede <oldId> <newId>");
                 output.WriteLine("  agentrecall rules archive <id>");
+                output.WriteLine("  agentrecall rules report-bad <id> [--reason <text>]");
                 output.WriteLine("  agentrecall rules delete <id> [--force]");
                 output.WriteLine("  agentrecall rules conflicts [--scope-level <level>] [--scope-value <text>] [--json]");
                 output.WriteLine("  agentrecall rules explain <id>");

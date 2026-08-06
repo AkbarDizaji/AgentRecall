@@ -24,6 +24,14 @@ public interface IRuleLifecycleService
     Task<RecallRule> ArchiveAsync(int id, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Any status → Archived, immediately, because a client encountered the rule and found
+    /// it wrong, corrupted, or otherwise unusable. Unlike <see cref="ArchiveAsync"/>'s routine
+    /// retirement, this is a negative signal from actual use and is recorded as such in the
+    /// event ledger so it can be told apart from ordinary lifecycle archiving.
+    /// </summary>
+    Task<RecallRule> ReportBadAsync(int id, string? reason = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Increases a rule's confidence by <paramref name="amount"/> (capped at 1.0)
     /// and auto-promotes it once the promotion threshold is reached.
     /// </summary>

@@ -119,6 +119,9 @@ public enum RecallEventType
 
     /// <summary>A rule was permanently removed from the database.</summary>
     RuleDeleted = 9,
+
+    /// <summary>A client reported a rule as wrong, corrupted, or unusable; it was archived on the spot.</summary>
+    RuleReportedBad = 10,
 }
 
 /// <summary>
