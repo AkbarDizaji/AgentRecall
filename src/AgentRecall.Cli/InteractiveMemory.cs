@@ -221,7 +221,8 @@ public static class InteractiveMemory
 
     private static void WritePrompt(TextWriter output, FeedbackResult result, RecallRule rule)
     {
-        output.WriteLine($"{ActivityNoticeRenderer.Badge} possible lesson detected.");
+        output.WriteLine("---");
+        output.WriteLine("🚨 possible lesson detected.");
         output.WriteLine();
         output.WriteLine("Candidate:");
         output.WriteLine(rule.RuleText);
@@ -230,6 +231,7 @@ public static class InteractiveMemory
         output.WriteLine(WhyLine(result));
         output.WriteLine();
         WriteActions(output);
+        output.WriteLine("---");
     }
 
     private static void WriteActions(TextWriter output)

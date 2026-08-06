@@ -175,7 +175,7 @@ public static class TurnSummaryRenderer
             return;
         }
 
-        sb.Append("\n\nAwaiting your approval:");
+        sb.Append("\n\n---\n🚨 **Awaiting your approval:**");
         foreach (var rule in pending.Take(MaxItems))
         {
             sb.Append("\n- #").Append(rule.Id).Append(' ').Append(rule.Title);
@@ -183,7 +183,8 @@ public static class TurnSummaryRenderer
 
         AppendOverflow(sb, pending.Count);
         sb.Append("\nReply `yes`/`no` for a rule above, or `yes to all` to approve every rule ")
-            .Append("awaiting approval in this chat.");
+            .Append("awaiting approval in this chat.")
+            .Append("\n---");
     }
 
     private static void AppendSkipSection(StringBuilder sb, IReadOnlyList<TurnSummarySkip> skips)
