@@ -4,6 +4,14 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Mutation testing runs in CI.** A `mutation-test` job in `.github/workflows/ci.yml`
+  runs `dotnet stryker` against `AgentRecall.Core` on every push/PR and uploads the
+  HTML report as a build artifact. It's exploratory (`continue-on-error: true`), not a
+  merge gate, since the existing `stryker-config.json` sets `break: 0`.
+
 ## [2.7.0] - 2026-08-06
 
 ### Added

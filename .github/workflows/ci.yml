@@ -82,3 +82,51 @@ jobs:
           name: test-results
           path: TestResults/**/*.trx
           if-no-files-found: warn
+
+  mutation-test:
+    name: Mutation testing (Stryker)
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    # Mutation testing is exploratory, not a merge gate: report the score without
+    # blocking the pipeline on it.
+    continue-on-error: true
+
+    env:
+      DOTNET_NOLOGO: "true"
+      DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+      DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "true"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Restore dotnet tools
+        run: dotnet tool restore
+
+      - name: Restore
+        run: dotnet restore AgentRecall.slnx
+
+      - name: Run Stryker
+        working-directory: src/AgentRecall.Core
+        run: dotnet stryker --config-file stryker-config.json
+
+      - name: Upload mutation report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-report
+          path: src/AgentRecall.Core/StrykerOutput/**/reports/*
+          if-no-files-found: warn
