@@ -4,6 +4,16 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **`finalize-turn` rejected valid `target_existing_rule_id` values.** `TurnPayload`'s
+  JSON parser only accepted the id as a literal JSON integer; a whole-number double (e.g.
+  `43.0`, which some JSON encoders always emit for numeric fields) silently parsed to
+  `null`, so `ReinforceExisting`/`SupersedeExisting` verdicts failed validation with
+  "missing target_existing_rule_id" even though a valid id was sent. `AsInt` now also
+  accepts whole-number doubles and numeric strings.
+
 ## [2.7.1] - 2026-08-08
 
 ### Added

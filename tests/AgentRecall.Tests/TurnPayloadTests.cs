@@ -257,6 +257,60 @@ public class TurnPayloadTests
         Assert.Null(TurnPayload.Parse(payload, Discard)!.SuppliedJudgment);
     }
 
+    // target_existing_rule_id is a plain int in NormalizedRule, but some JSON encoders
+    // (JavaScript's JSON.stringify, jq, etc.) always emit numeric fields as a double, so a
+    // whole-number double like 43.0 must still be read as id 43 rather than dropped as null.
+    [Theory]
+    [InlineData("43")]
+    [InlineData("43.0")]
+    [InlineData("\"43\"")]
+    public void Parse_ReinforceTargetId_AcceptsWholeNumberVariants(string rawTargetId)
+    {
+        var payload = $$"""
+        {
+          "prompt": "a turn",
+          "cwd": "/repo/project",
+          "judgment": {
+            "decision": "ReinforceExisting",
+            "memory_type": "EngineeringLesson",
+            "confidence": 0.9,
+            "capture_reason": "RepeatedMistake",
+            "target_existing_rule_id": {{rawTargetId}},
+            "dedupe_notes": "same rule as #43"
+          }
+        }
+        """;
+
+        var verdict = TurnPayload.Parse(payload, Discard)!.SuppliedJudgment;
+
+        Assert.NotNull(verdict);
+        Assert.Equal(43, verdict!.TargetExistingRuleId);
+    }
+
+    [Fact]
+    public void Parse_ReinforceTargetId_NonNumericStringStaysNull()
+    {
+        var payload = """
+        {
+          "prompt": "a turn",
+          "cwd": "/repo/project",
+          "judgment": {
+            "decision": "ReinforceExisting",
+            "memory_type": "EngineeringLesson",
+            "confidence": 0.9,
+            "capture_reason": "RepeatedMistake",
+            "target_existing_rule_id": "rule-43",
+            "dedupe_notes": "same rule as #43"
+          }
+        }
+        """;
+
+        var verdict = TurnPayload.Parse(payload, Discard)!.SuppliedJudgment;
+
+        Assert.NotNull(verdict);
+        Assert.Null(verdict!.TargetExistingRuleId);
+    }
+
     [Fact]
     public void Parse_OversizedJudgment_IsIgnored()
     {

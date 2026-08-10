@@ -429,8 +429,35 @@ public static class TurnPayload
     private static bool? AsBool(JsonNode? node) =>
         node is JsonValue value && value.TryGetValue<bool>(out var flag) ? flag : null;
 
-    private static int? AsInt(JsonNode? node) =>
-        node is JsonValue value && value.TryGetValue<int>(out var number) ? number : null;
+    // Tolerant of numbers that don't round-trip as a JSON integer literal: some JSON encoders
+    // (JavaScript's JSON.stringify, jq, etc.) always emit numeric fields as a double, so
+    // target_existing_rule_id can arrive as 43.0 rather than 43. A whole-number double is still
+    // a valid id; only fractional values or non-numeric strings are rejected.
+    private static int? AsInt(JsonNode? node)
+    {
+        if (node is not JsonValue value)
+        {
+            return null;
+        }
+
+        if (value.TryGetValue<int>(out var number))
+        {
+            return number;
+        }
+
+        if (value.TryGetValue<double>(out var real) && !double.IsNaN(real) && !double.IsInfinity(real) &&
+            real == Math.Floor(real) && real >= int.MinValue && real <= int.MaxValue)
+        {
+            return (int)real;
+        }
+
+        if (value.TryGetValue<string>(out var text) && int.TryParse(text, out var parsed))
+        {
+            return parsed;
+        }
+
+        return null;
+    }
 
     private static double? AsDouble(JsonNode? node) =>
         node is JsonValue value && value.TryGetValue<double>(out var number) ? number : null;
