@@ -4,6 +4,15 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Mutation testing no longer slows down every push/PR.** The `mutation-test` job in
+  `.github/workflows/ci.yml` now runs Stryker with `--since:origin/main`, mutating only
+  files changed vs `main` instead of the whole `AgentRecall.Core` project. A new
+  `mutation-nightly.yml` workflow (cron + `workflow_dispatch`) runs the full, unscoped
+  mutation suite once a day and uploads its own report artifact.
+
 ## [2.7.2] - 2026-08-10
 
 ### Fixed

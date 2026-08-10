@@ -99,6 +99,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Full history so Stryker's --since can diff against origin/main.
+          fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -119,9 +122,11 @@ jobs:
       - name: Restore
         run: dotnet restore AgentRecall.slnx
 
-      - name: Run Stryker
+      - name: Run Stryker (changed files only)
+        # Full-project mutation runs are slow; on every push/PR only mutate what
+        # changed vs main. See mutation-nightly.yml for the full, unscoped run.
         working-directory: src/AgentRecall.Core
-        run: dotnet stryker --config-file stryker-config.json
+        run: dotnet stryker --config-file stryker-config.json --since:origin/main
 
       - name: Upload mutation report
         if: ${{ !cancelled() }}
