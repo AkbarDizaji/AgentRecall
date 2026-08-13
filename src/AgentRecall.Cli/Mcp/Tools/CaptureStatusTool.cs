@@ -31,6 +31,11 @@ public sealed class CaptureStatusTool : IMcpTool
                 ["type"] = "string",
                 ["description"] = "Optional working directory to scope the lookup to.",
             },
+            ["session_id"] = new JsonObject
+            {
+                ["type"] = "string",
+                ["description"] = "Optional chat id, so an outstanding judgment request is matched to this chat.",
+            },
         },
     };
 
@@ -40,19 +45,33 @@ public sealed class CaptureStatusTool : IMcpTool
         var finalizer = services.GetRequiredService<ITurnFinalizer>();
         var result = await finalizer.GetLastAsync(cwd, cancellationToken).ConfigureAwait(false);
 
+        // A turn whose judgment is still outstanding has no finalization of its own yet, so report
+        // that state instead of the previous turn's outcome.
+        var awaiting = await JudgmentStatus
+            .FindAwaitingAsync(services, McpArgs.GetString(arguments, "session_id"), cwd, cancellationToken)
+            .ConfigureAwait(false);
+
         if (result is null)
         {
             return new JsonObject
             {
-                ["found"] = false,
-                ["summary"] = TurnFinalizationFormatter.NoFinalization,
+                ["found"] = awaiting is not null,
+                ["awaiting_judgment"] = awaiting is not null,
+                ["awaiting_request_id"] = awaiting?.Id,
+                ["summary"] = awaiting is null
+                    ? TurnFinalizationFormatter.NoFinalization
+                    : TurnFinalizationFormatter.AwaitingJudgmentLine(awaiting.Id),
             };
         }
 
         return new JsonObject
         {
             ["found"] = true,
-            ["summary"] = TurnFinalizationFormatter.SummaryLine(result),
+            ["awaiting_judgment"] = awaiting is not null,
+            ["awaiting_request_id"] = awaiting?.Id,
+            ["summary"] = awaiting is null
+                ? TurnFinalizationFormatter.SummaryLine(result)
+                : TurnFinalizationFormatter.AwaitingJudgmentLine(awaiting.Id),
             ["captured"] = Lessons(result.Captured),
             ["suggested"] = Lessons(result.Suggested),
             ["skipped"] = Skips(result.Skipped),

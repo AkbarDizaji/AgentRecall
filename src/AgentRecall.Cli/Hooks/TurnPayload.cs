@@ -53,6 +53,11 @@ public static class TurnPayload
         var accepted = AsBool(obj["accepted"]);
         var sessionId = NonEmpty(AsString(obj["session_id"]));
 
+        // Read as a courtesy, not as a dependency: `stop_hook_active` is not part of the documented
+        // Stop payload, so the enforced-judgment loop guard is AgentRecall's own attempt counter.
+        // When a host does send it, it only ever means "do not ask again on this turn".
+        var hostResumed = AsBool(obj["stop_hook_active"]) ?? false;
+
         var (userText, assistantText, rawTranscript) = ResolveText(obj, diagnostics);
         var repository = RepositoryName(cwd);
 
@@ -69,12 +74,25 @@ public static class TurnPayload
             SessionId = sessionId,
             SuppliedJudgment = ParseJudgment(obj["judgment"], diagnostics),
             SuppliedDocOpportunity = ParseDocOpportunity(obj["doc_opportunity"], diagnostics),
+            HostResumedTurn = hostResumed,
         };
+    }
+
+    /// <summary>
+    /// Parses a judgment object on its own — the same verdict shape the Stop-hook payload carries,
+    /// used by the <c>submit_capture_judgment</c> MCP tool so a verdict submitted mid-turn is read
+    /// by exactly the code that reads one arriving on a payload. Returns <c>null</c> for anything
+    /// missing, oversized, or malformed; the caller never substitutes a decision of its own.
+    /// </summary>
+    public static CaptureJudgeVerdict? ParseVerdict(JsonNode? judgment, TextWriter diagnostics)
+    {
+        ArgumentNullException.ThrowIfNull(diagnostics);
+        return ParseJudgment(judgment, diagnostics);
     }
 
     // The semantic judge's verdict is produced by the host and arrives as a `judgment` object on
     // the payload. Parsing is tolerant: a missing/oversized/malformed judgment (including an
-    // unrecognised enum value) yields null — the finalizer then treats the judge as unavailable
+    // unrecognised enum value) yields null — the finalizer then treats the judgment as absent
     // and skips, never falling back to keyword capture.
     private const int JudgmentMaxLength = 20000;
 
@@ -244,12 +262,33 @@ public static class TurnPayload
     private static (string? User, string? Assistant, string? Raw) ResolveText(JsonObject root, TextWriter diagnostics)
     {
         var inlinePrompt = NonEmpty(AsString(root["prompt"]));
-        var inlineAssistant = NonEmpty(AsString(root["assistant_response"]));
+
+        // `last_assistant_message` is the documented Stop-hook field for the turn's final assistant
+        // text; prefer it over re-reading the transcript, and keep `assistant_response` for the
+        // hand-written payloads the CLI path accepts.
+        var inlineAssistant =
+            NonEmpty(AsString(root["assistant_response"])) ??
+            NonEmpty(AsString(root["last_assistant_message"]));
         if (inlinePrompt is not null || inlineAssistant is not null)
         {
+            // A Stop payload can carry the assistant text but never the prompt, so fill the missing
+            // half from the transcript rather than finalizing a half-empty turn.
+            if (inlinePrompt is null || inlineAssistant is null)
+            {
+                var (fallbackUser, fallbackAssistant, raw) = ResolveFromTranscript(root, diagnostics);
+                return (inlinePrompt ?? fallbackUser, inlineAssistant ?? fallbackAssistant, raw);
+            }
+
             return (inlinePrompt, inlineAssistant, null);
         }
 
+        return ResolveFromTranscript(root, diagnostics);
+    }
+
+    /// <summary>Reads the turn from an inline transcript string, else the referenced transcript file.</summary>
+    private static (string? User, string? Assistant, string? Raw) ResolveFromTranscript(
+        JsonObject root, TextWriter diagnostics)
+    {
         var inlineTranscript = NonEmpty(AsString(root["transcript"]));
         if (inlineTranscript is not null)
         {
@@ -378,7 +417,13 @@ public static class TurnPayload
         return sb.Length == 0 ? null : sb.ToString();
     }
 
-    /// <summary>Repository name = the nearest ancestor with a .git, else the cwd's name.</summary>
+    /// <summary>
+    /// Repository name = the nearest ancestor with a .git, else the cwd's name. Public because the
+    /// <c>submit_capture_judgment</c> tool derives the same scope for a verdict submitted mid-turn,
+    /// and a verdict must not land in a different scope than the Stop hook would have used.
+    /// </summary>
+    public static string? RepositoryScopeName(string? cwd) => RepositoryName(cwd);
+
     private static string? RepositoryName(string? cwd)
     {
         if (string.IsNullOrWhiteSpace(cwd))

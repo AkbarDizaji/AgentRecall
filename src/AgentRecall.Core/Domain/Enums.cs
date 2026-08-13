@@ -273,6 +273,13 @@ public enum ActivityType
 
     /// <summary>The host-supplied document-opportunity judge offered a document to generate.</summary>
     DocOpportunityDetected = 14,
+
+    /// <summary>
+    /// The Stop hook declined to finish a turn without a semantic capture judgment and asked the
+    /// session model to submit one. Recorded so "why did the turn resume?" is answerable from
+    /// state rather than guessed.
+    /// </summary>
+    JudgmentRequested = 15,
 }
 
 /// <summary>

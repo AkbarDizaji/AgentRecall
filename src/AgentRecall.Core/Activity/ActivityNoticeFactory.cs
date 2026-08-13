@@ -431,6 +431,40 @@ public static class ActivityNoticeFactory
         };
     }
 
+    /// <summary>
+    /// A notice for a turn AgentRecall declined to finish without its semantic judgment. Recorded so
+    /// "why did that turn resume?" is answered from state, and so a repeatedly unanswered ask is
+    /// visible in the activity log rather than invisible.
+    /// </summary>
+    public static ActivityNotice ForJudgmentRequested(int? requestId, int attempts, string source) =>
+        new()
+        {
+            Type = ActivityType.JudgmentRequested,
+            Summary = "asked the session model for this turn's capture judgment before finishing.",
+            Details =
+            [
+                requestId is { } id ? $"request #{id}, ask {attempts}" : $"ask {attempts}",
+                "awaiting submit_capture_judgment",
+            ],
+            Source = source,
+            // Dedup per ask, so one recorded ask is one line even if the hook fires twice.
+            OperationHash = requestId is null ? null : $"judgment-request:{requestId}:{attempts}",
+        };
+
+    /// <summary>
+    /// A notice for a turn that finished unblocked because enforcement itself could not run. Shares
+    /// <see cref="ActivityType.JudgmentRequested"/> — it is the same step in the turn, reported as
+    /// the failure it was — so "enforcement was skipped" is queryable instead of stderr-only.
+    /// </summary>
+    public static ActivityNotice ForJudgmentEnforcementFailed(string reason, string source) =>
+        new()
+        {
+            Type = ActivityType.JudgmentRequested,
+            Summary = "could not enforce this turn's capture judgment; finalized without blocking.",
+            Details = [Truncate(reason ?? string.Empty, LabelLength)],
+            Source = source,
+        };
+
     private static string Short(RecallRule rule)
     {
         var label = !string.IsNullOrWhiteSpace(rule.Trigger) ? rule.Trigger : rule.RuleText;

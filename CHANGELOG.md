@@ -6,7 +6,45 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **The Stop hook now enforces that a turn is judged instead of silently skipping.** A
+  substantive turn that reaches the Stop hook with no semantic capture judgment is blocked
+  once: `finalize-turn --hook` emits Claude Code's `{"decision": "block", "reason": …}`
+  response asking the session model — the judge — to submit its verdict, the turn resumes
+  and calls the new tool, and the next Stop finalizes from the recorded verdict. Previously
+  every such turn was recorded as "judge unavailable" and captured nothing, which on a host
+  where the model never self-reported meant automatic capture never ran at all.
+- **`submit_capture_judgment` MCP tool.** Submits a turn's verdict mid-turn. Its arguments
+  are the same `judgment` object the `finalize-turn` payload carries, read by the same
+  parser, so the two routes cannot drift; a `Skip` verdict is a first-class answer that
+  resolves the request. It also works unprompted (pass `prompt`/`assistant_response`) as an
+  alternative to piping a payload into `finalize-turn`.
+- **`TurnJudgmentRequest` records every ask.** The row carries the blocked turn's own text,
+  so the resumed finalization runs on the same content that was blocked (stable idempotency
+  hash and turn correlation id), and its attempt counter is the loop guard — AgentRecall
+  asks at most once per turn and never depends on an undocumented host signal. Stale rows
+  expire, so a chat that ended mid-exchange cannot mute enforcement for the next turn.
+- **Configuration:** `AgentRecall.JudgmentEnforcementMode` (`Substantive` default, `Always`,
+  or `Off` for the previous never-block behaviour),
+  `AgentRecall.JudgmentEnforcementMinTurnCharacters` (structural size floor, default 200),
+  and `AgentRecall.MaxJudgmentRequestsPerTurn` (default 1).
+
 ### Changed
+- **Finalization diagnostics distinguish the reasons nothing was captured.** New decision
+  sources `NoJudgmentSupplied` and `JudgmentRetryExhausted` separate "nobody judged this
+  turn" from "asked and never answered", and both stay distinct from a real
+  `SemanticCaptureJudge` + `Skip` rejection. The old "Semantic capture judge unavailable"
+  wording is gone: it read like an external judge service was down, and there is no such
+  service — AgentRecall makes no model or network calls. `capture-status` and the
+  `capture_status` tool now also report `awaiting_judgment` while an ask is outstanding,
+  instead of answering with the previous turn's decision.
+- **A resumed turn no longer files a second, contradictory finalization.** A blocked turn
+  says more once it resumes, so its content hash moves; an unjudged finalization of a turn
+  that already carries a recent judged verdict now returns that record instead of writing a
+  new one.
+- **The Stop payload's `last_assistant_message` is read when present**, and a payload that
+  carries only one half of the exchange fills the other half from the transcript rather
+  than finalizing a half-empty turn.
 - **Mutation testing no longer slows down every push/PR.** The `mutation-test` job in
   `.github/workflows/ci.yml` now runs Stryker with `--since:origin/main`, mutating only
   files changed vs `main` instead of the whole `AgentRecall.Core` project. A new

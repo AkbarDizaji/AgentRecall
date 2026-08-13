@@ -70,6 +70,30 @@ public interface IRuleLifecycleRecommendationRepository : IRepository<RuleLifecy
 /// <summary>Persistence for <see cref="TurnFinalization"/>.</summary>
 public interface ITurnFinalizationRepository : IRepository<TurnFinalization>
 {
+    /// <summary>
+    /// The most recent finalization for <paramref name="turnId"/> that a semantic judge actually
+    /// decided, or null when the turn has none. Used to recognise an already-judged turn without
+    /// relying on the content hash, which shifts once a blocked turn resumes and the assistant
+    /// says more.
+    /// </summary>
+    Task<TurnFinalization?> FindJudgedByTurnAsync(string turnId, CancellationToken cancellationToken = default);
+}
+
+/// <summary>Persistence for <see cref="TurnJudgmentRequest"/>.</summary>
+public interface ITurnJudgmentRequestRepository : IRepository<TurnJudgmentRequest>
+{
+    /// <summary>
+    /// The outstanding request for a chat/directory, newest first, or null when nothing is
+    /// awaiting a verdict. <paramref name="sessionId"/> is the primary key when the host supplies
+    /// one; <paramref name="cwd"/> is the fallback. Both null means "the newest outstanding
+    /// request anywhere", which is correct for a single-session machine and harmless otherwise
+    /// (the request also carries its own turn text, so a mismatch cannot rewrite another turn).
+    /// </summary>
+    Task<TurnJudgmentRequest?> FindOutstandingAsync(
+        string? sessionId, string? cwd, CancellationToken cancellationToken = default);
+
+    /// <summary>The most recent request for a turn correlation id, whatever its status.</summary>
+    Task<TurnJudgmentRequest?> FindByTurnAsync(string turnId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>Persistence for <see cref="CareerImpactCandidate"/>.</summary>

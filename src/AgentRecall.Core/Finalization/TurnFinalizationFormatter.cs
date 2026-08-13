@@ -19,6 +19,19 @@ public static class TurnFinalizationFormatter
     /// <summary>Decision-source label recorded when the semantic judge produced a verdict.</summary>
     public const string JudgeDecisionSource = TurnFinalizer.JudgeDecisionSource;
 
+    /// <summary>
+    /// The line reported while a turn's judgment is still outstanding. A blocked turn has no
+    /// finalization yet, so without this the status surfaces would answer with the previous turn's
+    /// outcome — the one thing they exist to prevent.
+    /// </summary>
+    public static string AwaitingJudgmentLine(int? requestId)
+    {
+        var request = requestId is { } id ? $" (request #{id})" : string.Empty;
+        return
+            $"AgentRecall asked for this turn's semantic capture judgment{request} and is still waiting for it. " +
+            "Call `submit_capture_judgment` with your verdict — Skip is valid — and the turn is finalized from it.";
+    }
+
     /// <summary>The multi-line, sectioned summary used by `finalize-turn` and `status`.</summary>
     public static string RenderText(TurnFinalizationResult result)
     {

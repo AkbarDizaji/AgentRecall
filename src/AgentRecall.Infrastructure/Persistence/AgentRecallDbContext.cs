@@ -21,6 +21,7 @@ public sealed class AgentRecallDbContext : DbContext
     public DbSet<LessonCandidate> LessonCandidates => Set<LessonCandidate>();
     public DbSet<RuleLifecycleRecommendation> Recommendations => Set<RuleLifecycleRecommendation>();
     public DbSet<TurnFinalization> TurnFinalizations => Set<TurnFinalization>();
+    public DbSet<TurnJudgmentRequest> TurnJudgmentRequests => Set<TurnJudgmentRequest>();
     public DbSet<AgentRecallActivity> Activities => Set<AgentRecallActivity>();
     public DbSet<CareerImpactCandidate> CareerImpactCandidates => Set<CareerImpactCandidate>();
     public DbSet<DocOpportunityCandidate> DocOpportunityCandidates => Set<DocOpportunityCandidate>();
@@ -134,6 +135,20 @@ public sealed class AgentRecallDbContext : DbContext
             entity.HasIndex(e => e.Cwd);
             entity.HasIndex(e => e.TurnId);
             entity.HasIndex(e => e.SessionId);
+        });
+
+        modelBuilder.Entity<TurnJudgmentRequest>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Status).HasConversion<string>().HasDefaultValue(JudgmentRequestStatus.Outstanding);
+            entity.Property(e => e.ScopeLevel).HasConversion<string>().HasDefaultValue(ScopeLevel.Global);
+            entity.Property(e => e.ResolvedDecision).HasDefaultValue(string.Empty);
+            entity.Property(e => e.Attempts).HasDefaultValue(0);
+            entity.HasIndex(e => e.CreatedAt);
+            entity.HasIndex(e => e.TurnId);
+            entity.HasIndex(e => e.SessionId);
+            entity.HasIndex(e => e.Cwd);
+            entity.HasIndex(e => e.Status);
         });
 
         modelBuilder.Entity<AgentRecallActivity>(entity =>

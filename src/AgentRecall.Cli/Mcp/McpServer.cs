@@ -42,6 +42,7 @@ public sealed class McpServer
         new CaptureFeedbackTool(),
         new GetRemindersTool(),
         new CaptureStatusTool(),
+        new SubmitCaptureJudgmentTool(),
         new ResolvePendingCaptureTool(),
         new ResolveRulesTool(),
         new CompressMemoryTool(),

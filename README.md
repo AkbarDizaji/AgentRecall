@@ -400,6 +400,9 @@ gets remembered — runs through a separate pipeline each time a turn finishes:
 Stop hook → finalize-turn → semantic capture judge verdict → validate
   → map by confidence → store / suggest / skip / reinforce / supersede
   → structured summary
+
+no verdict? → Stop hook blocks → agent calls submit_capture_judgment
+  → turn finalized from that verdict → next Stop lets the turn finish
 ```
 
 **The semantic capture judge decides, not keyword heuristics.** A word like
@@ -418,12 +421,19 @@ capture anything.
   | `< 0.55` | Skips |
 - **Duplicates are reinforced, not duplicated**; an explicit supersede replaces
   the prior rule.
-- **If the judge is unavailable, automatic capture is skipped** for that turn —
-  there is no keyword fallback. The verdict is supplied by the host as a
-  `judgment` object on the `finalize-turn` payload (AgentRecall makes no
-  network/LLM calls itself); Claude Code's native Stop hook alone has no such
-  field, so `agentrecall devcontainer init` scaffolds `CLAUDE.md` guidance
-  telling the model to produce the verdict itself before the native hook fires.
+- **The judge is the agent, and the Stop hook enforces that it answers.**
+  AgentRecall makes no network/LLM calls itself, so the verdict comes from the
+  session model — either as a `judgment` object on the `finalize-turn` payload or
+  through the `submit_capture_judgment` MCP tool. Claude Code's native Stop
+  payload carries no such field, so a substantive turn that reaches Stop unjudged
+  is **blocked once** with a reason asking for the verdict; the turn resumes,
+  submits it, and finalizes from it. A `Skip` verdict is a complete answer.
+- **A turn nobody judged captures nothing** — there is no keyword fallback, ever.
+  "Unjudged" is recorded distinctly from "the model judged it as not worth
+  keeping", and from "asked and never answered". AgentRecall asks at most once
+  per turn (`AgentRecall.MaxJudgmentRequestsPerTurn`), so an unanswered ask costs
+  the memory, not the turn. Set `AgentRecall.JudgmentEnforcementMode` to `Off` to
+  never block, or `Always` to ask on every turn that has a prompt.
 - **Source and outcome matter as much as wording.** Documentation, tool
   instructions, command output, and logs are not captured merely because they
   were read — only when paired with an observed agent failure, a user

@@ -31,9 +31,32 @@ public sealed class TurnFinalizer : ITurnFinalizer
     /// <summary>Recorded as the decision source when the judge produced a verdict.</summary>
     public const string JudgeDecisionSource = "SemanticCaptureJudge";
 
-    /// <summary>The skip reason recorded when no semantic judge verdict was available.</summary>
-    public const string JudgeUnavailableMessage =
-        "Semantic capture judge unavailable; no automatic capture performed.";
+    /// <summary>
+    /// Recorded as the decision source when the session model reported no verdict for the turn.
+    /// Distinct from <see cref="JudgeDecisionSource"/> with a <c>Skip</c> decision, which is the
+    /// model judging the turn as not worth capturing — a real answer, not an absent one.
+    /// </summary>
+    public const string NoJudgmentSuppliedSource = "NoJudgmentSupplied";
+
+    /// <summary>
+    /// Recorded as the decision source when AgentRecall asked for the turn's judgment, the turn
+    /// resumed without one, and the allowed asks ran out.
+    /// </summary>
+    public const string JudgmentRetryExhaustedSource = "JudgmentRetryExhausted";
+
+    /// <summary>
+    /// The skip reason recorded when no judgment accompanied the turn. Worded as what actually
+    /// happened — nobody judged it — rather than implying an external judge service was down:
+    /// AgentRecall has no such service, because it makes no model or network calls.
+    /// </summary>
+    public const string NoJudgmentSuppliedMessage =
+        "No semantic capture judgment was supplied for this turn, so nothing was captured. " +
+        "The session model is the judge and reported no verdict; AgentRecall makes no model calls of its own.";
+
+    /// <summary>The skip reason recorded when the turn resumed without the judgment it was asked for.</summary>
+    public const string JudgmentRetryExhaustedMessage =
+        "AgentRecall asked the session model for this turn's judgment and the turn resumed without one, " +
+        "so it was finalized unjudged. No capture was inferred by other means.";
 
     // How many relevant existing rules to surface to the judge for dedupe/reinforce.
     private const int MaxRelevantRules = 12;
@@ -89,6 +112,21 @@ public sealed class TurnFinalizer : ITurnFinalizer
         {
             var reconstructed = await ReconstructAsync(prior, cancellationToken).ConfigureAwait(false);
             return reconstructed with { FromCache = true };
+        }
+
+        // The hash alone is not enough once a turn can be blocked and resumed: the resumed turn
+        // says more, so it hashes differently, and an unjudged Stop firing after the model already
+        // submitted its verdict would otherwise file a second, contradictory record for one turn.
+        // A turn that already carries a recent verdict is therefore returned as-is — a later
+        // verdict-bearing finalization still records normally.
+        if (input.SuppliedJudgment is null && turnId is not null)
+        {
+            var judged = await _finalizations.FindJudgedByTurnAsync(turnId, cancellationToken).ConfigureAwait(false);
+            if (judged is not null && IsRecent(judged.CreatedAt))
+            {
+                var reconstructed = await ReconstructAsync(judged, cancellationToken).ConfigureAwait(false);
+                return reconstructed with { FromCache = true };
+            }
         }
 
         var captured = new List<FinalizedLesson>();
@@ -194,9 +232,15 @@ public sealed class TurnFinalizer : ITurnFinalizer
         var verdict = await _judge.JudgeAsync(judgeInput, cancellationToken).ConfigureAwait(false);
         if (verdict is null)
         {
-            // No verdict: the judge is unavailable. Skip — never a keyword-driven fallback.
-            skipped.Add(new SkippedLesson { Reason = JudgeUnavailableMessage });
-            return TurnJudgeDecision.Unavailable;
+            // Nobody judged the turn. Skip, and record which kind of silence it was — one nobody
+            // was asked about, or one AgentRecall asked about and did not get. Never a
+            // keyword-driven fallback in either case.
+            var exhausted = input.JudgmentRequestExhausted;
+            skipped.Add(new SkippedLesson
+            {
+                Reason = exhausted ? JudgmentRetryExhaustedMessage : NoJudgmentSuppliedMessage,
+            });
+            return exhausted ? TurnJudgeDecision.RetryExhausted : TurnJudgeDecision.NoJudgmentSupplied;
         }
 
         var validation = CaptureJudgeValidator.Validate(verdict, judgeInput);
@@ -612,6 +656,9 @@ public sealed class TurnFinalizer : ITurnFinalizer
 
     private static string Trim(string? value) => value?.Trim() ?? string.Empty;
 
+    private static bool IsRecent(DateTimeOffset createdAt) =>
+        DateTimeOffset.UtcNow - createdAt <= TimeSpan.FromMinutes(JudgmentEnforcementPolicy.TurnJudgmentFreshnessMinutes);
+
     /// <summary>The judge decision metadata threaded through to persistence and status output.</summary>
     private readonly record struct TurnJudgeDecision
     {
@@ -624,7 +671,12 @@ public sealed class TurnFinalizer : ITurnFinalizer
         /// <summary>No judged decision (empty turn / disabled).</summary>
         public static TurnJudgeDecision None => new() { Source = "None", Decision = string.Empty, JudgeReason = string.Empty };
 
-        /// <summary>The judge was unavailable for the turn.</summary>
-        public static TurnJudgeDecision Unavailable => new() { Source = "None", Decision = string.Empty, JudgeReason = string.Empty };
+        /// <summary>The session model reported no verdict for the turn.</summary>
+        public static TurnJudgeDecision NoJudgmentSupplied =>
+            new() { Source = NoJudgmentSuppliedSource, Decision = string.Empty, JudgeReason = string.Empty };
+
+        /// <summary>AgentRecall asked for the turn's verdict and the allowed asks ran out.</summary>
+        public static TurnJudgeDecision RetryExhausted =>
+            new() { Source = JudgmentRetryExhaustedSource, Decision = string.Empty, JudgeReason = string.Empty };
     }
 }

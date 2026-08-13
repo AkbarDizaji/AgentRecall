@@ -63,6 +63,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ILessonCandidateRepository, LessonCandidateRepository>();
         services.AddScoped<IRuleLifecycleRecommendationRepository, RuleLifecycleRecommendationRepository>();
         services.AddScoped<ITurnFinalizationRepository, TurnFinalizationRepository>();
+        services.AddScoped<ITurnJudgmentRequestRepository, TurnJudgmentRequestRepository>();
         services.AddScoped<IAgentRecallActivityRepository, AgentRecallActivityRepository>();
         services.AddScoped<ICareerImpactCandidateRepository, CareerImpactCandidateRepository>();
         services.AddScoped<IDocOpportunityCandidateRepository, DocOpportunityCandidateRepository>();
@@ -113,6 +114,11 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITurnCandidateExtractor, TurnCandidateExtractor>();
         services.AddSingleton<ICaptureJudge, HostSuppliedCaptureJudge>();
         services.AddScoped<ITurnFinalizer, TurnFinalizer>();
+
+        // Enforced judgment: the Stop hook declines to finish a substantive turn nobody judged and
+        // asks the session model — the judge — to submit its verdict. The gate records the ask and
+        // finalizes from the answer; it never decides what to remember and never blocks twice.
+        services.AddScoped<ITurnJudgmentGate, TurnJudgmentGate>();
 
         // Document-opportunity judge: same host-supplied-verdict architecture as the capture
         // judge above, scoped to a narrower question (offer a document, or skip). AgentRecall

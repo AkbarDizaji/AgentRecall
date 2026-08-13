@@ -469,7 +469,7 @@ public class CaptureJudgeFinalizerTests
         Assert.Empty(result.Captured);
         Assert.Empty(result.Suggested);
         Assert.Empty(await Rules(db));
-        Assert.Contains(result.Skipped, s => s.Reason == TurnFinalizer.JudgeUnavailableMessage);
+        Assert.Contains(result.Skipped, s => s.Reason == TurnFinalizer.NoJudgmentSuppliedMessage);
     }
 
     // Mode Off disables automatic capture entirely: a no-op even with a Capture verdict.

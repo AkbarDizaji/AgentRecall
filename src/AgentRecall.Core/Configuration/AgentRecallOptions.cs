@@ -1,6 +1,7 @@
 using AgentRecall.Core.Activity;
 using AgentRecall.Core.Capture;
 using AgentRecall.Core.Domain;
+using AgentRecall.Core.Finalization;
 using AgentRecall.Core.Hooks;
 
 namespace AgentRecall.Core.Configuration;
@@ -254,6 +255,38 @@ public sealed class AgentRecallOptions
     /// paths resolve against the CLI's current working directory at write time.
     /// </summary>
     public string DocOpportunityRoot { get; set; } = "docs";
+
+    /// <summary>
+    /// Whether the Stop hook lets a turn finish without a semantic capture judgment:
+    /// <c>Substantive</c> (default; a turn carrying a real exchange is blocked once and the session
+    /// model is asked to submit its verdict via <c>submit_capture_judgment</c>), <c>Always</c>
+    /// (block any turn with a prompt), or <c>Off</c> (never block — the turn is finalized unjudged
+    /// and recorded as such). Parsed defensively so an unrecognised value falls back to
+    /// <c>Substantive</c>. Enforcement changes only whether silence is accepted as an answer: the
+    /// judge is always the model, and AgentRecall never substitutes a keyword decision for it.
+    /// </summary>
+    public string JudgmentEnforcementMode { get; set; } = nameof(Finalization.JudgmentEnforcementMode.Substantive);
+
+    /// <summary>
+    /// Combined prompt + response characters before a turn counts as substantive under
+    /// <see cref="Finalization.JudgmentEnforcementMode.Substantive"/>. A structural floor only — it
+    /// never inspects wording, so it can exempt a trivially short exchange but can never decide
+    /// what is worth remembering. Defaults to 200.
+    /// </summary>
+    public int JudgmentEnforcementMinTurnCharacters { get; set; } =
+        JudgmentEnforcementPolicy.DefaultMinTurnCharacters;
+
+    /// <summary>
+    /// How many times one turn may be blocked for its judgment before AgentRecall gives up and
+    /// finalizes it unjudged. This is the loop guard, so it is deliberately small; defaults to 1.
+    /// </summary>
+    public int MaxJudgmentRequestsPerTurn { get; set; } = JudgmentEnforcementPolicy.DefaultMaxAttempts;
+
+    /// <summary>The parsed judgment-enforcement mode, falling back to Substantive when invalid.</summary>
+    public JudgmentEnforcementMode ResolvedJudgmentEnforcementMode =>
+        Enum.TryParse<JudgmentEnforcementMode>(JudgmentEnforcementMode, ignoreCase: true, out var mode) && Enum.IsDefined(mode)
+            ? mode
+            : Finalization.JudgmentEnforcementMode.Substantive;
 
     /// <summary>The parsed capture-judge mode, falling back to Semantic when invalid.</summary>
     public CaptureJudgeMode ResolvedCaptureJudgeMode =>

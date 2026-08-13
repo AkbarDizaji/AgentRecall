@@ -118,6 +118,13 @@ public static class DevcontainerScaffolder
         holds memory-worthy content, and AgentRecall only validates that decision and
         persists it.
 
+        **You are that judge.** AgentRecall makes no model or network calls of its own — it
+        has no judge to fall back on and never guesses with keywords. So the Stop hook does
+        not decide capture on its own: it enforces that a judgment exists. If a substantive
+        turn reaches Stop with no verdict, AgentRecall declines to let the turn finish and
+        asks you for one; you call `submit_capture_judgment`, and the turn is finalized from
+        your verdict. A `Skip` verdict is a complete answer — most turns get one.
+
         ### Semantic capture judge
 
         Incidental keywords never cause a capture. The judge decides; the system validates
@@ -141,8 +148,9 @@ public static class DevcontainerScaffolder
         - **Do not narrate the mechanism.** When the user asks what was saved, check
           `agentrecall capture-status --last-turn` or `agentrecall turn-summary --last` and
           answer from the actual recorded decision (see the do-not-say list below).
-        - If no judgment is supplied for a turn, automatic capture is skipped for it —
-          AgentRecall never falls back to keyword capture.
+        - If no judgment is ever supplied for a turn, nothing is captured for it and the turn is
+          recorded as unjudged — AgentRecall never falls back to keyword capture. "Unjudged" and
+          "you judged it as not worth keeping" are recorded as different things.
 
         ### You are the semantic judge — report your verdict every substantive turn
 
@@ -192,8 +200,7 @@ public static class DevcontainerScaffolder
         - **Skip** — `why_not_saved` is required. This is the common case: most turns are
           ordinary work with nothing durable to learn, and a real "nothing worth saving"
           verdict is what makes `agentrecall capture-status --last-turn` trustworthy, instead
-          of showing the generic "judge unavailable" placeholder the native Stop hook records
-          when no judgment is supplied at all.
+          of the turn being recorded as one nobody judged.
         - **Capture** / **SuggestCapture** — `normalized_rule.title`, `.condition`, and
           `.action` are the minimum; also fill `.because` and `.scope`, or `Capture` downgrades
           to a pending suggestion instead.
@@ -203,7 +210,33 @@ public static class DevcontainerScaffolder
           `normalized_rule` (all of title/condition/action/because/scope filled in).
 
         Do this yourself even when nothing seems worth saving — a `Skip` verdict you report is
-        real signal; a turn you never report on just looks unavailable.
+        real signal; a turn you never report on is recorded as unjudged.
+
+        ### When the Stop hook asks for a judgment, submit one
+
+        If a substantive turn reaches the Stop hook with no verdict, AgentRecall does not let it
+        finish: it returns a block whose reason asks for your judgment, and your turn resumes.
+        When that happens:
+
+        1. Call the `submit_capture_judgment` MCP tool. Its arguments are the same `judgment`
+           fields shown above — `decision` and `capture_reason` are required, plus
+           `normalized_rule` for Capture/SuggestCapture/SupersedeExisting,
+           `target_existing_rule_id` for Reinforce/Supersede, and `why_not_saved` for Skip.
+        2. Do not redo the work, do not re-answer the user, and do not ask the user what to
+           save. Judge the turn you just completed and submit the verdict.
+        3. `Skip` is a valid, expected answer for ordinary work. Submitting `Skip` is how a turn
+           with nothing durable in it finishes cleanly.
+        4. Then finish your turn normally. AgentRecall finalizes from the submitted verdict, and
+           the next Stop sees the turn as judged and lets it end.
+
+        AgentRecall asks at most once per turn: if the turn resumes and still submits nothing,
+        the turn is finalized as unjudged (recorded as asked-and-unanswered) and it ends. So an
+        unanswered ask costs the memory, not the turn — but there is no reason to leave it
+        unanswered, since reporting the verdict yourself (either way) is one tool call.
+
+        You can also call `submit_capture_judgment` before Stop fires — passing `prompt` and
+        `assistant_response` — as an alternative to piping the payload into `finalize-turn`.
+        Either route supplies the same verdict to the same judge seam.
 
         **Before defaulting to Skip, reflect — don't only scan for explicit signals.** An
         explicit correction, failure, or save request is the common case, but friction that
@@ -312,6 +345,7 @@ public static class DevcontainerScaffolder
         | What did AgentRecall do? | Run `agentrecall activity last` |
         | What rules were fetched? | Run `agentrecall activity last` |
         | Did the Stop hook capture anything? | Run `agentrecall finalize-turn status` |
+        | Is a judgment still outstanding? | Run `agentrecall capture-status --last-turn` |
         | Did you save that as a doc? | Run `agentrecall document status --json` |
 
         Equivalently, call the `capture_status` MCP tool for capture questions. Always
@@ -358,6 +392,9 @@ public static class DevcontainerScaffolder
         - **Suggested / Pending** — "AgentRecall suggested pending rule #Y: <summary>." Same
           approval flow as an unapproved capture (`agentrecall rules approve Y`).
         - **Skipped** — "AgentRecall skipped capture: <reason>."
+        - **`awaiting_judgment: true`** — AgentRecall asked for this turn's judgment and is still
+          waiting: "AgentRecall is waiting for this turn's capture judgment." Then submit it with
+          `submit_capture_judgment` rather than reporting it as a capture outcome.
         - **Nothing recorded** — "No finalized AgentRecall capture is recorded for the
           last turn."
 

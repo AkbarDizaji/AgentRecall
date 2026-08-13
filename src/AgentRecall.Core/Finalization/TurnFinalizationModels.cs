@@ -53,6 +53,22 @@ public sealed record TurnFinalizationInput
     /// payload. A <c>null</c> verdict means the judge is unavailable and nothing is offered.
     /// </summary>
     public Capture.Judge.DocOpportunityVerdict? SuppliedDocOpportunity { get; init; }
+
+    /// <summary>
+    /// True when the host signalled that this end-of-turn is already the resumption of one it
+    /// blocked earlier (Claude Code's historical <c>stop_hook_active</c>). The current hook payload
+    /// does not document such a field, so enforcement does not depend on it: the persisted attempt
+    /// counter is the loop guard, and this flag only ever makes AgentRecall ask less.
+    /// </summary>
+    public bool HostResumedTurn { get; init; }
+
+    /// <summary>
+    /// Set by the Stop-hook path when it already asked the model for this turn's judgment, the turn
+    /// came back without one, and the allowed asks ran out. It only sharpens the recorded reason:
+    /// "asked and not answered" instead of "never judged". It never enables an alternative capture
+    /// route — an unjudged turn stores nothing either way.
+    /// </summary>
+    public bool JudgmentRequestExhausted { get; init; }
 }
 
 /// <summary>A lesson AgentRecall captured or suggested for the turn.</summary>

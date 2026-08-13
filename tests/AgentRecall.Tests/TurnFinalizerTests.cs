@@ -615,7 +615,7 @@ public class TurnFinalizerTests
 
         Assert.Null(result.Decision);
         Assert.Null(result.JudgeReason);
-        Assert.Contains(result.Skipped, s => s.Reason == TurnFinalizer.JudgeUnavailableMessage);
+        Assert.Contains(result.Skipped, s => s.Reason == TurnFinalizer.NoJudgmentSuppliedMessage);
     }
 
     // A judged verdict's Decision/JudgeReason are non-null and carry the judge's actual values.

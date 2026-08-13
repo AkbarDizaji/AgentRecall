@@ -1668,9 +1668,20 @@ public static partial class CommandRouter
             if (isStatus)
             {
                 var last = await finalizer.GetLastAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+
+                // A blocked turn has no finalization of its own yet. Report that it is waiting on a
+                // judgment rather than answering with the previous turn's decision.
+                var awaiting = await Mcp.Tools.JudgmentStatus
+                    .FindAwaitingAsync(scope.ServiceProvider, sessionId: null, cwd: null, cancellationToken)
+                    .ConfigureAwait(false);
+
                 if (json)
                 {
-                    WriteJson(output, FinalizationJson(last));
+                    WriteJson(output, FinalizationJson(last, awaiting?.Id));
+                }
+                else if (awaiting is not null)
+                {
+                    output.WriteLine(TurnFinalizationFormatter.AwaitingJudgmentLine(awaiting.Id));
                 }
                 else if (last is null)
                 {
@@ -1707,6 +1718,31 @@ public static partial class CommandRouter
                 }
 
                 return 0;
+            }
+
+            // Enforced judgment, on the Stop-hook surface only. A turn nobody judged is blocked once
+            // and the session model — the judge — is asked to submit its verdict; the turn resumes,
+            // calls submit_capture_judgment, and the next Stop finalizes from the recorded verdict.
+            // The CLI/--json surfaces never block, so scripted and manual finalization behave as
+            // before. Nothing here decides what to remember; it only decides whether to wait for
+            // the decision.
+            if (hook)
+            {
+                var gateDecision = await EvaluateJudgmentGateAsync(scope.ServiceProvider, input, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (gateDecision.Action == Core.Finalization.JudgmentEnforcementAction.RequestJudgment)
+                {
+                    EmitJudgmentBlock(output, gateDecision);
+                    return 0;
+                }
+
+                if (gateDecision.Action == Core.Finalization.JudgmentEnforcementAction.ProceedUnjudged)
+                {
+                    // Record which silence this was, so the finalization says "asked and not
+                    // answered" rather than "never judged".
+                    input = input with { JudgmentRequestExhausted = true };
+                }
             }
 
             var result = await finalizer.FinalizeAsync(input, cancellationToken).ConfigureAwait(false);
@@ -1802,6 +1838,79 @@ public static partial class CommandRouter
         }
 
         return 0;
+    }
+
+    /// <summary>
+    /// Asks the judgment gate what to do with a turn and records the ask when it decides to make
+    /// one. Failures are swallowed into a "finalize" decision: enforcement must never be the reason
+    /// a turn cannot end, and a block that could not be recorded is a block that could repeat.
+    /// </summary>
+    private static async Task<Core.Finalization.JudgmentGateDecision> EvaluateJudgmentGateAsync(
+        IServiceProvider services,
+        Core.Finalization.TurnFinalizationInput input,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var gate = services.GetRequiredService<Core.Finalization.ITurnJudgmentGate>();
+            var decision = await gate.EvaluateAsync(input, cancellationToken).ConfigureAwait(false);
+
+            var enforcementNotice = decision.Action switch
+            {
+                Core.Finalization.JudgmentEnforcementAction.RequestJudgment =>
+                    ActivityNoticeFactory.ForJudgmentRequested(
+                        decision.RequestId, decision.Attempts, input.Source ?? "stop_hook"),
+
+                // The gate fails open, so an enforcement failure looks like an ordinary unjudged
+                // turn from the outside. Record why, or the difference is invisible.
+                _ when decision.Reason.StartsWith(
+                    Core.Finalization.TurnJudgmentGate.EnforcementFailedReason, StringComparison.Ordinal) =>
+                    ActivityNoticeFactory.ForJudgmentEnforcementFailed(
+                        decision.Reason, input.Source ?? "stop_hook"),
+
+                _ => null,
+            };
+
+            if (enforcementNotice is not null)
+            {
+                await services.GetRequiredService<IActivityRecorder>()
+                    .RecordAsync(
+                        enforcementNotice with { TurnId = Core.Activity.TurnCorrelation.Compute(input.Cwd, input.Prompt) },
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            return decision;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Console.Error.WriteLine($"[agentrecall] judgment enforcement skipped: {ex.Message}");
+            return new Core.Finalization.JudgmentGateDecision
+            {
+                Action = Core.Finalization.JudgmentEnforcementAction.Finalize,
+                Reason = Core.Finalization.TurnJudgmentGate.EnforcementFailedReason,
+            };
+        }
+    }
+
+    /// <summary>
+    /// Emits Claude Code's Stop-hook block response: the turn does not finish, and
+    /// <c>reason</c> — the one channel a blocked Stop has — tells the model which tool to call and
+    /// what it must decide. The exit code stays 0; the JSON decision, not the exit code, blocks.
+    /// </summary>
+    private static void EmitJudgmentBlock(TextWriter output, Core.Finalization.JudgmentGateDecision decision)
+    {
+        var response = new System.Text.Json.Nodes.JsonObject
+        {
+            ["decision"] = "block",
+            ["reason"] = decision.BlockReason ?? Core.Finalization.JudgmentBlockMessage.For(decision.RequestId),
+            ["hookSpecificOutput"] = new System.Text.Json.Nodes.JsonObject
+            {
+                ["hookEventName"] = "Stop",
+            },
+        };
+
+        output.WriteLine(response.ToJsonString());
     }
 
     /// <summary>
@@ -1984,9 +2093,11 @@ public static partial class CommandRouter
     private static void RenderFinalization(TextWriter output, TurnFinalizationResult result) =>
         output.WriteLine(TurnFinalizationFormatter.RenderText(result));
 
-    private static object FinalizationJson(TurnFinalizationResult? result) =>
+    private static object FinalizationJson(TurnFinalizationResult? result, int? awaitingJudgmentRequestId = null) =>
         new
         {
+            awaitingJudgment = awaitingJudgmentRequestId is not null,
+            awaitingJudgmentRequestId,
             decisionSource = result?.DecisionSource,
             decision = result?.Decision,
             reason = result?.JudgeReason,
