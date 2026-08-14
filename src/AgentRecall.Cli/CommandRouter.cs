@@ -1747,6 +1747,12 @@ public static partial class CommandRouter
 
             var result = await finalizer.FinalizeAsync(input, cancellationToken).ConfigureAwait(false);
 
+            // A verdict can also arrive by this route (a judgment on the payload, or a hand-piped
+            // payload), not only through submit_capture_judgment. Close the ask it answers so the
+            // status surfaces stop reporting the turn as unanswered.
+            await scope.ServiceProvider.GetRequiredService<Core.Finalization.ITurnJudgmentGate>()
+                .CloseOutstandingAsync(input, result, cancellationToken).ConfigureAwait(false);
+
             // Passive seed reinforcement: a seed rule used repeatedly across turns without a
             // correction earns a small, capped confidence bump. Runs on the end-of-turn path
             // so evolution is deterministic and never touches the hot retrieval path.

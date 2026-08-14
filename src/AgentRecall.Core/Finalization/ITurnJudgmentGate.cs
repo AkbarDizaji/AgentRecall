@@ -33,6 +33,16 @@ public interface ITurnJudgmentGate
     /// <summary>The request currently awaiting a verdict for a chat/directory, or null.</summary>
     Task<TurnJudgmentRequest?> FindOutstandingAsync(
         string? sessionId, string? cwd, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Closes the ask a judged turn answers, whichever route supplied the verdict — the tool, a
+    /// judgment on the payload, or a hand-piped <c>finalize-turn</c>. Without this, a verdict that
+    /// arrived by a route other than the tool would leave the request outstanding and the status
+    /// surfaces would keep reporting a turn as unanswered after it was answered. A no-op unless the
+    /// finalization was actually judged.
+    /// </summary>
+    Task CloseOutstandingAsync(
+        TurnFinalizationInput input, TurnFinalizationResult result, CancellationToken cancellationToken = default);
 }
 
 /// <summary>The gate's decision for one turn, plus the state it recorded.</summary>

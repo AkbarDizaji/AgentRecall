@@ -1,5 +1,6 @@
 using AgentRecall.Core.Abstractions;
 using AgentRecall.Core.Activity;
+using AgentRecall.Core.Capture;
 using AgentRecall.Core.Capture.Judge;
 using AgentRecall.Core.Configuration;
 using AgentRecall.Core.Domain;
@@ -59,6 +60,10 @@ public sealed class TurnJudgmentGate : ITurnJudgmentGate
     public const string EnforcementFailedReason =
         "Judgment enforcement could not run, so the turn was finalized without blocking.";
 
+    /// <summary>Recorded when automatic capture is off, so a verdict would have nowhere to go.</summary>
+    public const string CaptureDisabledReason =
+        "Automatic capture is disabled, so no judgment was requested for this turn.";
+
     private readonly ITurnJudgmentRequestRepository _requests;
     private readonly ITurnFinalizationRepository _finalizations;
     private readonly ITurnFinalizer _finalizer;
@@ -88,6 +93,17 @@ public sealed class TurnJudgmentGate : ITurnJudgmentGate
             {
                 Action = JudgmentEnforcementAction.Finalize,
                 Reason = JudgmentEnforcementPolicy.JudgmentPresentReason,
+            };
+        }
+
+        // Nothing would be done with a verdict when automatic capture is switched off, so asking for
+        // one would cost the user a blocked turn and buy nothing.
+        if (!_options.TurnFinalizerEnabled || _options.ResolvedCaptureJudgeMode == CaptureJudgeMode.Off)
+        {
+            return new JudgmentGateDecision
+            {
+                Action = JudgmentEnforcementAction.Finalize,
+                Reason = CaptureDisabledReason,
             };
         }
 
@@ -144,6 +160,24 @@ public sealed class TurnJudgmentGate : ITurnJudgmentGate
         JudgmentSubmission submission, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(submission);
+
+        // A named request that is already settled is refused rather than retargeted: a repeated tool
+        // call must not silently attach its verdict to some other turn's outstanding ask.
+        if (submission.RequestId is { } named)
+        {
+            var byId = await _requests.GetAsync(named, cancellationToken).ConfigureAwait(false);
+            if (byId is not null && byId.Status != JudgmentRequestStatus.Outstanding)
+            {
+                return new JudgmentSubmissionResult
+                {
+                    Submitted = false,
+                    RequestId = named,
+                    Reason =
+                        $"Request #{named} is already {byId.Status.ToString().ToLowerInvariant()}; " +
+                        "its turn has been finalized and nothing further was recorded.",
+                };
+            }
+        }
 
         var request = await ResolveTargetAsync(submission, cancellationToken).ConfigureAwait(false);
 
@@ -204,6 +238,48 @@ public sealed class TurnJudgmentGate : ITurnJudgmentGate
     public Task<TurnJudgmentRequest?> FindOutstandingAsync(
         string? sessionId, string? cwd, CancellationToken cancellationToken = default) =>
         _requests.FindOutstandingAsync(sessionId, cwd, cancellationToken);
+
+    public async Task CloseOutstandingAsync(
+        TurnFinalizationInput input, TurnFinalizationResult result, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(result);
+
+        // Only a real verdict closes an ask. An unjudged finalization leaves it open on purpose:
+        // the turn still owes AgentRecall a judgment.
+        if (result.DecisionSource != TurnFinalizer.JudgeDecisionSource)
+        {
+            return;
+        }
+
+        try
+        {
+            var outstanding = await _requests
+                .FindOutstandingAsync(input.SessionId, input.Cwd, cancellationToken).ConfigureAwait(false);
+
+            // Match on the turn when both sides know it, so a judged turn cannot close the ask
+            // raised for a different one.
+            if (outstanding is null ||
+                !IsFresh(outstanding.CreatedAt) ||
+                (!string.IsNullOrEmpty(outstanding.TurnId) &&
+                 !string.IsNullOrEmpty(result.TurnId) &&
+                 !string.Equals(outstanding.TurnId, result.TurnId, StringComparison.Ordinal)))
+            {
+                return;
+            }
+
+            outstanding.Status = JudgmentRequestStatus.Resolved;
+            outstanding.ResolvedAt = DateTimeOffset.UtcNow;
+            outstanding.ResolvedDecision = result.Decision ?? string.Empty;
+            outstanding.FinalizationId = result.Id;
+            await _requests.UpdateAsync(outstanding, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Housekeeping only: the turn is already judged and recorded either way.
+            Console.Error.WriteLine($"[agentrecall] could not close the judgment request: {ex.Message}");
+        }
+    }
 
     /// <summary>
     /// The request that belongs to this turn: the outstanding one for the chat when it is still

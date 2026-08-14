@@ -51,7 +51,9 @@ public sealed class SubmitCaptureJudgmentTool : IMcpTool
             ["prompt"] = Prop("string", "Only for a turn that was not blocked: the user's message for it."),
             ["assistant_response"] = Prop("string", "Only for a turn that was not blocked: what you did/said."),
         },
-        ["required"] = new JsonArray { "decision", "capture_reason" },
+        // memory_type is required in practice: it defaults to NotMemory when absent, which turns a
+        // Capture verdict into a skip. Skip verdicts pass NotMemory explicitly.
+        ["required"] = new JsonArray { "decision", "capture_reason", "memory_type" },
     };
 
     public async Task<JsonNode> InvokeAsync(JsonObject? arguments, IServiceProvider services, CancellationToken cancellationToken)

@@ -105,10 +105,15 @@ public sealed class TurnFinalizer : ITurnFinalizer
         // also folds in the assistant response.
         var turnId = Activity.TurnCorrelation.Compute(input.Cwd, input.Prompt);
 
-        // Idempotent: an identical turn that was already finalized returns the prior
-        // result and creates nothing new (the Stop hook may fire more than once).
+        // Idempotent: an identical turn that was already finalized returns the prior result and
+        // creates nothing new (the Stop hook may fire more than once). A verdict, though, must never
+        // be swallowed by a record that decided nothing — an unjudged record for identical content
+        // (a manual `finalize-turn` with no judgment, or a turn that ran out of asks) hashes the
+        // same as the judged submission that follows it — so only a prior record that was itself
+        // judged may short-circuit a judged input.
         var prior = await FindByHashAsync(hash, cancellationToken).ConfigureAwait(false);
-        if (prior is not null)
+        if (prior is not null &&
+            (input.SuppliedJudgment is null || prior.DecisionSource == JudgeDecisionSource))
         {
             var reconstructed = await ReconstructAsync(prior, cancellationToken).ConfigureAwait(false);
             return reconstructed with { FromCache = true };

@@ -452,4 +452,141 @@ public class TurnPayloadTests
         Assert.NotNull(verdict);
         Assert.Equal(2, verdict!.KeyPoints.Count);
     }
+
+    // `last_assistant_message` is the documented Stop-hook field for the turn's final assistant
+    // text, so it is read without touching the transcript.
+    [Fact]
+    public void Parse_LastAssistantMessage_IsUsedAsTheAssistantText()
+    {
+        var payload = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            prompt = "what changed?",
+            last_assistant_message = "Rewrote the retry policy.",
+        });
+
+        var result = TurnPayload.Parse(payload, Discard);
+
+        Assert.NotNull(result);
+        Assert.Equal("Rewrote the retry policy.", result!.AssistantResponse);
+        Assert.Null(result.RawTranscript);
+    }
+
+    // `assistant_response` wins when both are present: it is the field a caller sets deliberately.
+    [Fact]
+    public void Parse_AssistantResponse_OutranksLastAssistantMessage()
+    {
+        var payload = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            prompt = "hi",
+            assistant_response = "explicit",
+            last_assistant_message = "host-provided",
+        });
+
+        Assert.Equal("explicit", TurnPayload.Parse(payload, Discard)!.AssistantResponse);
+    }
+
+    // A payload carrying only one half of the exchange fills the other half from the transcript,
+    // rather than finalizing a turn that looks half-empty (and so unjudgeable).
+    [Fact]
+    public void Parse_HalfInlinePayload_FillsTheMissingHalfFromTheTranscript()
+    {
+        var dir = NewTempDir();
+        try
+        {
+            var transcriptPath = Path.Combine(dir, "transcript.jsonl");
+            File.WriteAllText(transcriptPath, string.Join("\n",
+                """{ "type": "user", "message": { "content": "the real prompt" } }""",
+                """{ "type": "assistant", "message": { "content": "the transcript answer" } }"""));
+
+            var assistantOnly = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                last_assistant_message = "the host answer",
+                transcript_path = transcriptPath,
+            });
+            var promptOnly = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                prompt = "the inline prompt",
+                transcript_path = transcriptPath,
+            });
+
+            var fromAssistant = TurnPayload.Parse(assistantOnly, Discard)!;
+            Assert.Equal("the real prompt", fromAssistant.Prompt);
+            Assert.Equal("the host answer", fromAssistant.AssistantResponse);
+
+            var fromPrompt = TurnPayload.Parse(promptOnly, Discard)!;
+            Assert.Equal("the inline prompt", fromPrompt.Prompt);
+            Assert.Equal("the transcript answer", fromPrompt.AssistantResponse);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    // stop_hook_active is read when a host sends it, and absent means "not a resumption" — the
+    // enforced-judgment loop guard must never depend on the field being there.
+    [Theory]
+    [InlineData("""{ "prompt": "hi", "stop_hook_active": true }""", true)]
+    [InlineData("""{ "prompt": "hi", "stop_hook_active": false }""", false)]
+    [InlineData("""{ "prompt": "hi" }""", false)]
+    [InlineData("""{ "prompt": "hi", "stop_hook_active": "yes" }""", false)]
+    public void Parse_StopHookActive_IsReadDefensively(string payload, bool expected)
+    {
+        Assert.Equal(expected, TurnPayload.Parse(payload, Discard)!.HostResumedTurn);
+    }
+
+    // ParseVerdict is the shared reader for a verdict submitted mid-turn, so it must accept exactly
+    // what the payload accepts — and reject the same things.
+    [Fact]
+    public void ParseVerdict_ValidJudgment_IsRead()
+    {
+        var judgment = System.Text.Json.Nodes.JsonNode.Parse("""
+        {
+          "decision": "Capture",
+          "memory_type": "EngineeringLesson",
+          "capture_reason": "UserCorrection",
+          "confidence": 0.81,
+          "normalized_rule": { "title": "t", "condition": "when x", "action": "do y", "because": "z", "scope": "s" }
+        }
+        """);
+
+        var verdict = TurnPayload.ParseVerdict(judgment, Discard);
+
+        Assert.NotNull(verdict);
+        Assert.Equal(Core.Capture.Judge.JudgeDecision.Capture, verdict!.Decision);
+        Assert.Equal(Core.Capture.Judge.JudgeCaptureReason.UserCorrection, verdict.CaptureReason);
+        Assert.Equal(0.81, verdict.Confidence, 3);
+        Assert.Equal("do y", verdict.NormalizedRule!.Action);
+    }
+
+    [Fact]
+    public void ParseVerdict_UnknownEnumOrMissingDecision_IsRefused()
+    {
+        var unknownDecision = System.Text.Json.Nodes.JsonNode.Parse(
+            """{ "decision": "RememberForever", "capture_reason": "UserCorrection" }""");
+        var unknownReason = System.Text.Json.Nodes.JsonNode.Parse(
+            """{ "decision": "Capture", "capture_reason": "BecauseISaidSo" }""");
+        var noDecision = System.Text.Json.Nodes.JsonNode.Parse("""{ "capture_reason": "UserCorrection" }""");
+
+        Assert.Null(TurnPayload.ParseVerdict(unknownDecision, Discard));
+        Assert.Null(TurnPayload.ParseVerdict(unknownReason, Discard));
+        Assert.Null(TurnPayload.ParseVerdict(noDecision, Discard));
+    }
+
+    [Fact]
+    public void ParseVerdict_NonObjectOrOversized_IsRefused()
+    {
+        var oversized = System.Text.Json.Nodes.JsonNode.Parse($$"""
+        {
+          "decision": "Capture",
+          "memory_type": "EngineeringLesson",
+          "capture_reason": "UserCorrection",
+          "evidence": "{{new string('x', 20_001)}}"
+        }
+        """);
+
+        Assert.Null(TurnPayload.ParseVerdict(null, Discard));
+        Assert.Null(TurnPayload.ParseVerdict(System.Text.Json.Nodes.JsonNode.Parse("\"nope\""), Discard));
+        Assert.Null(TurnPayload.ParseVerdict(oversized, Discard));
+    }
 }

@@ -4,6 +4,31 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **A submitted judgment could be silently discarded.** The finalizer's content-hash idempotency
+  guard returned any prior record with a matching hash, and an unjudged record for identical
+  content — a hand-piped `finalize-turn` carrying no judgment, or a turn that ran out of asks —
+  hashes the same as the `submit_capture_judgment` verdict that follows it. The verdict was
+  dropped, no rule stored, and the request still marked resolved. Only a prior record that was
+  itself judged may now short-circuit a judged input.
+- **Turns were blocked for a judgment even when automatic capture was off.** With
+  `CaptureJudgeMode: Off` (or `TurnFinalizerEnabled: false`) the finalizer is a no-op, so asking
+  for a verdict cost a blocked turn and bought nothing. The gate is inert in that state.
+- **A repeated `submit_capture_judgment` call could attach its verdict to the wrong turn.** An
+  explicit `request_id` naming an already-settled request fell through to "resolve whatever is
+  outstanding for this chat". A settled named request is now refused with the reason; an
+  unrecognised id still falls back to the chat's outstanding ask.
+- **A verdict supplied outside the tool left the ask open.** Self-reporting through
+  `finalize-turn` (hook or CLI) judged the turn but never closed its request, so
+  `capture-status` kept reporting "still waiting" until the request expired. Either route now
+  closes the ask it answers, matched on the turn so a judged turn cannot close another's.
+
+### Changed
+- **`memory_type` is now a required argument of `submit_capture_judgment`.** It defaults to
+  `NotMemory` when absent, which silently downgrades a `Capture` verdict to a skip.
+
 ## [2.8.0] - 2026-08-13
 
 ### Added

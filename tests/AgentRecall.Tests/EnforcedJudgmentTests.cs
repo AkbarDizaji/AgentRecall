@@ -402,6 +402,284 @@ public class EnforcedJudgmentTests
         Assert.Single(await Rules(db));
     }
 
+    // Automatic capture switched off means a verdict would have nowhere to go, so asking for one
+    // would cost a blocked turn and buy nothing.
+    [Fact]
+    public async Task CaptureJudgeModeOff_DoesNotBlock()
+    {
+        await using var db = await NewDbAsync(o => o.CaptureJudgeMode = nameof(Core.Capture.CaptureJudgeMode.Off));
+
+        var (code, output) = await RunAsync(db, Payload(), "finalize-turn", "--hook");
+
+        Assert.Equal(0, code);
+        Assert.DoesNotContain("\"decision\":\"block\"", output);
+        Assert.Empty(await Requests(db));
+        Assert.Empty(await Finalizations(db));
+    }
+
+    [Fact]
+    public async Task TurnFinalizerDisabled_DoesNotBlock()
+    {
+        await using var db = await NewDbAsync(o => o.TurnFinalizerEnabled = false);
+
+        var (_, output) = await RunAsync(db, Payload(), "finalize-turn", "--hook");
+
+        Assert.DoesNotContain("\"decision\":\"block\"", output);
+        Assert.Empty(await Requests(db));
+    }
+
+    // A verdict must never be swallowed by a record that decided nothing. An unjudged manual
+    // finalization of the same turn hashes identically to the submission that follows it, so the
+    // idempotency cache must not treat the two as the same outcome.
+    [Fact]
+    public async Task VerdictAfterAnUnjudgedFinalizationOfTheSameTurn_IsStillRecorded()
+    {
+        await using var db = await NewDbAsync();
+        await RunAsync(db, Payload(), "finalize-turn", "--hook");
+
+        // The same turn, finalized by hand with no verdict: allowed, and records an unjudged result.
+        await RunAsync(db, Payload(), "finalize-turn");
+        var unjudged = Assert.Single(await Finalizations(db));
+        Assert.Equal(TurnFinalizer.NoJudgmentSuppliedSource, unjudged.DecisionSource);
+
+        var result = (await SubmitAsync(db, CaptureArgs())).AsObject();
+
+        Assert.True(result["submitted"]!.GetValue<bool>());
+        Assert.Single(await Rules(db));
+        Assert.Contains(await Finalizations(db), f => f.DecisionSource == TurnFinalizer.JudgeDecisionSource);
+    }
+
+    // Repeating the tool call with the same request id is refused rather than retargeted: a second
+    // verdict must not attach itself to some other turn's outstanding ask.
+    [Fact]
+    public async Task RepeatedSubmission_ForASettledRequest_IsRefused()
+    {
+        await using var db = await NewDbAsync();
+        await RunAsync(db, Payload(), "finalize-turn", "--hook");
+
+        var first = (await SubmitAsync(db, CaptureArgs())).AsObject();
+        var requestId = first["request_id"]!.GetValue<int>();
+
+        var args = CaptureArgs();
+        args["request_id"] = requestId;
+        var second = (await SubmitAsync(db, args)).AsObject();
+
+        Assert.False(second["submitted"]!.GetValue<bool>());
+        Assert.Contains("already resolved", second["reason"]!.GetValue<string>());
+        Assert.Single(await Rules(db));
+        Assert.Single(await Finalizations(db));
+    }
+
+    // A hallucinated request id is tolerated: the outstanding ask for the chat still resolves, so a
+    // wrong id costs nothing.
+    [Fact]
+    public async Task Submission_WithAnUnknownRequestId_StillResolvesTheOutstandingAsk()
+    {
+        await using var db = await NewDbAsync();
+        await RunAsync(db, Payload(), "finalize-turn", "--hook");
+
+        var args = CaptureArgs();
+        args["request_id"] = 4242;
+        var result = (await SubmitAsync(db, args)).AsObject();
+
+        Assert.True(result["submitted"]!.GetValue<bool>());
+        Assert.Equal(JudgmentRequestStatus.Resolved, (await Requests(db)).Single().Status);
+    }
+
+    // A verdict can arrive by another route than the tool — a judgment on the payload, or a
+    // hand-piped finalize-turn. Either way the ask it answers is closed, or the status surfaces
+    // would keep reporting the turn as unanswered.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task JudgmentSuppliedByAnotherRoute_ClosesTheOutstandingAsk(bool viaHook)
+    {
+        await using var db = await NewDbAsync();
+        await RunAsync(db, Payload(), "finalize-turn", "--hook");
+        Assert.Equal(JudgmentRequestStatus.Outstanding, (await Requests(db)).Single().Status);
+
+        var judgment = """
+        {
+          "decision": "Skip",
+          "memory_type": "NotMemory",
+          "capture_reason": "NotReusable",
+          "confidence": 0.6,
+          "why_not_saved": "self-reported before the hook fired"
+        }
+        """;
+
+        var args = viaHook ? new[] { "finalize-turn", "--hook" } : new[] { "finalize-turn" };
+        await RunAsync(db, Payload(judgment), args);
+
+        var request = Assert.Single(await Requests(db));
+        Assert.Equal(JudgmentRequestStatus.Resolved, request.Status);
+        Assert.Equal(nameof(JudgeDecision.Skip), request.ResolvedDecision);
+    }
+
+    // An ask raised for a different turn is left alone: a judged turn closes only its own.
+    [Fact]
+    public async Task JudgedTurn_DoesNotCloseAnotherTurnsAsk()
+    {
+        await using var db = await NewDbAsync();
+
+        await using (var scope = db.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<ITurnJudgmentRequestRepository>().AddAsync(
+                new TurnJudgmentRequest
+                {
+                    TurnId = "a-different-turn",
+                    SessionId = "chat-1",
+                    Cwd = "/repo/importer",
+                    Source = "stop_hook",
+                    Prompt = "some other prompt",
+                    AssistantResponse = "some other response",
+                    Attempts = 1,
+                });
+        }
+
+        var judgment = """
+        {
+          "decision": "Skip",
+          "memory_type": "NotMemory",
+          "capture_reason": "NotReusable",
+          "confidence": 0.6,
+          "why_not_saved": "unrelated turn"
+        }
+        """;
+
+        await RunAsync(db, Payload(judgment), "finalize-turn", "--hook");
+
+        Assert.Equal(JudgmentRequestStatus.Outstanding, (await Requests(db)).Single().Status);
+    }
+
+    // Mode Always asks even about a turn the size floor would exempt.
+    [Fact]
+    public async Task AlwaysMode_BlocksATrivialTurn()
+    {
+        await using var db = await NewDbAsync(
+            o => o.JudgmentEnforcementMode = nameof(JudgmentEnforcementMode.Always));
+
+        const string trivial = """
+        {
+          "cwd": "/repo/importer",
+          "session_id": "chat-1",
+          "prompt": "thanks",
+          "assistant_response": "No problem."
+        }
+        """;
+
+        var (_, output) = await RunAsync(db, trivial, "finalize-turn", "--hook");
+
+        Assert.Contains("\"decision\":\"block\"", output);
+        Assert.Equal(1, (await Requests(db)).Single().Attempts);
+    }
+
+    // The ask budget is configurable, and the attempt counter — not a host signal — enforces it.
+    [Fact]
+    public async Task TwoAllowedAsks_BlockTwiceThenFinalize()
+    {
+        await using var db = await NewDbAsync(o => o.MaxJudgmentRequestsPerTurn = 2);
+
+        var (_, first) = await RunAsync(db, Payload(), "finalize-turn", "--hook");
+        var (_, second) = await RunAsync(db, Payload(), "finalize-turn", "--hook");
+        var (_, third) = await RunAsync(db, Payload(), "finalize-turn", "--hook");
+
+        Assert.Contains("\"decision\":\"block\"", first);
+        Assert.Contains("\"decision\":\"block\"", second);
+        Assert.DoesNotContain("\"decision\":\"block\"", third);
+
+        var request = Assert.Single(await Requests(db));
+        Assert.Equal(2, request.Attempts);
+        Assert.Equal(JudgmentRequestStatus.Abandoned, request.Status);
+        Assert.Equal(TurnFinalizer.JudgmentRetryExhaustedSource, (await Finalizations(db)).Single().DecisionSource);
+    }
+
+    // Debris from a chat that ended mid-exchange must not mute enforcement for the next turn: a
+    // stale ask is closed and a fresh one is raised.
+    [Fact]
+    public async Task StaleOutstandingAsk_IsClosedAndDoesNotSuppressTheNextAsk()
+    {
+        await using var db = await NewDbAsync();
+
+        await using (var scope = db.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<ITurnJudgmentRequestRepository>().AddAsync(
+                new TurnJudgmentRequest
+                {
+                    CreatedAt = DateTimeOffset.UtcNow.AddMinutes(
+                        -(JudgmentEnforcementPolicy.TurnJudgmentFreshnessMinutes + 5)),
+                    TurnId = "an-abandoned-chat",
+                    SessionId = "chat-1",
+                    Cwd = "/repo/importer",
+                    Source = "stop_hook",
+                    Prompt = "a prompt from an hour ago",
+                    AssistantResponse = "a response from an hour ago",
+                    Attempts = 1,
+                });
+        }
+
+        var (_, output) = await RunAsync(db, Payload(), "finalize-turn", "--hook");
+
+        Assert.Contains("\"decision\":\"block\"", output);
+        var requests = await Requests(db);
+        Assert.Equal(2, requests.Count);
+        Assert.Equal(JudgmentRequestStatus.Abandoned, requests.Single(r => r.TurnId == "an-abandoned-chat").Status);
+        Assert.Contains(requests, r => r.Status == JudgmentRequestStatus.Outstanding && r.Prompt == Prompt);
+    }
+
+    // The ask is recorded in the activity log, joined to the turn, so "why did that turn resume?"
+    // is answerable from state.
+    [Fact]
+    public async Task Ask_IsRecordedAsActivityForTheTurn()
+    {
+        await using var db = await NewDbAsync();
+        await RunAsync(db, Payload(), "finalize-turn", "--hook");
+
+        await using var scope = db.CreateScope();
+        var activities = await scope.ServiceProvider.GetRequiredService<IAgentRecallActivityRepository>().ListAsync();
+
+        var ask = Assert.Single(activities, a => a.ActivityType == ActivityType.JudgmentRequested);
+        Assert.Contains("asked the session model", ask.Summary);
+        Assert.False(string.IsNullOrEmpty(ask.TurnId));
+    }
+
+    // A pending suggestion is a valid verdict too, and parks a rule for approval rather than
+    // storing one outright.
+    [Fact]
+    public async Task SuggestVerdict_ParksAPendingRule()
+    {
+        await using var db = await NewDbAsync();
+        await RunAsync(db, Payload(), "finalize-turn", "--hook");
+
+        var args = CaptureArgs();
+        args["decision"] = "SuggestCapture";
+        args["confidence"] = 0.6;
+        var result = (await SubmitAsync(db, args)).AsObject();
+
+        Assert.True(result["submitted"]!.GetValue<bool>());
+        Assert.Equal(RuleStatus.Pending, (await Rules(db)).Single().Status);
+        Assert.Equal(nameof(JudgeDecision.SuggestCapture), (await Finalizations(db)).Single().JudgeDecision);
+    }
+
+    // Once answered, the status surfaces stop reporting a wait and report the decision instead.
+    [Fact]
+    public async Task CaptureStatus_AfterSubmission_ReportsTheDecisionNotAWait()
+    {
+        await using var db = await NewDbAsync();
+        await RunAsync(db, Payload(), "finalize-turn", "--hook");
+        await SubmitAsync(db, RejectArgs());
+
+        var (_, output) = await RunAsync(db, string.Empty, "capture-status", "--last-turn");
+
+        Assert.DoesNotContain("still waiting", output);
+        Assert.Contains("Skip", output);
+
+        await using var scope = db.CreateScope();
+        var status = (await new CaptureStatusTool().InvokeAsync(
+            new JsonObject { ["session_id"] = "chat-1" }, scope.ServiceProvider, default)).AsObject();
+        Assert.False(status["awaiting_judgment"]!.GetValue<bool>());
+    }
+
     // Enforcement fails open: if the gate cannot read its own state it must not block, or a turn
     // could be blocked repeatedly with no record of the ask. The turn finalizes unjudged and the
     // failure is recorded, so it stays distinguishable from an ordinary unjudged turn.

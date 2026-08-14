@@ -145,6 +145,55 @@ public class JudgmentEnforcementPolicyTests
         Assert.Equal(JudgmentEnforcementAction.ProceedUnjudged, decision.Action);
     }
 
+    // An already-judged turn is finished business, so it is never re-asked and never re-reported as
+    // "asked and unanswered" just because an earlier ask was recorded against it.
+    [Fact]
+    public void AlreadyJudged_OutranksExhaustedAttempts()
+    {
+        var decision = JudgmentEnforcementPolicy.Decide(
+            Substantive(alreadyJudged: true, priorAttempts: 1), JudgmentEnforcementMode.Substantive);
+
+        Assert.Equal(JudgmentEnforcementAction.Finalize, decision.Action);
+        Assert.Equal(JudgmentEnforcementPolicy.AlreadyJudgedReason, decision.Reason);
+    }
+
+    // Every outcome carries its own reason, so the recorded diagnostics can name which one happened.
+    [Fact]
+    public void EveryReason_IsDistinct()
+    {
+        var reasons = new[]
+        {
+            JudgmentEnforcementPolicy.JudgmentPresentReason,
+            JudgmentEnforcementPolicy.AlreadyJudgedReason,
+            JudgmentEnforcementPolicy.EnforcementOffReason,
+            JudgmentEnforcementPolicy.NotSubstantiveReason,
+            JudgmentEnforcementPolicy.RequestingReason,
+            JudgmentEnforcementPolicy.AttemptsExhaustedReason,
+            JudgmentEnforcementPolicy.HostResumedReason,
+        };
+
+        Assert.Equal(reasons.Length, reasons.Distinct(StringComparer.Ordinal).Count());
+        Assert.DoesNotContain(reasons, r => r.Contains("unavailable", StringComparison.OrdinalIgnoreCase));
+    }
+
+    // The block reason is the only channel a blocked Stop has, so it must name the tool, say that a
+    // rejection is acceptable, and quote the request being answered.
+    [Fact]
+    public void BlockMessage_NamesTheToolAndTheAcceptedAnswers()
+    {
+        var message = JudgmentBlockMessage.For(7);
+
+        Assert.Contains("submit_capture_judgment", message);
+        Assert.Contains("request #7", message);
+        Assert.Contains("Skip", message);
+        foreach (var name in Enum.GetNames<Core.Capture.Judge.JudgeDecision>())
+        {
+            Assert.Contains(name, message);
+        }
+
+        Assert.DoesNotContain("request #", JudgmentBlockMessage.For(null));
+    }
+
     [Fact]
     public void MoreAttemptsAllowed_KeepsAsking()
     {
