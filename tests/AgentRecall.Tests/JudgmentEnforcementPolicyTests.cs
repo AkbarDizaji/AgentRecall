@@ -186,12 +186,19 @@ public class JudgmentEnforcementPolicyTests
         Assert.Contains("submit_capture_judgment", message);
         Assert.Contains("request #7", message);
         Assert.Contains("Skip", message);
-        foreach (var name in Enum.GetNames<Core.Capture.Judge.JudgeDecision>())
-        {
-            Assert.Contains(name, message);
-        }
-
         Assert.DoesNotContain("request #", JudgmentBlockMessage.For(null));
+    }
+
+    // Claude Code prints the block reason into the user's transcript, so an ask the user reads on
+    // an ordinary turn stays one short paragraph. The decision vocabulary and the field list belong
+    // to the tool schema and the project instructions, not to this message.
+    [Fact]
+    public void BlockMessage_StaysShortEnoughToShowTheUser()
+    {
+        var message = JudgmentBlockMessage.For(7);
+
+        Assert.True(message.Length <= 320, $"block reason grew to {message.Length} characters: {message}");
+        Assert.DoesNotContain("\n", message);
     }
 
     [Fact]

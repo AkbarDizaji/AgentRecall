@@ -4,6 +4,16 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **The judgment ask is one line instead of a wall of text.** Claude Code prints a blocked Stop
+  hook's reason into the user's own transcript, so the ask the user reads on an ordinary turn was
+  a ten-line protocol dump. The reason now names the tool, the request, and that `Skip` is the
+  expected answer, in a single sentence; the decision vocabulary and the required fields stay
+  where the model already reads them — the `submit_capture_judgment` schema and the project
+  instructions.
+
 ## [2.8.1] - 2026-08-14
 
 ### Fixed

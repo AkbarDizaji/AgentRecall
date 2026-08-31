@@ -9,9 +9,12 @@ namespace AgentRecall.Core.Finalization;
 
 /// <summary>
 /// The instruction AgentRecall hands back when it declines to finish an unjudged turn. It is the
-/// only channel available — a blocked Stop carries one string — so it names the tool, the decision
-/// vocabulary, and the required fields, and it says plainly that a rejection is a valid answer.
-/// Kept bounded and in one place so the CLI, the tests, and the docs cannot drift apart.
+/// only channel available — a blocked Stop carries one string — but that string is not private:
+/// Claude Code prints it into the user's transcript as well, so it stays one short paragraph. The
+/// vocabulary and the required fields live where the model reads them anyway (the
+/// <c>submit_capture_judgment</c> schema and the project instructions); repeating them here only
+/// bought the user a wall of text. Kept in one place so the CLI, the tests, and the docs cannot
+/// drift apart.
 /// </summary>
 public static class JudgmentBlockMessage
 {
@@ -20,17 +23,9 @@ public static class JudgmentBlockMessage
     {
         var request = requestId is { } id ? $" (request #{id})" : string.Empty;
         return
-            $"AgentRecall needs this turn's semantic capture judgment before the turn can finish{request}. " +
-            "You are the judge: AgentRecall makes no model or network calls of its own, so a turn nobody " +
-            "judges is a turn it must record as unjudged. Call the `submit_capture_judgment` MCP tool now " +
-            "with your verdict for the turn you just completed:\n" +
-            "- decision: Capture | SuggestCapture | Skip | ReinforceExisting | SupersedeExisting\n" +
-            "- memory_type, confidence, capture_reason\n" +
-            "- normalized_rule (title, condition, action, because, scope) for Capture/SuggestCapture/SupersedeExisting\n" +
-            "- target_existing_rule_id for ReinforceExisting/SupersedeExisting\n" +
-            "- why_not_saved for Skip\n" +
-            "Skip is a valid and expected answer: most turns hold nothing durable, and a reported Skip is " +
-            "real signal. Do not redo the work and do not ask the user — submit the verdict, then finish.";
+            $"AgentRecall needs your capture judgment for this turn{request}: call " +
+            "`submit_capture_judgment`, then finish. Skip (with why_not_saved) is the expected " +
+            "answer for ordinary work. Do not redo the work and do not ask the user.";
     }
 }
 
