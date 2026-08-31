@@ -18,7 +18,7 @@ public sealed class CaptureStatusTool : IMcpTool
     public string Description =>
         "Report the last AgentRecall turn-finalization result (captured, suggested, " +
         "and skipped rules). Call this before answering whether AgentRecall captured, " +
-        "saved, or remembered anything — never guess and never say the Stop hook 'may " +
+        "saved, or remembered anything — never guess and never say AgentRecall 'may " +
         "have' captured it. Equivalent to `agentrecall finalize-turn status`.";
 
     public JsonObject InputSchema => new()

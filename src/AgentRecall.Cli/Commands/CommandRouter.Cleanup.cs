@@ -222,7 +222,7 @@ public static partial class CommandRouter
         output.WriteLine("Usage:");
         output.WriteLine("  agentrecall cleanup pending-noise [--apply] [--json] [--tag <tag>] [--status <status>]");
         output.WriteLine();
-        output.WriteLine("Finds noisy Pending rules the Stop hook created (assistant prose, malformed");
+        output.WriteLine("Finds noisy Pending rules AgentRecall's end-of-turn capture created (assistant prose, malformed");
         output.WriteLine("triggers, duplicates) and archives them. Dry run by default; pass --apply to archive.");
     }
 }

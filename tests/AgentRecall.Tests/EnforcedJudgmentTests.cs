@@ -737,6 +737,51 @@ public class EnforcedJudgmentTests
             throw new InvalidOperationException("request store unavailable");
     }
 
+    // A self-reported verdict names its turn loosely: the model retypes the prompt into the
+    // finalize-turn payload, and a retyped prompt derives a different turn id than the payload that
+    // was blocked. The verdict must still answer the outstanding ask, or it finalizes a phantom turn
+    // beside the real one — the ask stays open, the next end-of-turn run records the turn as
+    // unjudged, and the summary reports zero captures for a turn that captured a rule.
+    [Fact]
+    public async Task SelfReportedVerdict_WithRetypedPrompt_AnswersTheBlockedTurn()
+    {
+        await using var db = await NewDbAsync();
+        await RunAsync(db, Payload(), "finalize-turn", "--hook");
+        var blocked = Assert.Single(await Requests(db));
+
+        var judgment = CaptureArgs();
+        judgment.Remove("session_id");
+        var selfReported = $$"""
+        {
+          "cwd": "/repo/importer",
+          "session_id": "chat-1",
+          "source": "model-self-judged",
+          "prompt": "Rework the retry policy in the importer.",
+          "assistant_response": "Reworked it and adjusted the tests.",
+          "judgment": {{judgment.ToJsonString()}}
+        }
+        """;
+
+        await RunAsync(db, selfReported, "finalize-turn");
+
+        // One turn, judged, under the blocked turn's id — not a second turn beside it.
+        var finalization = Assert.Single(await Finalizations(db));
+        Assert.Equal(blocked.TurnId, finalization.TurnId);
+        Assert.Equal(nameof(JudgeDecision.Capture), finalization.JudgeDecision);
+        Assert.Single(await Rules(db));
+
+        var resolved = Assert.Single(await Requests(db));
+        Assert.Equal(JudgmentRequestStatus.Resolved, resolved.Status);
+
+        // The next end-of-turn run finishes the turn and reports the capture it actually made.
+        var (_, output) = await RunAsync(db, Payload(), "finalize-turn", "--hook");
+
+        Assert.DoesNotContain("\"decision\":\"block\"", output);
+        Assert.Single(await Finalizations(db));
+        var summary = JsonNode.Parse(output.Trim())!["systemMessage"]!.GetValue<string>();
+        Assert.Contains("auto-captured 1", summary);
+    }
+
     // A verdict with no request and no turn to attach it to is refused, not guessed at.
     [Fact]
     public async Task UnpromptedSubmission_WithNoTurn_IsRefused()

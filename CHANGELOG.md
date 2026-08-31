@@ -4,6 +4,32 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **A self-reported verdict could be recorded against a turn that did not exist, leaving the real
+  turn unjudged.** The turn correlation id is derived from the prompt, and a model reporting its
+  own verdict through `finalize-turn` retypes the prompt rather than replaying the hook payload
+  byte-for-byte. The verdict finalized a phantom turn beside the blocked one: the ask stayed open,
+  the next end-of-turn run recorded the turn as "asked and not answered", its summary reported
+  zero captures for a turn that had just captured a rule, and `capture-status --last-turn`
+  contradicted the rule sitting in the database. A self-reported verdict now answers the
+  outstanding ask through the same seam `submit_capture_judgment` uses, finalizing the turn from
+  the text AgentRecall stored. A judgment on a hook payload is unchanged — Claude Code supplied
+  that turn's text, so its turn id is authoritative and it still closes only its own ask.
+- **A verdict could be attached to a stale ask.** The chat/directory and turn-id fallbacks adopted
+  any outstanding request, including debris from a conversation that ended mid-exchange. Both now
+  require the ask to be fresh, as the enforcement path already did.
+
+### Changed
+- **The judgment ask no longer reads like something the user broke.** Claude Code prints a blocked
+  end-of-turn hook's reason under a prefix of its own — "Stop hook error" — which cannot be changed
+  from here, so the message now opens by saying nothing went wrong before asking for the verdict.
+- **AgentRecall's own output calls it AgentRecall, not "the Stop hook."** Help text and tool
+  descriptions now say "AgentRecall's end-of-turn capture". The remaining occurrences of "Stop" are
+  Claude Code's own: the hook event name in settings, and the prefixes it prints around hook
+  output.
+
 ## [2.8.2] - 2026-08-31
 
 ### Changed

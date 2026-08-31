@@ -23,7 +23,7 @@ public sealed class SubmitCaptureJudgmentTool : IMcpTool
 
     public string Description =>
         "Submit your semantic capture judgment for the turn you just completed — you are the judge. " +
-        "Call this when AgentRecall's Stop hook asks for a judgment, or whenever you want a turn " +
+        "Call this when AgentRecall asks for a judgment at the end of a turn, or whenever you want a turn " +
         "judged without waiting for it. decision=Capture|SuggestCapture|Skip|ReinforceExisting|" +
         "SupersedeExisting. Skip is valid and expected for ordinary work: pass why_not_saved. " +
         "Capture/SuggestCapture/SupersedeExisting need normalized_rule (title, condition, action, " +

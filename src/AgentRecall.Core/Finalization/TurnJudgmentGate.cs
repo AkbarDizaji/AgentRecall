@@ -10,7 +10,10 @@ namespace AgentRecall.Core.Finalization;
 /// <summary>
 /// The instruction AgentRecall hands back when it declines to finish an unjudged turn. It is the
 /// only channel available — a blocked Stop carries one string — but that string is not private:
-/// Claude Code prints it into the user's transcript as well, so it stays one short paragraph. The
+/// Claude Code prints it into the user's transcript, under a prefix of its own that reads
+/// "Stop hook error". That prefix is the host's and cannot be changed here, so the message opens by
+/// saying nothing went wrong: the user sees the word "error" for a routine handoff and would
+/// otherwise think they broke something. It stays one short paragraph for the same reason. The
 /// vocabulary and the required fields live where the model reads them anyway (the
 /// <c>submit_capture_judgment</c> schema and the project instructions); repeating them here only
 /// bought the user a wall of text. Kept in one place so the CLI, the tests, and the docs cannot
@@ -23,8 +26,8 @@ public static class JudgmentBlockMessage
     {
         var request = requestId is { } id ? $" (request #{id})" : string.Empty;
         return
-            $"AgentRecall needs your capture judgment for this turn{request}: call " +
-            "`submit_capture_judgment`, then finish. Skip (with why_not_saved) is the expected " +
+            $"Nothing went wrong — AgentRecall is asking for this turn's capture judgment{request}. " +
+            "Call `submit_capture_judgment`, then finish. Skip (with why_not_saved) is the expected " +
             "answer for ordinary work. Do not redo the work and do not ask the user.";
     }
 }
@@ -392,6 +395,12 @@ public sealed class TurnJudgmentGate : ITurnJudgmentGate
         };
     }
 
+    /// <summary>
+    /// The request this verdict answers. An id the caller quotes is honoured as given; the looser
+    /// hints (turn id, then chat/directory) only adopt an ask that is still fresh, so a verdict
+    /// cannot be attached to debris from a chat that ended mid-exchange — which would finalize the
+    /// wrong turn's text under the wrong turn id.
+    /// </summary>
     private async Task<TurnJudgmentRequest?> ResolveTargetAsync(
         JudgmentSubmission submission, CancellationToken cancellationToken)
     {
@@ -407,14 +416,16 @@ public sealed class TurnJudgmentGate : ITurnJudgmentGate
         if (!string.IsNullOrEmpty(submission.TurnId))
         {
             var byTurn = await _requests.FindByTurnAsync(submission.TurnId, cancellationToken).ConfigureAwait(false);
-            if (byTurn is { Status: JudgmentRequestStatus.Outstanding })
+            if (byTurn is { Status: JudgmentRequestStatus.Outstanding } && IsFresh(byTurn.CreatedAt))
             {
                 return byTurn;
             }
         }
 
-        return await _requests
+        var outstanding = await _requests
             .FindOutstandingAsync(submission.SessionId, submission.Cwd, cancellationToken).ConfigureAwait(false);
+
+        return outstanding is not null && IsFresh(outstanding.CreatedAt) ? outstanding : null;
     }
 
     /// <summary>

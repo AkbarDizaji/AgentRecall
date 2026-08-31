@@ -1745,13 +1745,51 @@ public static partial class CommandRouter
                 }
             }
 
-            var result = await finalizer.FinalizeAsync(input, cancellationToken).ConfigureAwait(false);
+            var gate = scope.ServiceProvider.GetRequiredService<Core.Finalization.ITurnJudgmentGate>();
+            Core.Finalization.TurnFinalizationResult result;
 
-            // A verdict can also arrive by this route (a judgment on the payload, or a hand-piped
-            // payload), not only through submit_capture_judgment. Close the ask it answers so the
-            // status surfaces stop reporting the turn as unanswered.
-            await scope.ServiceProvider.GetRequiredService<Core.Finalization.ITurnJudgmentGate>()
-                .CloseOutstandingAsync(input, result, cancellationToken).ConfigureAwait(false);
+            // A self-reported verdict (the model piping `finalize-turn` itself) names its turn only
+            // loosely: the model retypes the prompt, and a retyped prompt derives a different turn id
+            // than the payload that was blocked. So its turn id cannot be trusted and the outstanding
+            // ask for the chat is the better identifier — route it through the same seam the tool
+            // uses, which answers that ask from the turn text AgentRecall stored. Otherwise the
+            // verdict finalizes a phantom turn beside the real one: the ask stays open, the next
+            // end-of-turn run records the turn as unjudged, and its summary reports zero captures for
+            // a turn that captured a rule.
+            //
+            // A judgment on a hook payload is the opposite case: Claude Code supplied that turn's
+            // text, so its turn id is authoritative and must not be overridden by whatever ask
+            // happens to be open — it closes its own ask, and only its own.
+            if (input.SuppliedJudgment is not null && !hook)
+            {
+                var submission = await gate.SubmitAsync(
+                    new Core.Finalization.JudgmentSubmission
+                    {
+                        Verdict = input.SuppliedJudgment,
+                        SessionId = input.SessionId,
+                        Cwd = input.Cwd,
+                        Prompt = input.Prompt,
+                        AssistantResponse = input.AssistantResponse,
+                        ScopeLevel = input.ScopeLevel,
+                        ScopeValue = input.ScopeValue,
+                        Source = input.Source ?? "model-self-judged",
+                    },
+                    cancellationToken).ConfigureAwait(false);
+
+                // A refused submission is not a reason to lose the turn: finalize it directly, which
+                // is what this path did before there was anything to submit to.
+                result = submission.Finalization
+                    ?? await finalizer.FinalizeAsync(input, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                result = await finalizer.FinalizeAsync(input, cancellationToken).ConfigureAwait(false);
+
+                // A judgment can also reach the finalizer without passing through the gate at all
+                // (a cached re-finalization of a judged turn). Close the ask it answers so the
+                // status surfaces stop reporting the turn as unanswered.
+                await gate.CloseOutstandingAsync(input, result, cancellationToken).ConfigureAwait(false);
+            }
 
             // Passive seed reinforcement: a seed rule used repeatedly across turns without a
             // correction earns a small, capped confidence bump. Runs on the end-of-turn path
@@ -2907,7 +2945,7 @@ public static partial class CommandRouter
         output.WriteLine("                       body read from stdin)");
         output.WriteLine("  document status      Show document-opportunity mode and the last candidate (--json)");
         output.WriteLine("  cleanup pending-noise");
-        output.WriteLine("                       Archive noisy Pending rules from the Stop hook (--apply, --json, --tag, --status)");
+        output.WriteLine("                       Archive noisy Pending rules from AgentRecall's end-of-turn capture (--apply, --json, --tag, --status)");
         output.WriteLine("  doctor               Check database/schema, PATH, Claude Code hook wiring, and the");
         output.WriteLine("                       installed version (--fix, --json, --offline, --project <path>)");
         output.WriteLine("  mcp                  Run the MCP server over stdio (for Claude Code)");
