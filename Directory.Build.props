@@ -17,7 +17,7 @@
     <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1903</WarningsNotAsErrors>
 
     <!-- Single source of truth for the AgentRecall version. -->
-    <VersionPrefix>2.8.1</VersionPrefix>
+    <VersionPrefix>2.8.2</VersionPrefix>
 
     <!-- Only the CLI project opts back in (as a packed tool). -->
     <IsPackable>false</IsPackable>
