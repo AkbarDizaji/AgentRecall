@@ -4,7 +4,7 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.8.3] - 2026-09-01
 
 ### Fixed
 - **A self-reported verdict could be recorded against a turn that did not exist, leaving the real
