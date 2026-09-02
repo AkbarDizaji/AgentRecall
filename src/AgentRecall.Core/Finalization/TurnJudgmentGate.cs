@@ -21,14 +21,33 @@ namespace AgentRecall.Core.Finalization;
 /// </summary>
 public static class JudgmentBlockMessage
 {
-    /// <summary>Builds the block instruction, quoting the request id when there is one.</summary>
-    public static string For(int? requestId)
+    /// <summary>How many rule ids the ask names before it stops listing them.</summary>
+    private const int MaxRulesNamedInAsk = 5;
+
+    /// <summary>
+    /// Builds the block instruction, quoting the request id when there is one and naming the rules
+    /// still awaiting an outcome. The outcome clause is added only when this turn injected rules
+    /// nobody has reported on: an agent that is never asked never answers, and an unreported rule
+    /// is how a confidence ledger stays empty for months.
+    /// </summary>
+    public static string For(int? requestId, IReadOnlyList<int>? rulesAwaitingOutcome = null)
     {
         var request = requestId is { } id ? $" (request #{id})" : string.Empty;
-        return
+        var message =
             $"Nothing went wrong — AgentRecall is asking for this turn's capture judgment{request}. " +
             "Call `submit_capture_judgment`, then finish. Skip (with why_not_saved) is the expected " +
             "answer for ordinary work. Do not redo the work and do not ask the user.";
+
+        if (rulesAwaitingOutcome is { Count: > 0 } awaiting)
+        {
+            var ids = string.Join(", ", awaiting.Take(MaxRulesNamedInAsk).Select(id => $"#{id}"));
+            var more = awaiting.Count > MaxRulesNamedInAsk ? " and others" : string.Empty;
+            message +=
+                $" Also say how the rules it injected fared ({ids}{more}) in `rule_outcomes`: " +
+                "UserAccepted, UserRejected, CorrectionRepeated or RuleIgnored.";
+        }
+
+        return message;
     }
 }
 
@@ -205,6 +224,7 @@ public sealed class TurnJudgmentGate : ITurnJudgmentGate
                     ScopeLevel = submission.ScopeLevel,
                     ScopeValue = submission.ScopeValue,
                     SuppliedJudgment = submission.Verdict,
+                    RuleOutcomes = submission.RuleOutcomes,
                 },
                 cancellationToken).ConfigureAwait(false);
 
@@ -216,7 +236,7 @@ public sealed class TurnJudgmentGate : ITurnJudgmentGate
             };
         }
 
-        var result = await _finalizer.FinalizeAsync(ToInput(request, submission.Verdict), cancellationToken)
+        var result = await _finalizer.FinalizeAsync(ToInput(request, submission.Verdict, submission.RuleOutcomes), cancellationToken)
             .ConfigureAwait(false);
 
         request.Status = JudgmentRequestStatus.Resolved;
@@ -433,9 +453,13 @@ public sealed class TurnJudgmentGate : ITurnJudgmentGate
     /// transcript now says — keeps the finalized turn identical to the one that was blocked, so the
     /// idempotency hash and the turn correlation id both stay put.
     /// </summary>
-    private static TurnFinalizationInput ToInput(TurnJudgmentRequest request, CaptureJudgeVerdict verdict) =>
+    private static TurnFinalizationInput ToInput(
+        TurnJudgmentRequest request,
+        CaptureJudgeVerdict verdict,
+        IReadOnlyList<Outcomes.ReportedRuleOutcome> ruleOutcomes) =>
         new()
         {
+            RuleOutcomes = ruleOutcomes,
             Cwd = request.Cwd,
             Prompt = request.Prompt,
             AssistantResponse = request.AssistantResponse,

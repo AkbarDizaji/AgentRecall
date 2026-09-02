@@ -131,6 +131,7 @@ public static class ServiceCollectionExtensions
 
         // Outcome-based learning: move rule confidence on real evidence.
         services.AddScoped<IOutcomeTrackingService, OutcomeTrackingService>();
+        services.AddScoped<ITurnOutcomeReporter, TurnOutcomeReporter>();
 
         // Lesson mining: propose new lesson candidates from repeated historical signals.
         services.AddScoped<ILessonMiningService, LessonMiningService>();

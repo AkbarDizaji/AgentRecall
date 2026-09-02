@@ -105,6 +105,12 @@ public sealed record JudgmentSubmission
 
     /// <summary>Where the submission came from, for the recorded source.</summary>
     public string Source { get; init; } = "submit_capture_judgment";
+
+    /// <summary>
+    /// How the rules this turn injected fared, when the submitter reports it alongside the verdict.
+    /// The same shape the payload's <c>rule_outcomes</c> carries, so both routes reach one seam.
+    /// </summary>
+    public IReadOnlyList<Outcomes.ReportedRuleOutcome> RuleOutcomes { get; init; } = [];
 }
 
 /// <summary>The outcome of submitting a verdict.</summary>

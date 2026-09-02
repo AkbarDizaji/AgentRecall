@@ -92,6 +92,42 @@ public class HookTests
         Assert.Contains("Source Rules:", output);
     }
 
+    // The retrieval id has to reach the agent: it is the handle an outcome attaches to, and the
+    // agent is the only party that can report one. An injected block without it makes the
+    // confidence ledger unfillable by design.
+    [Fact]
+    public async Task Hook_InjectedBlock_CarriesTheRetrievalIdOutcomesAttachTo()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+        await SeedMoqRule(db);
+
+        var output = await UserPromptSubmitHook.RunAsync(
+            Payload("Write Moq tests for OrderService"), db.Services, new StringWriter());
+
+        Assert.Contains("Retrieval id: ", output);
+
+        // The id is the one actually recorded, so an outcome reported against it resolves.
+        await using var scope = db.CreateScope();
+        var retrievals = await scope.ServiceProvider
+            .GetRequiredService<IRetrievalRecordRepository>().ListAsync();
+        var recorded = Assert.Single(retrievals);
+        Assert.Contains($"Retrieval id: {recorded.RetrievalId}", output);
+    }
+
+    // Nothing injected, nothing recorded: no id line to point at a retrieval that never happened.
+    [Fact]
+    public void Formatter_WithoutARetrieval_OmitsTheIdLine()
+    {
+        var result = new ContextInjectionResult
+        {
+            MustFollow = [], Suggested = [], Warnings = [],
+            TokensUsed = 0, TokenBudget = 0, Explanation = "",
+        };
+
+        Assert.DoesNotContain("Retrieval id:", HookContextFormatter.Format(result));
+    }
+
     [Fact]
     public async Task Hook_NonDevelopmentPrompt_InjectsNothing()
     {

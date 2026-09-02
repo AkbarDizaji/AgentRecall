@@ -66,7 +66,7 @@ public sealed class AgentRecallDbContext : DbContext
         modelBuilder.Entity<RecallEvent>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Type).HasConversion<string>();
+            entity.Property(e => e.Type).HasConversion(LenientEnum.Converter(RecallEventType.Unknown));
             entity.HasIndex(e => e.RuleId);
             entity.HasIndex(e => e.CreatedAt);
         });
@@ -89,7 +89,7 @@ public sealed class AgentRecallDbContext : DbContext
         modelBuilder.Entity<RuleOutcome>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Type).HasConversion<string>();
+            entity.Property(e => e.Type).HasConversion(LenientEnum.Converter(OutcomeType.Unknown));
             entity.HasIndex(e => e.RuleId);
             entity.HasIndex(e => e.RetrievalId);
             entity.HasIndex(e => e.CreatedAt);
@@ -154,8 +154,10 @@ public sealed class AgentRecallDbContext : DbContext
         modelBuilder.Entity<AgentRecallActivity>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.ActivityType).HasConversion<string>();
-            entity.Property(e => e.NoticeLevel).HasConversion<string>();
+            // Read-tolerant: a row written by a newer build must not break `activity` or the
+            // turn summary for an older one. See LenientEnum.
+            entity.Property(e => e.ActivityType).HasConversion(LenientEnum.Converter(ActivityType.Unknown));
+            entity.Property(e => e.NoticeLevel).HasConversion(LenientEnum.Converter(NoticeLevel.Silent));
             entity.HasIndex(e => e.CreatedAt);
             entity.HasIndex(e => e.ActivityType);
             entity.HasIndex(e => e.OperationHash);

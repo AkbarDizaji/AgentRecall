@@ -1733,7 +1733,12 @@ public static partial class CommandRouter
 
                 if (gateDecision.Action == Core.Finalization.JudgmentEnforcementAction.RequestJudgment)
                 {
-                    EmitJudgmentBlock(output, gateDecision);
+                    // Ask for the outcomes in the same breath as the judgment: the turn already
+                    // stops once here, and a second seam would be a second interruption.
+                    var awaitingOutcome = await RulesAwaitingOutcomeAsync(
+                        scope.ServiceProvider, input, cancellationToken).ConfigureAwait(false);
+
+                    EmitJudgmentBlock(output, gateDecision, awaitingOutcome);
                     return 0;
                 }
 
@@ -1790,6 +1795,13 @@ public static partial class CommandRouter
                 // status surfaces stop reporting the turn as unanswered.
                 await gate.CloseOutstandingAsync(input, result, cancellationToken).ConfigureAwait(false);
             }
+
+            // The other half of recall: how the rules this turn injected actually fared. The report
+            // is host-supplied like the capture judgment — validated here, never inferred — and the
+            // rules nobody reported on are recorded as unreported, so an empty confidence ledger is
+            // visible instead of silent.
+            var outcomeReport = await ApplyRuleOutcomesAsync(
+                scope.ServiceProvider, input, result, cancellationToken).ConfigureAwait(false);
 
             // Passive seed reinforcement: a seed rule used repeatedly across turns without a
             // correction earns a small, capped confidence bump. Runs on the end-of-turn path
@@ -1857,6 +1869,7 @@ public static partial class CommandRouter
             else
             {
                 RenderFinalization(output, result);
+                RenderRuleOutcomes(output, outcomeReport);
                 var level = services.GetRequiredService<AgentRecallOptions>().ResolvedActivityNoticeLevel;
                 PrintNotice(output, notice, level);
                 PrintNotice(output, seedNotice, level);
@@ -1938,16 +1951,108 @@ public static partial class CommandRouter
     }
 
     /// <summary>
+    /// Prints what became of the turn's reported outcomes. Refusals are printed, not swallowed: a
+    /// reporter that thinks it moved a rule's confidence when it did not will never correct itself.
+    /// </summary>
+    private static void RenderRuleOutcomes(TextWriter output, Core.Outcomes.TurnOutcomeReportResult report)
+    {
+        if (report.IsEmpty)
+        {
+            return;
+        }
+
+        output.WriteLine();
+        foreach (var (ruleId, outcome) in report.Applied)
+        {
+            output.WriteLine($"Outcome recorded: #{ruleId} {outcome}");
+        }
+
+        foreach (var refusal in report.Rejected)
+        {
+            output.WriteLine($"Outcome refused: {refusal}");
+        }
+
+        if (report.Unreported.Count > 0)
+        {
+            output.WriteLine(
+                $"Awaiting an outcome: {string.Join(", ", report.Unreported.Select(id => $"#{id}"))}");
+        }
+    }
+
+    /// <summary>
+    /// The rules this turn injected that nobody has reported an outcome for yet. Asking the
+    /// reporter with no reports is a read: it resolves the turn's injected rules and subtracts the
+    /// ones already in the ledger, and writes nothing.
+    /// </summary>
+    private static async Task<IReadOnlyList<int>> RulesAwaitingOutcomeAsync(
+        IServiceProvider services,
+        Core.Finalization.TurnFinalizationInput input,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var turnId = Core.Activity.TurnCorrelation.Compute(input.Cwd, input.Prompt);
+            var report = await services.GetRequiredService<Core.Outcomes.ITurnOutcomeReporter>()
+                .ApplyAsync(turnId, [], cancellationToken).ConfigureAwait(false);
+
+            return report.Unreported;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Never let the outcome half break the judgment ask.
+            Console.Error.WriteLine($"[agentrecall] could not list rules awaiting an outcome: {ex.Message}");
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// Applies the turn's reported rule outcomes and records what came of them. Failures are
+    /// swallowed: a rejected or unrecordable outcome must never be the reason a turn cannot end,
+    /// and the reports themselves are already validated by the reporter.
+    /// </summary>
+    private static async Task<Core.Outcomes.TurnOutcomeReportResult> ApplyRuleOutcomesAsync(
+        IServiceProvider services,
+        Core.Finalization.TurnFinalizationInput input,
+        TurnFinalizationResult result,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await Core.Outcomes.TurnOutcomeReporting.ApplyAndRecordAsync(
+                services.GetRequiredService<Core.Outcomes.ITurnOutcomeReporter>(),
+                services.GetRequiredService<IActivityRecorder>(),
+                result.TurnId,
+                input.RuleOutcomes,
+                input.Source ?? "cli",
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Console.Error.WriteLine($"[agentrecall] rule outcomes not recorded: {ex.Message}");
+            return new Core.Outcomes.TurnOutcomeReportResult();
+        }
+    }
+
+    /// <summary>
     /// Emits Claude Code's Stop-hook block response: the turn does not finish, and
     /// <c>reason</c> — the one channel a blocked Stop has — tells the model which tool to call and
     /// what it must decide. The exit code stays 0; the JSON decision, not the exit code, blocks.
     /// </summary>
-    private static void EmitJudgmentBlock(TextWriter output, Core.Finalization.JudgmentGateDecision decision)
+    private static void EmitJudgmentBlock(
+        TextWriter output,
+        Core.Finalization.JudgmentGateDecision decision,
+        IReadOnlyList<int>? rulesAwaitingOutcome = null)
     {
+        // One message, composed in one place: the stored block reason covers the judgment, and the
+        // outcome clause is added only when this turn left rules unreported.
+        var reason = rulesAwaitingOutcome is { Count: > 0 }
+            ? Core.Finalization.JudgmentBlockMessage.For(decision.RequestId, rulesAwaitingOutcome)
+            : decision.BlockReason ?? Core.Finalization.JudgmentBlockMessage.For(decision.RequestId);
+
         var response = new System.Text.Json.Nodes.JsonObject
         {
             ["decision"] = "block",
-            ["reason"] = decision.BlockReason ?? Core.Finalization.JudgmentBlockMessage.For(decision.RequestId),
+            ["reason"] = reason,
             ["hookSpecificOutput"] = new System.Text.Json.Nodes.JsonObject
             {
                 ["hookEventName"] = "Stop",

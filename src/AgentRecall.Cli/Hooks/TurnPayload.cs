@@ -4,6 +4,7 @@ using System.Text.Json.Nodes;
 using AgentRecall.Core.Capture.Judge;
 using AgentRecall.Core.Domain;
 using AgentRecall.Core.Finalization;
+using AgentRecall.Core.Outcomes;
 
 namespace AgentRecall.Cli.Hooks;
 
@@ -74,9 +75,66 @@ public static class TurnPayload
             SessionId = sessionId,
             SuppliedJudgment = ParseJudgment(obj["judgment"], diagnostics),
             SuppliedDocOpportunity = ParseDocOpportunity(obj["doc_opportunity"], diagnostics),
+            RuleOutcomes = ParseRuleOutcomes(obj["rule_outcomes"], diagnostics),
             HostResumedTurn = hostResumed,
         };
     }
+
+    /// <summary>
+    /// Reads a <c>rule_outcomes</c> array: how the rules this turn injected actually fared. Public
+    /// so the <c>submit_capture_judgment</c> tool reads reports through exactly the same parser as
+    /// the hook payload. Tolerant like the judgment parser — an unreadable entry is dropped with a
+    /// diagnostic rather than failing the turn, and an unknown outcome name is dropped rather than
+    /// guessed at, because a wrong outcome moves a rule's confidence the wrong way.
+    /// </summary>
+    public static IReadOnlyList<ReportedRuleOutcome> ParseRuleOutcomes(JsonNode? node, TextWriter diagnostics)
+    {
+        ArgumentNullException.ThrowIfNull(diagnostics);
+
+        if (node is not JsonArray array)
+        {
+            return [];
+        }
+
+        var reports = new List<ReportedRuleOutcome>();
+        foreach (var entry in array.Take(MaxRuleOutcomes))
+        {
+            if (entry is not JsonObject report)
+            {
+                continue;
+            }
+
+            if (!TryParseEnum<OutcomeType>(AsString(report["outcome"]), out var outcome) ||
+                outcome == OutcomeType.Unknown)
+            {
+                diagnostics.WriteLine(
+                    "[agentrecall] finalize-turn: ignoring a rule outcome with an unrecognised 'outcome'.");
+                continue;
+            }
+
+            var ruleId = AsInt(report["rule_id"]);
+            var retrievalId = NonEmpty(AsString(report["retrieval_id"]));
+            if (ruleId is null && retrievalId is null)
+            {
+                diagnostics.WriteLine(
+                    "[agentrecall] finalize-turn: ignoring a rule outcome naming neither 'rule_id' nor 'retrieval_id'.");
+                continue;
+            }
+
+            reports.Add(new ReportedRuleOutcome
+            {
+                RuleId = ruleId,
+                RetrievalId = retrievalId,
+                Outcome = outcome,
+                Note = Truncate(NonEmpty(AsString(report["note"])), MaxNoteLength),
+            });
+        }
+
+        return reports;
+    }
+
+    private static string? Truncate(string? value, int max) =>
+        value is null || value.Length <= max ? value : value[..max];
 
     /// <summary>
     /// Parses a judgment object on its own — the same verdict shape the Stop-hook payload carries,
@@ -95,6 +153,12 @@ public static class TurnPayload
     // unrecognised enum value) yields null — the finalizer then treats the judgment as absent
     // and skips, never falling back to keyword capture.
     private const int JudgmentMaxLength = 20000;
+
+    /// <summary>Cap on reported outcomes per turn: a turn injects a handful of rules, not hundreds.</summary>
+    private const int MaxRuleOutcomes = 32;
+
+    /// <summary>Cap on an outcome's note, so one report cannot bloat the ledger.</summary>
+    private const int MaxNoteLength = 500;
 
     private static CaptureJudgeVerdict? ParseJudgment(JsonNode? node, TextWriter diagnostics)
     {

@@ -42,6 +42,65 @@ public static class ActivityNoticeFactory
         };
     }
 
+    /// <summary>
+    /// A notice for the outcomes a turn reported, or null when there is nothing to say. Rejected
+    /// reports are listed too: a refused outcome is a decision AgentRecall made, and hiding it
+    /// would leave the reporter thinking a rule's confidence moved when it did not.
+    /// </summary>
+    public static ActivityNotice? ForRuleOutcomesReported(Outcomes.TurnOutcomeReportResult result, string source)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        if (result.Applied.Count == 0 && result.Rejected.Count == 0)
+        {
+            return null;
+        }
+
+        var ruleIds = result.Applied.Select(a => a.RuleId).Distinct().ToList();
+        var summary = result.Applied.Count > 0
+            ? $"recorded outcomes for {ruleIds.Count} {Plural(ruleIds.Count, "rule")}."
+            : $"refused {result.Rejected.Count} reported {Plural(result.Rejected.Count, "outcome")}.";
+
+        return new ActivityNotice
+        {
+            Type = ActivityType.RuleOutcomesReported,
+            Summary = summary,
+            Details =
+            [
+                .. result.Applied.Select(a => $"#{a.RuleId} {a.Outcome}"),
+                .. result.Rejected.Select(r => $"refused: {r}"),
+            ],
+            RuleIds = ruleIds,
+            Source = source,
+        };
+    }
+
+    /// <summary>
+    /// A notice for a turn that used rules and ended with nobody saying how they fared, or null
+    /// when there is nothing outstanding. Recorded so silence is visible: an unreported turn and a
+    /// turn whose rules were reported as ignored are different facts, and only one of them means
+    /// the feedback loop is not running.
+    /// </summary>
+    public static ActivityNotice? ForRuleOutcomesUnreported(
+        Outcomes.TurnOutcomeReportResult result, string source)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        if (result.Disabled || result.Unreported.Count == 0)
+        {
+            return null;
+        }
+
+        return new ActivityNotice
+        {
+            Type = ActivityType.RuleOutcomesUnreported,
+            Summary =
+                $"no outcome reported for {result.Unreported.Count} injected " +
+                $"{Plural(result.Unreported.Count, "rule")}.",
+            Details = [.. result.Unreported.Select(id => $"#{id} awaiting an outcome")],
+            RuleIds = result.Unreported,
+            Source = source,
+        };
+    }
+
     /// <summary>A notice for resolved conflicts, or null when nothing conflicted.</summary>
     public static ActivityNotice? ForConflictResolved(IReadOnlyList<ResolvedConflict> conflicts, string source)
     {

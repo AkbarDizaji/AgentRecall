@@ -55,6 +55,13 @@ public sealed record TurnFinalizationInput
     public Capture.Judge.DocOpportunityVerdict? SuppliedDocOpportunity { get; init; }
 
     /// <summary>
+    /// How the rules this turn injected actually fared, when the host reported it. AgentRecall
+    /// cannot observe this itself, and never infers it: an empty list means nobody said, which is
+    /// recorded as unreported rather than as "the rules did nothing".
+    /// </summary>
+    public IReadOnlyList<Outcomes.ReportedRuleOutcome> RuleOutcomes { get; init; } = [];
+
+    /// <summary>
     /// True when the host signalled that this end-of-turn is already the resumption of one it
     /// blocked earlier (Claude Code's historical <c>stop_hook_active</c>). The current hook payload
     /// does not document such a field, so enforcement does not depend on it: the persisted attempt

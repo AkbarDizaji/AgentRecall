@@ -33,6 +33,16 @@ public static class HookContextFormatter
         // A compact source list stays at the end so the agent can cite every rule.
         AppendSourceRules(sb, result.All.Select(r => $"#{r.Rule.Id}"));
 
+        // The retrieval id these rules were recorded under. It is the handle an outcome
+        // attaches to, and the agent is the only party that can report one — so the id has to
+        // travel with the rules. Without it, every outcome AgentRecall stores would have to
+        // guess which retrieval it belonged to, and the confidence ledger would stay empty.
+        if (!string.IsNullOrWhiteSpace(result.RetrievalId))
+        {
+            sb.AppendLine();
+            sb.AppendLine($"Retrieval id: {result.RetrievalId} (report rule outcomes against this id)");
+        }
+
         // Surface a conflict only when resolution changed what was injected.
         if (result.Conflicts.Count > 0)
         {

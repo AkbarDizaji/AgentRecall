@@ -328,6 +328,33 @@ public static class DevcontainerScaffolder
         check `agentrecall document status` (or `--json`) and answer from the actual recorded
         state, the same discipline as capture-status questions above.
 
+        ### Report how the injected rules fared
+
+        Recall has two halves. The injected block at the top of a turn is the first; the second
+        is saying whether those rules helped, and it is the only thing that moves a rule's
+        confidence. AgentRecall cannot observe it, so it asks — the injected block ends with a
+        `Retrieval id: <id>` line, and the end-of-turn ask names the rules still awaiting an
+        answer. Report them with the verdict, on the `finalize-turn` payload or as a
+        `submit_capture_judgment` argument:
+
+            "rule_outcomes": [
+              { "rule_id": 21, "retrieval_id": "<the injected retrieval id>",
+                "outcome": "UserAccepted", "note": "followed it; the result stood" },
+              { "rule_id": 25, "outcome": "RuleIgnored", "note": "did not apply to this turn" }
+            ]
+
+        - `UserAccepted` — you followed the rule and the work stood.
+        - `UserRejected` — you followed it and the user corrected the result.
+        - `CorrectionRepeated` — the mistake the rule exists to prevent happened anyway.
+        - `RuleIgnored` — the rule did not apply. The honest, expected answer for most injected
+          rules on most turns, and what stops unused rules from drifting upward in confidence.
+
+        AgentRecall refuses two kinds of report, so do not send them: an outcome for a rule no
+        retrieval injected, and `BuildPassed` / `TestsPassed` / `LintPassed` — those must come
+        from whatever actually ran the command, since asserting that tests passed is not a test
+        run and would raise a rule's confidence on nothing. Refusals come back in the tool
+        result; `agentrecall activity last` shows what was recorded.
+
         ### AgentRecall behavior contract
 
         When the user asks anything about AgentRecall's state — whether it captured,

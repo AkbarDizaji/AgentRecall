@@ -28,7 +28,9 @@ public sealed class SubmitCaptureJudgmentTool : IMcpTool
         "SupersedeExisting. Skip is valid and expected for ordinary work: pass why_not_saved. " +
         "Capture/SuggestCapture/SupersedeExisting need normalized_rule (title, condition, action, " +
         "because, scope); ReinforceExisting/SupersedeExisting need target_existing_rule_id. " +
-        "AgentRecall validates the verdict and persists the outcome; it never infers one for you.";
+        "AgentRecall validates the verdict and persists the outcome; it never infers one for you. " +
+        "When the turn used injected rules, also pass rule_outcomes saying how they fared — that is " +
+        "the only thing that moves a rule's confidence.";
 
     public JsonObject InputSchema => new()
     {
@@ -48,6 +50,29 @@ public sealed class SubmitCaptureJudgmentTool : IMcpTool
             ["session_id"] = Prop("string", "Optional: this chat's session id, used to find the awaiting turn."),
             ["cwd"] = Prop("string", "Optional: the turn's working directory, used as a fallback."),
             ["turn_id"] = Prop("string", "Optional: the turn correlation id, when you know it."),
+            ["rule_outcomes"] = new JsonObject
+            {
+                ["type"] = "array",
+                ["description"] =
+                    "How the rules AgentRecall injected this turn actually fared — the other half of " +
+                    "recall, and the only signal that moves a rule's confidence. One entry per rule: " +
+                    "{rule_id (or retrieval_id, quoted from the injected block), outcome, note}. " +
+                    "outcome is UserAccepted, UserRejected, CorrectionRepeated or RuleIgnored — only " +
+                    "what you actually witnessed; a build or test result must come from whatever ran " +
+                    "the command, not from you. RuleIgnored is the honest answer for a rule that did " +
+                    "not apply.",
+                ["items"] = new JsonObject
+                {
+                    ["type"] = "object",
+                    ["properties"] = new JsonObject
+                    {
+                        ["rule_id"] = Prop("integer", "The rule being reported on."),
+                        ["retrieval_id"] = Prop("string", "The retrieval id from the injected context block."),
+                        ["outcome"] = Prop("string", "UserAccepted | UserRejected | CorrectionRepeated | RuleIgnored."),
+                        ["note"] = Prop("string", "A short note recorded as the outcome's reason."),
+                    },
+                },
+            },
             ["prompt"] = Prop("string", "Only for a turn that was not blocked: the user's message for it."),
             ["assistant_response"] = Prop("string", "Only for a turn that was not blocked: what you did/said."),
         },
@@ -74,6 +99,7 @@ public sealed class SubmitCaptureJudgmentTool : IMcpTool
             };
         }
 
+        var ruleOutcomes = TurnPayload.ParseRuleOutcomes(arguments?["rule_outcomes"], Console.Error);
         var cwd = McpArgs.GetString(arguments, "cwd");
         var gate = services.GetRequiredService<ITurnJudgmentGate>();
         var result = await gate.SubmitAsync(
@@ -88,6 +114,7 @@ public sealed class SubmitCaptureJudgmentTool : IMcpTool
                 AssistantResponse = McpArgs.GetString(arguments, "assistant_response"),
                 ScopeLevel = cwd is null ? ScopeLevel.Global : ScopeLevel.Repository,
                 ScopeValue = TurnPayload.RepositoryScopeName(cwd),
+                RuleOutcomes = ruleOutcomes,
             },
             cancellationToken).ConfigureAwait(false);
 
@@ -101,7 +128,18 @@ public sealed class SubmitCaptureJudgmentTool : IMcpTool
         }
 
         await RecordActivityAsync(result, services, cancellationToken).ConfigureAwait(false);
-        return ToNode(result);
+
+        // Outcomes ride the verdict: the same helper the end-of-turn payload uses, so a report
+        // counts the same whether it arrived through this tool or through finalize-turn.
+        var outcomeReport = await Core.Outcomes.TurnOutcomeReporting.ApplyAndRecordAsync(
+            services.GetRequiredService<Core.Outcomes.ITurnOutcomeReporter>(),
+            services.GetRequiredService<IActivityRecorder>(),
+            result.Finalization?.TurnId,
+            ruleOutcomes,
+            "mcp",
+            cancellationToken).ConfigureAwait(false);
+
+        return ToNode(result, outcomeReport);
     }
 
     private static async Task RecordActivityAsync(
@@ -123,7 +161,8 @@ public sealed class SubmitCaptureJudgmentTool : IMcpTool
             .ConfigureAwait(false);
     }
 
-    private static JsonNode ToNode(JudgmentSubmissionResult result)
+    private static JsonNode ToNode(
+        JudgmentSubmissionResult result, Core.Outcomes.TurnOutcomeReportResult outcomes)
     {
         var node = new JsonObject
         {
@@ -131,6 +170,17 @@ public sealed class SubmitCaptureJudgmentTool : IMcpTool
             ["request_id"] = result.RequestId,
             ["was_unprompted"] = result.WasUnprompted,
         };
+
+        // Refusals are reported back, never swallowed: a reporter that believes it moved a rule's
+        // confidence when it did not will keep reporting the same unusable outcome.
+        if (!outcomes.IsEmpty)
+        {
+            node["outcomes_recorded"] = new JsonArray(
+                [.. outcomes.Applied.Select(a => (JsonNode)$"#{a.RuleId} {a.Outcome}")]);
+            node["outcomes_refused"] = new JsonArray([.. outcomes.Rejected.Select(r => (JsonNode)r)]);
+            node["rules_awaiting_outcome"] = new JsonArray(
+                [.. outcomes.Unreported.Select(id => (JsonNode)id)]);
+        }
 
         if (result.Finalization is not { } finalization)
         {

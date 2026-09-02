@@ -4,6 +4,34 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **AgentRecall now asks how the rules it injected actually fared, and records the answer.**
+  Retrieval records have always existed "so outcomes can be attached to them later", and nothing
+  ever attached one: the `Outcomes` table stayed empty for the life of a database, so rule
+  confidence never moved on evidence. The gap was structural, not a missing feature — the
+  retrieval id was never shown to the only party that could report an outcome, and nothing asked
+  for one. Now the injected context block ends with its `Retrieval id`, `inject_context` returns
+  it, the end-of-turn ask names the rules still awaiting an answer, and both the `finalize-turn`
+  payload and `submit_capture_judgment` accept `rule_outcomes`. Rules nobody reported on are
+  recorded as unreported, so an empty ledger is visible rather than silent.
+- **Reported outcomes are validated, not trusted.** An outcome counts only for a rule some
+  retrieval actually injected, and only for what an agent can witness first-hand —
+  `UserAccepted`, `UserRejected`, `CorrectionRepeated`, `RuleIgnored`. `BuildPassed`,
+  `TestsPassed` and `LintPassed` are refused with the reason: they have to come from whatever ran
+  the command, since a model asserting that tests passed is not a test run and would raise a
+  rule's confidence on nothing. Refusals are surfaced in the CLI output, the tool result, and the
+  activity log instead of being swallowed.
+
+### Fixed
+- **A log written by a newer build no longer breaks an older one.** Every enum column used a
+  strict name conversion, so one activity row written by a later AgentRecall (`activity_type` it
+  had never heard of) made EF throw for the whole query — and `agentrecall activity`,
+  `turn-summary` and `capture-status` are exactly the commands the behavior contract says to trust
+  over guessing. The three append-only log tables now read an unrecognised name as `Unknown` and
+  keep the row's own summary text. Writes are unchanged; a build only ever writes names it knows.
+
 ## [2.8.3] - 2026-09-01
 
 ### Fixed

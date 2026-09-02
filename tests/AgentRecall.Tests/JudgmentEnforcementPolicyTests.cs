@@ -201,6 +201,33 @@ public class JudgmentEnforcementPolicyTests
         Assert.DoesNotContain("\n", message);
     }
 
+    // The outcome clause names the rules and the vocabulary the reporter needs, and stays one
+    // paragraph: the user reads this line too, under a prefix that says "error".
+    [Fact]
+    public void BlockMessage_WithRulesAwaitingOutcome_AsksForThemBriefly()
+    {
+        var message = JudgmentBlockMessage.For(7, [21, 25]);
+
+        Assert.Contains("rule_outcomes", message);
+        Assert.Contains("#21", message);
+        Assert.Contains("#25", message);
+        Assert.Contains("RuleIgnored", message);
+        Assert.True(message.Length <= 520, $"the ask grew to {message.Length} characters: {message}");
+        Assert.DoesNotContain("\n", message);
+    }
+
+    // A long list is summarised rather than dumped: the ask names a few rules, not forty.
+    [Fact]
+    public void BlockMessage_WithManyRules_NamesOnlyAFew()
+    {
+        var message = JudgmentBlockMessage.For(7, [.. Enumerable.Range(1, 40)]);
+
+        Assert.Contains("#1", message);
+        Assert.DoesNotContain("#40", message);
+        Assert.Contains("and others", message);
+        Assert.True(message.Length <= 520, $"the ask grew to {message.Length} characters: {message}");
+    }
+
     [Fact]
     public void MoreAttemptsAllowed_KeepsAsking()
     {

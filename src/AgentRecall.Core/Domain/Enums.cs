@@ -122,6 +122,12 @@ public enum RecallEventType
 
     /// <summary>A client reported a rule as wrong, corrupted, or unusable; it was archived on the spot.</summary>
     RuleReportedBad = 10,
+
+    /// <summary>
+    /// An event this build does not recognise — written by a newer AgentRecall. Read tolerance
+    /// only, never written; see <see cref="ActivityType.Unknown"/>.
+    /// </summary>
+    Unknown = 11,
 }
 
 /// <summary>
@@ -273,6 +279,19 @@ public enum ActivityType
 
     /// <summary>The host-supplied document-opportunity judge offered a document to generate.</summary>
     DocOpportunityDetected = 14,
+
+    /// <summary>The host reported how the rules this turn injected fared, and confidence moved.</summary>
+    RuleOutcomesReported = 15,
+
+    /// <summary>The turn injected rules and finished with nobody reporting how they fared.</summary>
+    RuleOutcomesUnreported = 16,
+
+    /// <summary>
+    /// A logged activity this build does not recognise — written by a newer AgentRecall. Read
+    /// tolerance only: never written, so an older build can still list a forward-written log
+    /// (the row's own summary text still reads fine) instead of failing the whole query.
+    /// </summary>
+    Unknown = 17,
 
     /// <summary>
     /// The Stop hook declined to finish a turn without a semantic capture judgment and asked the

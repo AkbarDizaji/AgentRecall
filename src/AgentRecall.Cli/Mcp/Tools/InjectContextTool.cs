@@ -70,6 +70,9 @@ public sealed class InjectContextTool : IMcpTool
             ["preferred_patterns"] = ToStringArray(ContextProjection.PreferredPatterns(result)),
             ["anti_patterns"] = ToStringArray(ContextProjection.AntiPatterns(result)),
             ["source_rule_ids"] = new JsonArray([.. ContextProjection.SourceRuleIds(result).Select(id => (JsonNode)id)]),
+            // The handle an outcome attaches to: the caller is the only party that can report
+            // how these rules actually fared, so it needs the id they were recorded under.
+            ["retrieval_id"] = result.RetrievalId,
             ["tokens_used"] = result.TokensUsed,
             ["token_budget"] = result.TokenBudget,
             ["explanation"] = result.Explanation,

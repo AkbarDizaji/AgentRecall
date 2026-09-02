@@ -131,6 +131,35 @@ Either route supplies the same verdict to the same judge seam.
 Enforcement is configurable via `AgentRecall.JudgmentEnforcementMode`: `Substantive`
 (default), `Always`, or `Off` (never block; turns finalize unjudged as before).
 
+### Report how the injected rules fared
+
+Recall has two halves. The injection you see at the top of a turn is the first; the second is
+saying whether those rules helped, and it is the only thing that moves a rule's confidence.
+AgentRecall cannot observe it, so it asks you — the injected block ends with a
+`Retrieval id: <id>` line, and the end-of-turn ask names the rules still awaiting an answer.
+
+Report them with the verdict, either on the `finalize-turn` payload or as a
+`submit_capture_judgment` argument:
+
+    "rule_outcomes": [
+      { "rule_id": 21, "retrieval_id": "<the injected retrieval id>",
+        "outcome": "UserAccepted", "note": "followed it; the user kept the result" },
+      { "rule_id": 25, "outcome": "RuleIgnored", "note": "did not apply to this turn" }
+    ]
+
+- `UserAccepted` — you followed the rule and the work stood.
+- `UserRejected` — you followed it and the user corrected the result.
+- `CorrectionRepeated` — the mistake the rule exists to prevent happened anyway.
+- `RuleIgnored` — the rule did not apply. This is the honest, expected answer for most injected
+  rules on most turns; reporting it is what keeps a rule's confidence from drifting up on rules
+  nobody uses.
+
+Two things AgentRecall refuses, so do not bother sending them: an outcome for a rule no retrieval
+injected, and `BuildPassed` / `TestsPassed` / `LintPassed`. Those must come from whatever actually
+ran the command — you asserting that tests passed is not a test run, and it would raise a rule's
+confidence on nothing. Refusals come back in the tool result, and `agentrecall activity last`
+shows what was recorded.
+
 ### AgentRecall behavior contract
 
 When the user asks anything about AgentRecall's state — whether it captured,
