@@ -1,5 +1,7 @@
+using System.Globalization;
 using AgentRecall.Cli;
 using AgentRecall.Cli.Devcontainer;
+using AgentRecall.Core;
 using AgentRecall.Core.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -50,6 +52,96 @@ public class CliDoctorSurfaceTests
             Assert.Contains("ready at", output, StringComparison.Ordinal);
             Assert.DoesNotContain("Claude Code hooks", output, StringComparison.Ordinal);
             Assert.DoesNotContain("Version:", output, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    /// <summary>Writes a CLAUDE.md whose AgentRecall block declares the given contract.</summary>
+    private static Task WriteInstructionsAsync(string root, string? declaredContract) =>
+        File.WriteAllTextAsync(
+            Path.Combine(root, DevcontainerScaffolder.ClaudeMdRelativePath),
+            $"{DevcontainerScaffolder.ClaudeMdHeading}\n\n"
+                + (declaredContract is null ? "" : $"**AgentRecall contract: {declaredContract}**\n\n")
+                + "Guidance body.\n");
+
+    // The check that catches a stale install: instructions asking for capabilities the running
+    // build does not implement is a hard failure, because the agent will be told to call tools
+    // that do not exist and nothing else in the system reports it.
+    [Fact]
+    public async Task Doctor_InstructionsExpectALaterContract_FailsAndPointsAtTheUpdate()
+    {
+        var root = NewTempProject();
+        try
+        {
+            await WriteInstructionsAsync(root, (AgentContract.Version + 1).ToString(CultureInfo.InvariantCulture));
+
+            await using var db = await NewDbAsync();
+
+            var (code, output) = await RunAsync(db, "doctor", "--offline", "--project", root);
+
+            Assert.Equal(1, code);
+            Assert.Contains("Instruction contract", output, StringComparison.Ordinal);
+            Assert.Contains($"expects contract {AgentContract.Version + 1}", output, StringComparison.Ordinal);
+            Assert.Contains("dotnet tool update -g agentrecall", output, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Doctor_InstructionsWithoutAContract_WarnsAndFixRefreshesThem()
+    {
+        var root = NewTempProject();
+        try
+        {
+            await WriteInstructionsAsync(root, declaredContract: null);
+
+            await using var db = await NewDbAsync();
+
+            var (warnCode, warnOutput) = await RunAsync(db, "doctor", "--offline", "--project", root);
+
+            Assert.Equal(0, warnCode);
+            Assert.Contains("declares no contract", warnOutput, StringComparison.Ordinal);
+            Assert.Contains("agentrecall claude-code init", warnOutput, StringComparison.Ordinal);
+
+            var (fixCode, fixOutput) = await RunAsync(db, "doctor", "--offline", "--project", root, "--fix");
+
+            Assert.Equal(0, fixCode);
+            Assert.Contains($"contract {AgentContract.Version} matches this build", fixOutput, StringComparison.Ordinal);
+
+            var refreshed = await File.ReadAllTextAsync(
+                Path.Combine(root, DevcontainerScaffolder.ClaudeMdRelativePath));
+            Assert.Equal(AgentContract.Version, AgentContract.ReadDeclaredVersion(refreshed));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    // A project that never opted in has nothing to compare, and a check that fires there would be
+    // noise on every unrelated repository.
+    [Fact]
+    public async Task Doctor_ProjectWithoutAgentRecallInstructions_SkipsTheContractCheck()
+    {
+        var root = NewTempProject();
+        try
+        {
+            await File.WriteAllTextAsync(
+                Path.Combine(root, DevcontainerScaffolder.ClaudeMdRelativePath),
+                "# Someone else's instructions\n");
+
+            await using var db = await NewDbAsync();
+
+            var (code, output) = await RunAsync(db, "doctor", "--offline", "--project", root);
+
+            Assert.Equal(0, code);
+            Assert.DoesNotContain("Instruction contract", output, StringComparison.Ordinal);
         }
         finally
         {

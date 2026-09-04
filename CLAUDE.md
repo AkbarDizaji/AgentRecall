@@ -8,6 +8,17 @@ capture judge**, not from keyword heuristics: the judge decides whether the turn
 holds memory-worthy content, and AgentRecall only validates that decision and
 persists it.
 
+**AgentRecall contract: 3** — these instructions were written for that contract:
+the semantic capture judge, Stop-hook judgment enforcement, and reported rule outcomes.
+Hooks run the globally installed `agentrecall`, never this repository's source, so the
+two can drift apart. Every injected context block names the contract the installed build
+actually implements, in its heading: `## AgentRecall Technical Context (agentrecall
+<version>, contract <n>)`. If that stamp is missing, or names a lower contract than the
+line above, the installed CLI predates these instructions and cannot accept
+`submit_capture_judgment` or `rule_outcomes` — nothing else reports that, and capture
+silently stops happening. Run `agentrecall doctor` and tell the user what it says rather
+than retrying the calls.
+
 **You are that judge.** AgentRecall makes no model or network calls of its own — it
 has no judge to fall back on and never guesses with keywords. So the Stop hook does
 not decide capture on its own: it enforces that a judgment exists. If a substantive

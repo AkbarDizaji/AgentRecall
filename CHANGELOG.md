@@ -4,6 +4,25 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **A stale install now says so, instead of silently dropping capture.** Hooks run whatever
+  `agentrecall` is installed on the machine, never the working tree, so a repository's
+  `CLAUDE.md` can instruct the agent to call `submit_capture_judgment` and report
+  `rule_outcomes` while the installed CLI has neither. Nothing errored and nothing reported it:
+  the agent was told to use capabilities its binary did not have, capture quietly stopped
+  happening, and the only symptom was a memory that never grew — diagnosing one such case meant
+  reading string literals out of an installed dll. Both halves now name a contract. The
+  scaffolded guidance declares the contract it was written for (`AgentRecall contract: 3`),
+  every injected context block stamps the contract the running build implements in its heading
+  (`## AgentRecall Technical Context (agentrecall 2.9.0, contract 3)`), and
+  `agentrecall doctor` compares the two: a failure when the instructions expect more than the
+  build provides, with `dotnet tool update -g agentrecall` as the fix, and a warning when the
+  instructions are the stale half. The check is offline, because a machine with no network
+  still needs the answer, and the stamp costs no extra line of context — it rides on the
+  heading the block already has.
+
 ## [2.9.0] - 2026-09-03
 
 ### Added

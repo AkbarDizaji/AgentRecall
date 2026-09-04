@@ -42,6 +42,12 @@ public static partial class CommandRouter
             checks.Add(hooksCheck);
         }
 
+        var contractCheck = CheckContract(projectRoot, fix);
+        if (contractCheck is not null)
+        {
+            checks.Add(contractCheck);
+        }
+
         if (!offline)
         {
             checks.Add(await CheckVersionAsync(fix, cancellationToken).ConfigureAwait(false));
@@ -193,6 +199,72 @@ public static partial class CommandRouter
             ? $"not fully wired in {settingsPath}"
             : "not wired for this project — automatic recall/capture won't run";
         return new DoctorCheck("Claude Code hooks", DoctorStatus.Warn, message, "agentrecall claude-code init");
+    }
+
+    /// <summary>
+    /// Compares the contract the project's instructions declare against the one this build
+    /// implements. This is the check that catches a stale install: the version check only knows
+    /// what the newest published release is, while the instructions know what the agent is being
+    /// told to do. Offline by design — a machine with no network still needs the answer.
+    /// </summary>
+    private static DoctorCheck? CheckContract(string projectRoot, bool fix)
+    {
+        const string name = "Instruction contract";
+
+        var path = Path.Combine(projectRoot, Devcontainer.DevcontainerScaffolder.ClaudeMdRelativePath);
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        var text = File.ReadAllText(path);
+
+        // A project that never opted in has nothing to compare against, and saying so would be
+        // noise; CheckHooks already reports when the wiring is missing.
+        if (!text.Contains(Devcontainer.DevcontainerScaffolder.ClaudeMdHeading, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var declared = Core.AgentContract.ReadDeclaredVersion(text);
+
+        // Instructions this build can refresh: rewrite the block, then report what it now says.
+        if (fix && (declared is null || declared < Core.AgentContract.Version))
+        {
+            Devcontainer.DevcontainerScaffolder.EnsureClaudeMdGuidance(projectRoot);
+            declared = Core.AgentContract.ReadDeclaredVersion(File.ReadAllText(path));
+        }
+
+        if (declared is null)
+        {
+            return new DoctorCheck(
+                name,
+                DoctorStatus.Warn,
+                $"{path} declares no contract; this build implements {Core.AgentContract.Version}",
+                "agentrecall claude-code init");
+        }
+
+        // The install is behind what the agent is being asked to do — the silent-capture failure.
+        if (declared > Core.AgentContract.Version)
+        {
+            return new DoctorCheck(
+                name,
+                DoctorStatus.Fail,
+                $"{path} expects contract {declared}; this build implements {Core.AgentContract.Version} — "
+                    + "the agent is being asked for capabilities this CLI does not have",
+                "dotnet tool update -g agentrecall");
+        }
+
+        if (declared < Core.AgentContract.Version)
+        {
+            return new DoctorCheck(
+                name,
+                DoctorStatus.Warn,
+                $"{path} declares contract {declared}; this build implements {Core.AgentContract.Version}",
+                "agentrecall claude-code init");
+        }
+
+        return new DoctorCheck(name, DoctorStatus.Ok, $"contract {declared} matches this build");
     }
 
     private static async Task<DoctorCheck> CheckVersionAsync(bool fix, CancellationToken cancellationToken)

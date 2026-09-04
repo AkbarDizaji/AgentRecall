@@ -92,6 +92,22 @@ public class HookTests
         Assert.Contains("Source Rules:", output);
     }
 
+    // Which build answered has to reach the agent too. Hooks run the installed CLI, not the
+    // working tree, so instructions can outlive the binary that must honour them; the heading
+    // stamp is how a stale install becomes visible instead of silently dropping capture.
+    [Fact]
+    public async Task Hook_InjectedBlock_StampsTheRunningBuildAndContract()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+        await SeedMoqRule(db);
+
+        var output = await UserPromptSubmitHook.RunAsync(
+            Payload("Write Moq tests for OrderService"), db.Services, new StringWriter());
+
+        Assert.Contains($"## AgentRecall Technical Context ({Core.AgentContract.Stamp})", output, StringComparison.Ordinal);
+    }
+
     // The retrieval id has to reach the agent: it is the handle an outcome attaches to, and the
     // agent is the only party that can report one. An injected block without it makes the
     // confidence ledger unfillable by design.

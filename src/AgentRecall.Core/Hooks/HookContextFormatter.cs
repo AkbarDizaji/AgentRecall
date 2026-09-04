@@ -22,7 +22,13 @@ public static class HookContextFormatter
         }
 
         var sb = new StringBuilder();
-        sb.AppendLine("## AgentRecall Technical Context");
+
+        // The heading carries the running build's contract stamp. Instructions outlive the binary
+        // that has to honour them — hooks run the installed tool, not the working tree — so the
+        // agent needs to see which build actually answered, and the heading is the one line that
+        // is always there. A missing or lower stamp than the instructions declare is the tell that
+        // the installed CLI predates them; see AgentContract.
+        sb.AppendLine($"## AgentRecall Technical Context ({AgentContract.Stamp})");
 
         // Each section renders its rules as conditional blocks (When / Do / Avoid /
         // Because) so the agent receives knowledge in the same shape it is stored.
