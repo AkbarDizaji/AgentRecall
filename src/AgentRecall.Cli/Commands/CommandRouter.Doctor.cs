@@ -34,12 +34,29 @@ public static partial class CommandRouter
         var offline = options.ContainsKey("offline");
         var projectRoot = options.GetValueOrDefault("project") ?? Directory.GetCurrentDirectory();
 
+        // Which user-level settings file merges into this project. Overridable because the merged
+        // view is the whole point of the registration check, and it has to be inspectable for a
+        // machine other than the one running the command.
+        var userSettingsPath = options.GetValueOrDefault("user-settings");
+
         var checks = new List<DoctorCheck> { await CheckDatabaseAsync(services, cancellationToken).ConfigureAwait(false), CheckPath(fix) };
 
-        var hooksCheck = CheckHooks(projectRoot, fix);
+        var hooksCheck = CheckHooks(projectRoot, fix, userSettingsPath);
         if (hooksCheck is not null)
         {
             checks.Add(hooksCheck);
+        }
+
+        var registrationCheck = CheckHookRegistrations(projectRoot, userSettingsPath);
+        if (registrationCheck is not null)
+        {
+            checks.Add(registrationCheck);
+        }
+
+        var sourceCheck = CheckInstalledAgainstSource(projectRoot);
+        if (sourceCheck is not null)
+        {
+            checks.Add(sourceCheck);
         }
 
         var contractCheck = CheckContract(projectRoot, fix);
@@ -148,6 +165,19 @@ public static partial class CommandRouter
         return new DoctorCheck("PATH", DoctorStatus.Warn, $"{dir} is not on PATH", "agentrecall setup");
     }
 
+    /// <summary>Whether this directory has already opted in to AgentRecall's Claude Code wiring.</summary>
+    private static bool OptedIn(string projectRoot) =>
+        Directory.Exists(Path.Combine(projectRoot, ".claude"))
+        || File.Exists(Path.Combine(projectRoot, Devcontainer.DevcontainerScaffolder.ClaudeMdRelativePath));
+
+    /// <summary>
+    /// Whether the directory is somewhere hook wiring is worth reporting on: already opted in, or a
+    /// repository where a missing wire-up would otherwise go unnoticed. A scratch directory gets no
+    /// hook checks at all, so `doctor` there never reports a problem it does not have.
+    /// </summary>
+    private static bool LooksLikeAProject(string projectRoot) =>
+        OptedIn(projectRoot) || Directory.Exists(Path.Combine(projectRoot, ".git"));
+
     /// <summary>
     /// Checks Claude Code hook wiring. Reported for any project that has either already
     /// opted in (a <c>.claude</c> directory or <c>CLAUDE.md</c> present) or looks like one
@@ -156,12 +186,10 @@ public static partial class CommandRouter
     /// recognizable project (e.g. a scratch directory), so `doctor` there doesn't report a
     /// false problem.
     /// </summary>
-    private static DoctorCheck? CheckHooks(string projectRoot, bool fix)
+    private static DoctorCheck? CheckHooks(string projectRoot, bool fix, string? userSettingsPath)
     {
-        var everOptedIn = Directory.Exists(Path.Combine(projectRoot, ".claude"))
-            || File.Exists(Path.Combine(projectRoot, Devcontainer.DevcontainerScaffolder.ClaudeMdRelativePath));
-        var looksLikeAProject = everOptedIn || Directory.Exists(Path.Combine(projectRoot, ".git"));
-        if (!looksLikeAProject)
+        var everOptedIn = OptedIn(projectRoot);
+        if (!LooksLikeAProject(projectRoot))
         {
             return null;
         }
@@ -187,6 +215,26 @@ public static partial class CommandRouter
             return new DoctorCheck("Claude Code hooks", DoctorStatus.Ok, $"wired in {settingsPath}");
         }
 
+        // Wired, but somewhere other than the file this command writes — a local settings file, or
+        // the user-level one. Reporting "not wired" there would be wrong, and letting --fix act on
+        // it would add a second registration of a hook that already runs.
+        var scan = Devcontainer.HookRegistrationScanner.Scan(
+            Devcontainer.HookRegistrationScanner.SettingsPathsFor(projectRoot, userSettingsPath));
+        if (scan.Registers(Devcontainer.DevcontainerScaffolder.RecallHookMarker)
+            && scan.Registers(Devcontainer.DevcontainerScaffolder.FinalizeTurnMarker)
+            && scan.Registers(Devcontainer.DevcontainerScaffolder.PreToolUseHookMarker))
+        {
+            var files = scan.Registrations
+                .Select(r => r.SettingsPath)
+                .Distinct(StringComparer.Ordinal)
+                .Select(Path.GetFileName);
+
+            return new DoctorCheck(
+                "Claude Code hooks",
+                DoctorStatus.Ok,
+                $"wired across {string.Join(", ", files)}");
+        }
+
         if (fix)
         {
             Devcontainer.DevcontainerScaffolder.Init(projectRoot, createDevcontainer: false);
@@ -199,6 +247,115 @@ public static partial class CommandRouter
             ? $"not fully wired in {settingsPath}"
             : "not wired for this project — automatic recall/capture won't run";
         return new DoctorCheck("Claude Code hooks", DoctorStatus.Warn, message, "agentrecall claude-code init");
+    }
+
+    /// <summary>
+    /// Reports how many times AgentRecall's hooks are registered across the settings files Claude
+    /// Code merges. A hook wired in both <c>settings.json</c> and <c>settings.local.json</c> is not
+    /// a conflict the host resolves — it runs twice on every turn, and no single file shows that.
+    /// Deliberately not repaired by --fix: the duplicate could be the copy the user wants kept, and
+    /// settings.local.json is usually untracked, so guessing wrong is unrecoverable.
+    /// </summary>
+    private static DoctorCheck? CheckHookRegistrations(string projectRoot, string? userSettingsPath)
+    {
+        const string name = "Hook registrations";
+
+        if (!LooksLikeAProject(projectRoot))
+        {
+            return null;
+        }
+
+        var scan = Devcontainer.HookRegistrationScanner.Scan(
+            Devcontainer.HookRegistrationScanner.SettingsPathsFor(projectRoot, userSettingsPath));
+
+        // Claude Code cannot read them either, so hooks the user believes are wired are not running.
+        if (scan.UnreadableFiles.Count > 0)
+        {
+            return new DoctorCheck(
+                name,
+                DoctorStatus.Fail,
+                $"could not parse {string.Join(", ", scan.UnreadableFiles)} — Claude Code cannot load it either, "
+                    + "so its hooks are not running",
+                "fix the JSON in that file");
+        }
+
+        // Nothing registered anywhere: CheckHooks already says so, and repeating it is noise.
+        if (!scan.Any)
+        {
+            return null;
+        }
+
+        if (scan.Duplicates.Count > 0)
+        {
+            var detail = scan.Duplicates.Select(duplicate =>
+                $"{duplicate.Key} registered {duplicate.Count()} times "
+                    + $"({string.Join(", ", duplicate.Select(r => Path.GetFileName(r.SettingsPath)))})");
+
+            return new DoctorCheck(
+                name,
+                DoctorStatus.Warn,
+                $"{string.Join("; ", detail)} — Claude Code merges these files, so each runs every turn",
+                "remove the duplicate registration from one of those files");
+        }
+
+        return new DoctorCheck(
+            name,
+            DoctorStatus.Ok,
+            $"{scan.Registrations.Count} hook(s) registered once each");
+    }
+
+    /// <summary>
+    /// On an AgentRecall checkout, compares the running build against the version in the working
+    /// tree. This is the drift that cost the most to find: the hooks run the installed tool, so
+    /// someone developing a new version can spend a long time watching the old one behave exactly
+    /// as it always did. The published-version check cannot see it — unreleased source is newer
+    /// than anything on NuGet — and it stays silent outside AgentRecall's own repository, where the
+    /// comparison would be meaningless.
+    /// </summary>
+    private static DoctorCheck? CheckInstalledAgainstSource(string projectRoot)
+    {
+        const string name = "Installed vs. source";
+
+        var propsPath = Path.Combine(projectRoot, "Directory.Build.props");
+        if (!File.Exists(propsPath) || !File.Exists(Path.Combine(projectRoot, "AgentRecall.slnx")))
+        {
+            return null;
+        }
+
+        string propsText;
+        try
+        {
+            propsText = File.ReadAllText(propsPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+
+        var match = System.Text.RegularExpressions.Regex.Match(
+            propsText,
+            @"<VersionPrefix>\s*([^<\s]+)\s*</VersionPrefix>",
+            System.Text.RegularExpressions.RegexOptions.None,
+            TimeSpan.FromSeconds(1));
+
+        if (!match.Success
+            || !Version.TryParse(match.Groups[1].Value, out var source)
+            || !Version.TryParse(AppInfo.Version, out var running))
+        {
+            return null;
+        }
+
+        if (running < source)
+        {
+            return new DoctorCheck(
+                name,
+                DoctorStatus.Warn,
+                $"running {AppInfo.Version}, but this checkout is {source} — hooks run the installed tool, "
+                    + "not this source",
+                "dotnet tool update -g agentrecall --source https://api.nuget.org/v3/index.json");
+        }
+
+        return new DoctorCheck(name, DoctorStatus.Ok, $"running {AppInfo.Version} against a {source} checkout");
     }
 
     /// <summary>

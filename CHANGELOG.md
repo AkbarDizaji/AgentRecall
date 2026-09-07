@@ -4,6 +4,26 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **`doctor` now sees a hook that runs twice, and an install older than the checkout.** The hook
+  check read one file, `.claude/settings.json`, and only asked whether AgentRecall's three
+  commands appeared in it. Claude Code merges `settings.json`, `settings.local.json` and the
+  user-level settings instead of letting the most specific one win, so a hook registered in two of
+  them runs twice on every turn — and every one of those files reported "wired" on its own. One
+  real project had `finalize-turn` and the recall hook doubled that way for weeks while `doctor`
+  reported all checks passed. The new `Hook registrations` check scans the merged set, names the
+  files a duplicate came from, and fails outright on a settings file that exists but cannot be
+  parsed, since the host cannot load it either and its hooks are silently not running. Wiring that
+  lives only in a local settings file now reads as wired rather than missing, and `--fix` leaves it
+  alone instead of adding a second copy. A companion `Installed vs. source` check compares the
+  running build against an AgentRecall checkout's `VersionPrefix`: developing a version while the
+  hooks keep running an older installed tool is invisible to the published-version check, because
+  unreleased source is newer than anything on NuGet. Both checks are offline, and both stay silent
+  outside a recognizable project. `doctor` takes `--user-settings <path>` so the merged view can be
+  inspected for a machine other than the one running the command.
+
 ## [2.10.0] - 2026-09-05
 
 ### Added

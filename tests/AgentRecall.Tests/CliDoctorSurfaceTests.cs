@@ -59,6 +59,188 @@ public class CliDoctorSurfaceTests
         }
     }
 
+    /// <summary>
+    /// A user-level settings path that does not exist, so the merged view a test sees depends only
+    /// on the files the test wrote — never on the settings of whoever runs the suite.
+    /// </summary>
+    private static string NoUserSettings(string root) => Path.Combine(root, "no-user-settings.json");
+
+    private static async Task WriteProjectHookAsync(string root, string fileName, string hookEvent, string command)
+    {
+        var claudeDirectory = Path.Combine(root, ".claude");
+        Directory.CreateDirectory(claudeDirectory);
+        await File.WriteAllTextAsync(
+            Path.Combine(claudeDirectory, fileName),
+            $$"""
+            {
+              "hooks": {
+                "{{hookEvent}}": [
+                  { "hooks": [ { "type": "command", "command": "{{command}}" } ] }
+                ]
+              }
+            }
+            """);
+    }
+
+    // The failure this check exists for: Claude Code merges the settings files rather than letting
+    // the most specific one win, so the same hook in two of them runs twice on every turn.
+    [Fact]
+    public async Task Doctor_SameHookInTwoSettingsFiles_WarnsThatItRunsEveryTurn()
+    {
+        var root = NewTempProject();
+        try
+        {
+            await WriteProjectHookAsync(root, "settings.json", "Stop", "agentrecall finalize-turn --hook");
+            await WriteProjectHookAsync(root, "settings.local.json", "Stop", "agentrecall finalize-turn --hook");
+
+            await using var db = await NewDbAsync();
+
+            var (code, output) = await RunAsync(
+                db, "doctor", "--offline", "--project", root, "--user-settings", NoUserSettings(root));
+
+            Assert.Equal(0, code);
+            Assert.Contains("Hook registrations", output, StringComparison.Ordinal);
+            Assert.Contains("Stop registered 2 times", output, StringComparison.Ordinal);
+            Assert.Contains("settings.json", output, StringComparison.Ordinal);
+            Assert.Contains("settings.local.json", output, StringComparison.Ordinal);
+            Assert.Contains("remove the duplicate registration", output, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    // Wiring that lives in a local settings file is still wiring. Reporting it as missing would be
+    // wrong, and --fix acting on that report would add a second copy of a hook that already runs.
+    [Fact]
+    public async Task Doctor_HooksWiredOnlyInLocalSettings_ReportsWiredAndFixAddsNoDuplicate()
+    {
+        var root = NewTempProject();
+        try
+        {
+            var claudeDirectory = Path.Combine(root, ".claude");
+            Directory.CreateDirectory(claudeDirectory);
+            await File.WriteAllTextAsync(
+                Path.Combine(claudeDirectory, "settings.local.json"),
+                """
+                {
+                  "hooks": {
+                    "UserPromptSubmit": [
+                      { "hooks": [ { "type": "command", "command": "agentrecall hook user-prompt-submit" } ] }
+                    ],
+                    "Stop": [
+                      { "hooks": [ { "type": "command", "command": "agentrecall finalize-turn --hook" } ] }
+                    ],
+                    "PreToolUse": [
+                      { "hooks": [ { "type": "command", "command": "agentrecall hook pre-tool-use" } ] }
+                    ]
+                  }
+                }
+                """);
+
+            await using var db = await NewDbAsync();
+
+            var (code, output) = await RunAsync(
+                db, "doctor", "--offline", "--project", root, "--user-settings", NoUserSettings(root));
+
+            Assert.Equal(0, code);
+            Assert.Contains("wired across settings.local.json", output, StringComparison.Ordinal);
+            Assert.Contains("3 hook(s) registered once each", output, StringComparison.Ordinal);
+
+            var (fixCode, _) = await RunAsync(
+                db, "doctor", "--offline", "--project", root, "--user-settings", NoUserSettings(root), "--fix");
+
+            Assert.Equal(0, fixCode);
+            Assert.False(
+                File.Exists(Path.Combine(claudeDirectory, "settings.json")),
+                "--fix must not re-wire hooks that already run from another settings file");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    // A settings file that exists but cannot be parsed is a wiring failure: the host cannot load it
+    // either, so the hooks a user believes are wired are not running at all.
+    [Fact]
+    public async Task Doctor_UnparseableSettingsFile_FailsInsteadOfReportingWired()
+    {
+        var root = NewTempProject();
+        try
+        {
+            var claudeDirectory = Path.Combine(root, ".claude");
+            Directory.CreateDirectory(claudeDirectory);
+            await File.WriteAllTextAsync(Path.Combine(claudeDirectory, "settings.json"), "{ \"hooks\": ");
+
+            await using var db = await NewDbAsync();
+
+            var (code, output) = await RunAsync(
+                db, "doctor", "--offline", "--project", root, "--user-settings", NoUserSettings(root));
+
+            Assert.Equal(1, code);
+            Assert.Contains("could not parse", output, StringComparison.Ordinal);
+            Assert.Contains("Claude Code cannot load it either", output, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    // Developing a new version while the hooks keep running the installed one is invisible to the
+    // published-version check, because unreleased source is newer than anything on NuGet.
+    [Fact]
+    public async Task Doctor_CheckoutNewerThanTheRunningBuild_WarnsThatHooksRunTheInstalledTool()
+    {
+        var root = NewTempProject();
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(root, "AgentRecall.slnx"), "<Solution />");
+            await File.WriteAllTextAsync(
+                Path.Combine(root, "Directory.Build.props"),
+                "<Project><PropertyGroup><VersionPrefix>999.0.0</VersionPrefix></PropertyGroup></Project>");
+
+            await using var db = await NewDbAsync();
+
+            var (code, output) = await RunAsync(
+                db, "doctor", "--offline", "--project", root, "--user-settings", NoUserSettings(root));
+
+            Assert.Equal(0, code);
+            Assert.Contains("Installed vs. source", output, StringComparison.Ordinal);
+            Assert.Contains($"running {AppInfo.Version}, but this checkout is 999.0.0", output, StringComparison.Ordinal);
+            Assert.Contains("hooks run the installed tool", output, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    // Outside AgentRecall's own repository the comparison is meaningless, so it says nothing.
+    [Fact]
+    public async Task Doctor_ProjectThatIsNotAnAgentRecallCheckout_SkipsTheSourceComparison()
+    {
+        var root = NewTempProject();
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(root, ".git"));
+
+            await using var db = await NewDbAsync();
+
+            var (code, output) = await RunAsync(
+                db, "doctor", "--offline", "--project", root, "--user-settings", NoUserSettings(root));
+
+            Assert.Equal(0, code);
+            Assert.DoesNotContain("Installed vs. source", output, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     /// <summary>Writes a CLAUDE.md whose AgentRecall block declares the given contract.</summary>
     private static Task WriteInstructionsAsync(string root, string? declaredContract) =>
         File.WriteAllTextAsync(

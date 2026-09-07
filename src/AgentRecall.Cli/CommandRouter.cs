@@ -3051,8 +3051,10 @@ public static partial class CommandRouter
         output.WriteLine("  document status      Show document-opportunity mode and the last candidate (--json)");
         output.WriteLine("  cleanup pending-noise");
         output.WriteLine("                       Archive noisy Pending rules from AgentRecall's end-of-turn capture (--apply, --json, --tag, --status)");
-        output.WriteLine("  doctor               Check database/schema, PATH, Claude Code hook wiring, and the");
-        output.WriteLine("                       installed version (--fix, --json, --offline, --project <path>)");
+        output.WriteLine("  doctor               Check database/schema, PATH, Claude Code hook wiring and");
+        output.WriteLine("                       duplicates, the instruction contract, and the installed version");
+        output.WriteLine("                       (--fix, --json, --offline, --project <path>,");
+        output.WriteLine("                       --user-settings <path>)");
         output.WriteLine("  mcp                  Run the MCP server over stdio (for Claude Code)");
         output.WriteLine("  status               Show the memory subsystem status");
         output.WriteLine("  help                 Show this help text");
