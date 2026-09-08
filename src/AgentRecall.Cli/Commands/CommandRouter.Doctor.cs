@@ -205,9 +205,8 @@ public static partial class CommandRouter
             }
 
             var text = File.ReadAllText(settingsPath);
-            return text.Contains(Devcontainer.DevcontainerScaffolder.RecallHookMarker, StringComparison.Ordinal)
-                && text.Contains(Devcontainer.DevcontainerScaffolder.FinalizeTurnMarker, StringComparison.Ordinal)
-                && text.Contains(Devcontainer.DevcontainerScaffolder.PreToolUseHookMarker, StringComparison.Ordinal);
+            return Devcontainer.AgentRecallHooks.All.All(
+                hook => text.Contains(hook.Marker, StringComparison.Ordinal));
         }
 
         if (HasAllMarkers())
@@ -220,9 +219,7 @@ public static partial class CommandRouter
         // it would add a second registration of a hook that already runs.
         var scan = Devcontainer.HookRegistrationScanner.Scan(
             Devcontainer.HookRegistrationScanner.SettingsPathsFor(projectRoot, userSettingsPath));
-        if (scan.Registers(Devcontainer.DevcontainerScaffolder.RecallHookMarker)
-            && scan.Registers(Devcontainer.DevcontainerScaffolder.FinalizeTurnMarker)
-            && scan.Registers(Devcontainer.DevcontainerScaffolder.PreToolUseHookMarker))
+        if (Devcontainer.AgentRecallHooks.All.All(scan.Registers))
         {
             var files = scan.Registrations
                 .Select(r => r.SettingsPath)

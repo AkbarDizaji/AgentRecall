@@ -4,6 +4,19 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **One list of the hooks AgentRecall owns, and one way to find them.** The scaffolder knew which
+  hooks to write while the registration scanner kept its own list of which commands to count, and
+  each walked the settings JSON with its own copy of the same traversal. The lists agreed, which
+  was the danger: a fourth hook added to one of them would have left the other silently blind, and
+  the scanner exists precisely to notice miswiring. `AgentRecallHooks` now holds the hooks — event,
+  command, marker, matcher, superseded markers — and the single traversal over a settings file;
+  writing, counting and auditing all read from it, so `doctor` no longer names the three markers by
+  hand either. Behaviour is unchanged, and a new test asserts the round trip: every hook the
+  scaffolder writes is found by a scan.
+
 ## [2.11.0] - 2026-09-07
 
 ### Added

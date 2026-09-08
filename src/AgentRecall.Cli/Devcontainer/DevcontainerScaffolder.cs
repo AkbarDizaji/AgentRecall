@@ -936,7 +936,7 @@ public static class DevcontainerScaffolder
     /// other settings. Idempotent: a second run reports the hook is already present.
     /// </summary>
     public static HookSetupOutcome EnsureUserPromptSubmitHook(string projectRoot) =>
-        EnsureHook(projectRoot, RecallHookEvent, HookCommand, RecallHookMarker);
+        EnsureHook(projectRoot, AgentRecallHooks.Recall);
 
     /// <summary>
     /// Ensures the project's <c>.claude/settings.json</c> registers the AgentRecall
@@ -946,8 +946,7 @@ public static class DevcontainerScaffolder
     /// <c>agentrecall hook capture</c> registration is upgraded in place to the finalizer.
     /// </summary>
     public static HookSetupOutcome EnsureCaptureHook(string projectRoot) =>
-        EnsureHook(projectRoot, CaptureHookEvent, FinalizeTurnHookCommand, FinalizeTurnMarker,
-            legacyMarkers: [CaptureHookMarker]);
+        EnsureHook(projectRoot, AgentRecallHooks.FinalizeTurn);
 
     /// <summary>
     /// Ensures the project's <c>.claude/settings.json</c> registers the AgentRecall
@@ -957,7 +956,7 @@ public static class DevcontainerScaffolder
     /// other hooks.
     /// </summary>
     public static HookSetupOutcome EnsurePreToolUseHook(string projectRoot) =>
-        EnsureHook(projectRoot, PreToolUseHookEvent, PreToolUseHookCommand, PreToolUseHookMarker, matcher: PreToolUseHookMatcher);
+        EnsureHook(projectRoot, AgentRecallHooks.PreToolUse);
 
     /// <summary>
     /// Registers <paramref name="command"/> under the given Claude Code
@@ -969,14 +968,10 @@ public static class DevcontainerScaffolder
     /// Any of <paramref name="legacyMarkers"/> also identifies a prior registration to
     /// upgrade, so a hook whose command changed across versions is replaced, not duplicated.
     /// </summary>
-    private static HookSetupOutcome EnsureHook(
-        string projectRoot,
-        string eventName,
-        string command,
-        string marker,
-        string? matcher = null,
-        string[]? legacyMarkers = null)
+    private static HookSetupOutcome EnsureHook(string projectRoot, AgentRecallHook hook)
     {
+        var (eventName, command, matcher) = (hook.Event, hook.Command, hook.Matcher);
+
         var path = Path.Combine(projectRoot, ClaudeSettingsRelativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
 
@@ -1036,8 +1031,7 @@ public static class DevcontainerScaffolder
         // If AgentRecall already registered this hook in any form, upgrade it in place
         // (e.g. an older PATH-less command) instead of appending a second, duplicate
         // matcher — which would leave the broken command still firing alongside the fix.
-        var markers = new[] { marker }.Concat(legacyMarkers ?? []).ToArray();
-        var existingCommand = FindHookCommand(matchers, markers);
+        var existingCommand = AgentRecallHooks.FindRegistration(matchers, hook);
         if (existingCommand is not null)
         {
             if (existingCommand["command"]?.GetValue<string>() == command)
@@ -1073,35 +1067,6 @@ public static class DevcontainerScaffolder
 
         File.WriteAllText(path, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
         return existed ? HookSetupOutcome.Merged : HookSetupOutcome.Created;
-    }
-
-    /// <summary>
-    /// Returns the inner <c>{ "type": "command", "command": … }</c> object for the first
-    /// hook whose command contains any of <paramref name="markers"/> (i.e. an AgentRecall
-    /// hook, current or legacy, with or without a PATH prefix), or null when none is
-    /// registered.
-    /// </summary>
-    private static JsonObject? FindHookCommand(JsonArray matchers, string[] markers)
-    {
-        foreach (var matcher in matchers)
-        {
-            if (matcher?["hooks"] is not JsonArray inner)
-            {
-                continue;
-            }
-
-            foreach (var entry in inner)
-            {
-                if (entry is JsonObject obj
-                    && obj["command"]?.GetValue<string>() is { } cmd
-                    && markers.Any(m => cmd.Contains(m, StringComparison.Ordinal)))
-                {
-                    return obj;
-                }
-            }
-        }
-
-        return null;
     }
 
     /// <summary>

@@ -163,6 +163,58 @@ public class HookRegistrationScannerTests
         }
     }
 
+    // The drift guard. The scaffolder writes hooks and the scanner counts them, and those used to
+    // be two hand-maintained lists: a hook added to one was invisible to the other, which blinded
+    // the very check that exists to notice miswiring. Both now read AgentRecallHooks.All, and this
+    // asserts the round trip so a fourth hook cannot be half-added.
+    [Fact]
+    public void EveryHookTheScaffolderWrites_IsFoundByAScan()
+    {
+        var root = NewTempDirectory();
+        try
+        {
+            DevcontainerScaffolder.EnsureUserPromptSubmitHook(root);
+            DevcontainerScaffolder.EnsureCaptureHook(root);
+            DevcontainerScaffolder.EnsurePreToolUseHook(root);
+
+            var scan = HookRegistrationScanner.Scan(
+                HookRegistrationScanner.SettingsPathsFor(root, Path.Combine(root, "absent.json")));
+
+            Assert.Equal(AgentRecallHooks.All.Count, scan.Registrations.Count);
+            Assert.Empty(scan.Duplicates);
+            foreach (var hook in AgentRecallHooks.All)
+            {
+                Assert.True(scan.Registers(hook), $"{hook.Event} hook was written but not found by the scan");
+            }
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    // A superseded command still identifies the hook, which is what lets init upgrade it in place
+    // rather than appending a second registration beside the broken one.
+    [Fact]
+    public void LegacyCommands_StillIdentifyTheirHook()
+    {
+        Assert.True(AgentRecallHooks.FinalizeTurn.Matches(DevcontainerScaffolder.CaptureHookCommand));
+        Assert.True(AgentRecallHooks.IsAgentRecall(DevcontainerScaffolder.CaptureHookCommand));
+        Assert.Contains(DevcontainerScaffolder.CaptureHookMarker, AgentRecallHooks.FinalizeTurn.Markers);
+    }
+
+    [Fact]
+    public void IsAgentRecall_RecognisesEveryCurrentCommandAndNothingElse()
+    {
+        foreach (var hook in AgentRecallHooks.All)
+        {
+            Assert.True(AgentRecallHooks.IsAgentRecall(hook.Command), hook.Command);
+        }
+
+        Assert.False(AgentRecallHooks.IsAgentRecall("bash .ai/hooks/format.sh"));
+        Assert.False(AgentRecallHooks.IsAgentRecall("agentrecall rules list"));
+    }
+
     // The user-level file merges into every project, so it belongs in the scanned set.
     [Fact]
     public void SettingsPathsFor_CoversBothProjectFilesAndTheUserFile()

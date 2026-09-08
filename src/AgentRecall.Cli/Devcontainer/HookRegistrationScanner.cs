@@ -35,6 +35,14 @@ public sealed record HookRegistrationScan
     /// <summary>True when any registration for <paramref name="marker"/> exists in any file.</summary>
     public bool Registers(string marker) =>
         Registrations.Any(r => r.Command.Contains(marker, StringComparison.Ordinal));
+
+    /// <summary>
+    /// True when <paramref name="hook"/> is registered somewhere, at any version — the question
+    /// "is this wired?" asked of the hook itself rather than of a marker string a caller had to
+    /// pick correctly.
+    /// </summary>
+    public bool Registers(AgentRecallHook hook) =>
+        Registrations.Any(r => hook.Matches(r.Command));
 }
 
 /// <summary>
@@ -49,18 +57,6 @@ public sealed record HookRegistrationScan
 /// </summary>
 public static class HookRegistrationScanner
 {
-    /// <summary>
-    /// Every command fragment that identifies a hook as AgentRecall's, current or legacy. Matched
-    /// as a substring so a PATH prefix or an absolute tool path still counts.
-    /// </summary>
-    private static readonly string[] Markers =
-    [
-        DevcontainerScaffolder.RecallHookMarker,
-        DevcontainerScaffolder.FinalizeTurnMarker,
-        DevcontainerScaffolder.PreToolUseHookMarker,
-        DevcontainerScaffolder.CaptureHookMarker,
-    ];
-
     /// <summary>
     /// The settings files Claude Code merges for a project, in the order it reads them. The
     /// user-level file is included because a hook registered there merges into every project.
@@ -128,32 +124,13 @@ public static class HookRegistrationScanner
                 }
 
                 registrations.AddRange(
-                    CommandsIn(matchers).Select(command => new HookRegistration(eventName, command, path)));
+                    AgentRecallHooks.HookCommandsIn(matchers)
+                        .Select(found => found.Command)
+                        .Where(AgentRecallHooks.IsAgentRecall)
+                        .Select(command => new HookRegistration(eventName, command, path)));
             }
         }
 
         return new HookRegistrationScan { Registrations = registrations, UnreadableFiles = unreadable };
-    }
-
-    /// <summary>Yields the AgentRecall commands registered under one event's matcher groups.</summary>
-    private static IEnumerable<string> CommandsIn(JsonArray matchers)
-    {
-        foreach (var matcher in matchers)
-        {
-            if (matcher?["hooks"] is not JsonArray inner)
-            {
-                continue;
-            }
-
-            foreach (var entry in inner)
-            {
-                if (entry is JsonObject obj
-                    && obj["command"]?.GetValue<string>() is { } command
-                    && Markers.Any(marker => command.Contains(marker, StringComparison.Ordinal)))
-                {
-                    yield return command;
-                }
-            }
-        }
     }
 }
