@@ -6,6 +6,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **A rule that keeps proving useful now keeps gaining confidence.** A reported outcome that named
+  its rule had its retrieval id dropped before being recorded, so two things went wrong quietly.
+  The link retrieval ids exist to create was never stored, leaving no way to ask which injection an
+  outcome judged — the `Outcomes` table filled up with rows whose `RetrievalId` was always null.
+  Worse, duplicate suppression keys on (rule, type, retrieval), so a null made one verdict per rule
+  per type recordable exactly once for the life of the database: the first `UserAccepted` for a rule
+  landed, and every later turn reporting that same rule useful again was silently swallowed as a
+  duplicate. The accumulating confidence the outcome ledger was built for could not accumulate.
+  Outcomes now carry the retrieval they answer; targeting still prefers an explicit rule id, and
+  duplicate suppression still holds within a single retrieval.
+
 ### Changed
 - **One list of the hooks AgentRecall owns, and one way to find them.** The scaffolder knew which
   hooks to write while the registration scanner kept its own list of which commands to count, and

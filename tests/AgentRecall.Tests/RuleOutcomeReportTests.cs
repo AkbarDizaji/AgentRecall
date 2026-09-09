@@ -65,14 +65,43 @@ public class RuleOutcomeReportTests
         return (rule.Id, retrievalId, turnId);
     }
 
-    private static string Payload(string? ruleOutcomes = null, string session = "chat-1")
+    /// <summary>
+    /// A later turn that injects the same rule again: a new retrieval record and a new turn id, so
+    /// the second report is a genuinely separate piece of evidence about the same rule.
+    /// </summary>
+    private static async Task<(string RetrievalId, string TurnId)> SeedSecondInjectionAsync(
+        TestDatabase db, int ruleId, string prompt, string cwd = "/repo/importer")
+    {
+        await using var scope = db.CreateScope();
+
+        var retrievalId = "ret" + Guid.NewGuid().ToString("N")[..8];
+        await scope.ServiceProvider.GetRequiredService<IRetrievalRecordRepository>().AddAsync(
+            new RetrievalRecord { RetrievalId = retrievalId, Task = prompt, RuleIds = ruleId.ToString() });
+
+        var turnId = TurnCorrelation.Compute(cwd, prompt)!;
+        await scope.ServiceProvider.GetRequiredService<IActivityRecorder>().RecordAsync(
+            new ActivityNotice
+            {
+                Type = ActivityType.ContextFetched,
+                Summary = "fetched 1 relevant rule.",
+                RuleIds = [ruleId],
+                Source = "hook",
+                TurnId = turnId,
+                OperationHash = $"context:{retrievalId}",
+            });
+
+        return (retrievalId, turnId);
+    }
+
+    private static string Payload(string? ruleOutcomes = null, string session = "chat-1", string? prompt = null)
     {
         var outcomes = ruleOutcomes is null ? string.Empty : $",\n  \"rule_outcomes\": {ruleOutcomes}";
+        var turnPrompt = prompt ?? Prompt;
         return $$"""
         {
           "cwd": "/repo/importer",
           "session_id": "{{session}}",
-          "prompt": "{{Prompt}}",
+          "prompt": "{{turnPrompt}}",
           "assistant_response": "Reworked the retry policy, added tests for the transient path, suite green.",
           "judgment": {
             "decision": "Skip",
@@ -286,5 +315,83 @@ public class RuleOutcomeReportTests
         var outcome = Assert.Single(await Outcomes(db));
         Assert.Equal(OutcomeType.UserRejected, outcome.Type);
         Assert.True(outcome.ConfidenceDelta < 0, "UserRejected should lower confidence.");
+    }
+
+    // The retrieval id is the whole point of minting one: without it on the row, no outcome can say
+    // which injection it judged, and the duplicate guard (rule, type, retrieval) collapses to one
+    // verdict per rule per type for the life of the database.
+    [Fact]
+    public async Task ReportedOutcome_CarriesTheRetrievalItAnswers()
+    {
+        await using var db = await NewDbAsync();
+        var (ruleId, retrievalId, _) = await SeedInjectedRuleAsync(db);
+
+        await RunAsync(
+            db,
+            Payload($$"""[{"rule_id": {{ruleId}}, "retrieval_id": "{{retrievalId}}", "outcome": "UserAccepted"}]"""),
+            "finalize-turn");
+
+        var outcome = Assert.Single(await Outcomes(db));
+        Assert.Equal(retrievalId, outcome.RetrievalId);
+    }
+
+    // A rule that proves useful again, on a later turn, is new evidence — not a duplicate. This is
+    // the confidence that is supposed to accumulate, and it was being swallowed.
+    [Fact]
+    public async Task SameRuleAcrossTwoRetrievals_KeepsAccumulatingConfidence()
+    {
+        await using var db = await NewDbAsync();
+        var (ruleId, firstRetrieval, _) = await SeedInjectedRuleAsync(db);
+
+        await RunAsync(
+            db,
+            Payload($$"""[{"rule_id": {{ruleId}}, "retrieval_id": "{{firstRetrieval}}", "outcome": "UserAccepted"}]"""),
+            "finalize-turn");
+
+        var afterFirst = await ConfidenceOf(db, ruleId);
+
+        const string LaterPrompt = "Tighten the importer's backoff so the retry does not hammer the upstream.";
+        var (secondRetrieval, _) = await SeedSecondInjectionAsync(db, ruleId, LaterPrompt);
+
+        await RunAsync(
+            db,
+            Payload(
+                $$"""[{"rule_id": {{ruleId}}, "retrieval_id": "{{secondRetrieval}}", "outcome": "UserAccepted"}]""",
+                prompt: LaterPrompt),
+            "finalize-turn");
+
+        var outcomes = await Outcomes(db);
+        Assert.Equal(2, outcomes.Count);
+        Assert.Equal(
+            [firstRetrieval, secondRetrieval],
+            outcomes.OrderBy(o => o.Id).Select(o => o.RetrievalId!).ToArray());
+        Assert.True(
+            await ConfidenceOf(db, ruleId) > afterFirst,
+            "a rule that helped again should keep gaining confidence.");
+    }
+
+    // Within one retrieval, the guard still holds: the same verdict reported twice for the same
+    // injection is one piece of evidence, not two.
+    [Fact]
+    public async Task SameRuleAndOutcomeWithinOneRetrieval_IsStillDeduplicated()
+    {
+        await using var db = await NewDbAsync();
+        var (ruleId, retrievalId, _) = await SeedInjectedRuleAsync(db);
+
+        var payload = Payload($$"""[{"rule_id": {{ruleId}}, "retrieval_id": "{{retrievalId}}", "outcome": "UserAccepted"}]""");
+        await RunAsync(db, payload, "finalize-turn");
+        var afterFirst = await ConfidenceOf(db, ruleId);
+
+        await RunAsync(db, payload, "finalize-turn");
+
+        Assert.Single(await Outcomes(db));
+        Assert.Equal(afterFirst, await ConfidenceOf(db, ruleId));
+    }
+
+    private static async Task<double> ConfidenceOf(TestDatabase db, int ruleId)
+    {
+        await using var scope = db.CreateScope();
+        var rule = await scope.ServiceProvider.GetRequiredService<IRecallRuleRepository>().GetAsync(ruleId);
+        return rule!.Confidence;
     }
 }

@@ -105,7 +105,16 @@ public sealed class TurnOutcomeReporter : ITurnOutcomeReporter
                 new OutcomeRequest
                 {
                     RuleId = report.RuleId,
-                    RetrievalId = report.RuleId is null ? retrieval.RetrievalId : null,
+
+                    // Always the retrieval this outcome answers, even when a rule id targets it.
+                    // Nulling it here cost two things. The link retrieval ids exist to create was
+                    // never stored, so no outcome could say which injection it judged; and the
+                    // duplicate guard keys on (rule, type, retrieval), so a null made one verdict
+                    // per rule per type recordable once for the life of the database — every later
+                    // turn reporting the same rule useful again was silently swallowed, which is
+                    // exactly the confidence that was supposed to accumulate. Targeting still
+                    // prefers the rule id; ResolveTargetsAsync carries this through as context.
+                    RetrievalId = retrieval.RetrievalId,
                     TaskId = turnId,
                     Type = report.Outcome,
                     Reason = string.IsNullOrWhiteSpace(report.Note)
