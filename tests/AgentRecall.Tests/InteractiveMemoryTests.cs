@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using AgentRecall.Cli;
+using AgentRecall.Cli.ClaudeCode;
 using AgentRecall.Cli.Mcp.Tools;
 using AgentRecall.Core.Abstractions;
 using AgentRecall.Core.Activity;
@@ -441,7 +442,7 @@ public class InteractiveMemoryTests
     [Fact]
     public void R_ClaudeMdScaffold_ForbidsWantMeToSaveIt()
     {
-        var guidance = AgentRecall.Cli.Devcontainer.DevcontainerScaffolder.ClaudeMdGuidance;
+        var guidance = AgentRecall.Cli.ClaudeCode.ClaudeMdGuidance.Text;
         Assert.Contains("Interactive Memory", guidance, StringComparison.Ordinal);
         Assert.Contains("Want me to save it?", guidance, StringComparison.Ordinal); // present, as a forbidden example
         Assert.Contains("Reply `remember` to save it or `ignore` to skip", guidance, StringComparison.Ordinal);

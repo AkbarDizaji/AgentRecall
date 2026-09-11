@@ -1,3 +1,4 @@
+using AgentRecall.Cli.ClaudeCode;
 using System.Text.Json;
 using AgentRecall.Cli;
 using AgentRecall.Core.Abstractions;
@@ -695,7 +696,7 @@ public class SeedPackTests
     [Fact] // F,AG. The scaffolded CLAUDE.md says seeds are active starter guidance, not absolute truth.
     public void Scaffold_ExplainsSeedRulesAreActiveButNotAbsolute()
     {
-        var scaffold = File.ReadAllText(FindRepoFile(Path.Combine("src", "AgentRecall.Cli", "Devcontainer", "DevcontainerScaffolder.cs")));
+        var scaffold = ClaudeMdGuidance.Text;
         Assert.Contains("Seed rules", scaffold, StringComparison.Ordinal);
         Assert.Contains("active starter guidance", scaffold, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("not project-specific truth", scaffold, StringComparison.Ordinal);

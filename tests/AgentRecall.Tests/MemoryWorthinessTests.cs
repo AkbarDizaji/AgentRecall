@@ -1,3 +1,4 @@
+using AgentRecall.Cli.ClaudeCode;
 using AgentRecall.Cli.Devcontainer;
 using AgentRecall.Core.Abstractions;
 using AgentRecall.Core.Domain;
@@ -294,7 +295,7 @@ public class MemoryWorthinessTests
     [Fact]
     public void ClaudeMdGuidance_TeachesLessonsNotFacts()
     {
-        var guidance = DevcontainerScaffolder.ClaudeMdGuidance;
+        var guidance = ClaudeMdGuidance.Text;
 
         Assert.Contains("Store lessons, not facts", guidance, StringComparison.Ordinal);
         Assert.Contains("Is this a reusable lesson or merely a code fact?", guidance, StringComparison.Ordinal);

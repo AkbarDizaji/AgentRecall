@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AgentRecall.Cli;
+using AgentRecall.Cli.ClaudeCode;
 using AgentRecall.Cli.Devcontainer;
 using AgentRecall.Cli.Hooks;
 using AgentRecall.Core.Abstractions;
@@ -332,6 +333,6 @@ public class CaptureHookTests
     [Fact]
     public void ClaudeMdGuidance_ContainsStoreLessonsNotFacts()
     {
-        Assert.Contains("Store lessons, not facts", DevcontainerScaffolder.ClaudeMdGuidance, StringComparison.Ordinal);
+        Assert.Contains("Store lessons, not facts", ClaudeMdGuidance.Text, StringComparison.Ordinal);
     }
 }

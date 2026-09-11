@@ -1,3 +1,4 @@
+using AgentRecall.Cli.ClaudeCode;
 using System.Text.Json.Nodes;
 using AgentRecall.Cli.Devcontainer;
 using Xunit;
@@ -89,7 +90,7 @@ public class DevcontainerScaffolderTests
 
             // But the environment-agnostic wiring is applied.
             Assert.True(File.Exists(Path.Combine(root, DevcontainerScaffolder.ClaudeSettingsRelativePath)));
-            Assert.True(File.Exists(Path.Combine(root, DevcontainerScaffolder.ClaudeMdRelativePath)));
+            Assert.True(File.Exists(Path.Combine(root, ClaudeMdGuidance.RelativePath)));
         }
         finally
         {
@@ -310,8 +311,8 @@ public class DevcontainerScaffolderTests
 
             Assert.Equal(GuidanceOutcome.Created, result.GuidanceOutcome);
 
-            var claudeMd = File.ReadAllText(Path.Combine(root, DevcontainerScaffolder.ClaudeMdRelativePath));
-            Assert.Contains(DevcontainerScaffolder.ClaudeMdHeading, claudeMd);
+            var claudeMd = File.ReadAllText(Path.Combine(root, ClaudeMdGuidance.RelativePath));
+            Assert.Contains(ClaudeMdGuidance.Heading, claudeMd);
             // Encodes the accept-on-action capture policy.
             Assert.Contains("accepted", claudeMd);
             Assert.Contains("import_pr_comments", claudeMd);
@@ -328,22 +329,22 @@ public class DevcontainerScaffolderTests
         var root = NewTempProject();
         try
         {
-            var path = Path.Combine(root, DevcontainerScaffolder.ClaudeMdRelativePath);
+            var path = Path.Combine(root, ClaudeMdGuidance.RelativePath);
             const string original = "# My Project\n\nExisting notes.\n";
             File.WriteAllText(path, original);
 
-            var first = DevcontainerScaffolder.EnsureClaudeMdGuidance(root);
+            var first = ClaudeMdGuidance.Ensure(root);
             Assert.Equal(GuidanceOutcome.Appended, first);
 
             var afterFirst = File.ReadAllText(path);
             Assert.StartsWith(original, afterFirst); // prior content preserved verbatim
-            Assert.Contains(DevcontainerScaffolder.ClaudeMdHeading, afterFirst);
+            Assert.Contains(ClaudeMdGuidance.Heading, afterFirst);
 
-            var second = DevcontainerScaffolder.EnsureClaudeMdGuidance(root);
+            var second = ClaudeMdGuidance.Ensure(root);
             Assert.Equal(GuidanceOutcome.AlreadyPresent, second);
 
             // Heading appears exactly once — no duplicate block.
-            var occurrences = File.ReadAllText(path).Split(DevcontainerScaffolder.ClaudeMdHeading).Length - 1;
+            var occurrences = File.ReadAllText(path).Split(ClaudeMdGuidance.Heading).Length - 1;
             Assert.Equal(1, occurrences);
         }
         finally
@@ -360,13 +361,13 @@ public class DevcontainerScaffolderTests
         var root = NewTempProject();
         try
         {
-            var path = Path.Combine(root, DevcontainerScaffolder.ClaudeMdRelativePath);
+            var path = Path.Combine(root, ClaudeMdGuidance.RelativePath);
             const string before = "# My Project\n\nExisting notes above the guidance.\n\n";
             const string after = "\n## My Own Section\n\nExisting notes below the guidance.\n";
-            var stale = DevcontainerScaffolder.ClaudeMdHeading + "\n\nThis is an outdated guidance block from an older AgentRecall version.\n";
+            var stale = ClaudeMdGuidance.Heading + "\n\nThis is an outdated guidance block from an older AgentRecall version.\n";
             File.WriteAllText(path, before + stale + after);
 
-            var outcome = DevcontainerScaffolder.EnsureClaudeMdGuidance(root);
+            var outcome = ClaudeMdGuidance.Ensure(root);
             Assert.Equal(GuidanceOutcome.Updated, outcome);
 
             var refreshed = File.ReadAllText(path);
@@ -378,11 +379,11 @@ public class DevcontainerScaffolderTests
             Assert.Contains("You are the semantic judge", refreshed, StringComparison.Ordinal);
 
             // Heading appears exactly once — the refresh replaced, never duplicated, the block.
-            var occurrences = refreshed.Split(DevcontainerScaffolder.ClaudeMdHeading).Length - 1;
+            var occurrences = refreshed.Split(ClaudeMdGuidance.Heading).Length - 1;
             Assert.Equal(1, occurrences);
 
             // A further re-run is now a true no-op.
-            Assert.Equal(GuidanceOutcome.AlreadyPresent, DevcontainerScaffolder.EnsureClaudeMdGuidance(root));
+            Assert.Equal(GuidanceOutcome.AlreadyPresent, ClaudeMdGuidance.Ensure(root));
         }
         finally
         {

@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using AgentRecall.Cli;
+using AgentRecall.Cli.ClaudeCode;
 using AgentRecall.Cli.Devcontainer;
 using AgentRecall.Cli.Mcp;
 using AgentRecall.Cli.Mcp.Tools;
@@ -21,7 +22,7 @@ namespace AgentRecall.Tests;
 /// </summary>
 public class BehaviorContractTests
 {
-    private static readonly string Guidance = DevcontainerScaffolder.ClaudeMdGuidance;
+    private static readonly string Guidance = ClaudeMdGuidance.Text;
 
     private static async Task Init(TestDatabase db)
     {
@@ -113,20 +114,20 @@ public class BehaviorContractTests
         var root = NewTempProject();
         try
         {
-            var path = Path.Combine(root, DevcontainerScaffolder.ClaudeMdRelativePath);
+            var path = Path.Combine(root, ClaudeMdGuidance.RelativePath);
             const string before = "# My Project\n\nProject notes that must survive.\n\n";
             const string after = "\n## My Own Section\n\nKeep this verbatim.\n";
             // A stale AgentRecall block from an older version, between the user's content.
-            var stale = before + DevcontainerScaffolder.ClaudeMdHeading +
+            var stale = before + ClaudeMdGuidance.Heading +
                 "\n\nOutdated guidance with no behavior contract.\n" + after;
             File.WriteAllText(path, stale);
 
-            var outcome = DevcontainerScaffolder.EnsureClaudeMdGuidance(root);
+            var outcome = ClaudeMdGuidance.Ensure(root);
             Assert.Equal(GuidanceOutcome.Updated, outcome);
 
             var refreshed = File.ReadAllText(path);
             // Heading appears exactly once — the block was replaced, not duplicated.
-            Assert.Equal(1, Occurrences(refreshed, DevcontainerScaffolder.ClaudeMdHeading));
+            Assert.Equal(1, Occurrences(refreshed, ClaudeMdGuidance.Heading));
             // The new behavior contract is now present; the stale text is gone.
             Assert.Contains("### AgentRecall behavior contract", refreshed, StringComparison.Ordinal);
             Assert.DoesNotContain("Outdated guidance with no behavior contract.", refreshed, StringComparison.Ordinal);
@@ -136,7 +137,7 @@ public class BehaviorContractTests
             Assert.Contains("Keep this verbatim.", refreshed, StringComparison.Ordinal);
 
             // Re-running is now a no-op (idempotent against the current block).
-            Assert.Equal(GuidanceOutcome.AlreadyPresent, DevcontainerScaffolder.EnsureClaudeMdGuidance(root));
+            Assert.Equal(GuidanceOutcome.AlreadyPresent, ClaudeMdGuidance.Ensure(root));
             Assert.Equal(refreshed, File.ReadAllText(path));
         }
         finally

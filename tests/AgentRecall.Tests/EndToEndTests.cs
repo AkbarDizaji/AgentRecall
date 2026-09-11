@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AgentRecall.Cli;
+using AgentRecall.Cli.ClaudeCode;
 using AgentRecall.Cli.Devcontainer;
 using AgentRecall.Core.Abstractions;
 using AgentRecall.Core.Domain;
@@ -225,7 +226,7 @@ public class DevcontainerAndCaptureE2ETests
 
         var script = Path.Combine(repo.Path, DevcontainerScaffolder.PostCreateRelativePath);
         var settings = Path.Combine(repo.Path, DevcontainerScaffolder.ClaudeSettingsRelativePath);
-        var claudeMd = Path.Combine(repo.Path, DevcontainerScaffolder.ClaudeMdRelativePath);
+        var claudeMd = Path.Combine(repo.Path, ClaudeMdGuidance.RelativePath);
 
         Assert.True(File.Exists(script));
         Assert.True(File.Exists(settings));
@@ -236,7 +237,7 @@ public class DevcontainerAndCaptureE2ETests
 
         // The guidance block appears exactly once, and prior content is preserved.
         var claudeText = File.ReadAllText(claudeMd);
-        Assert.Equal(1, Occurrences(claudeText, DevcontainerScaffolder.ClaudeMdHeading));
+        Assert.Equal(1, Occurrences(claudeText, ClaudeMdGuidance.Heading));
         Assert.StartsWith(existingClaudeMd, claudeText);
     }
 

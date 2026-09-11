@@ -4,6 +4,23 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **The CLAUDE.md guidance is a document again, not a string literal.** Five hundred lines of agent
+  instructions lived as a raw-string literal inside the dev-container scaffolder — a type named for
+  something else entirely, where editing one sentence recompiled the scaffolding logic, every brace
+  in the document's JSON examples had to survive raw-string interpolation, and no reviewer could
+  read the guidance as the document it is. It now lives in `ClaudeCode/AgentGuidance.md`, compiled
+  in as an embedded resource, with `{{token}}` placeholders for the parts that genuinely vary, and
+  a new `ClaudeMdGuidance` type owns the document, the heading, and keeping a project's block up to
+  date. The scaffolder drops from 1225 lines to 599 and is left with dev-container work.
+  Byte-for-byte, projects receive exactly the same guidance as before. Two tests that had been
+  asserting on the scaffolder's *source text* now assert on the rendered document instead, and new
+  tests cover what a resource can break that a literal could not: a document that fails to embed,
+  an unsubstituted placeholder, a heading that drifts from the constant used to find the block, and
+  CRLF endings that would make every refresh rewrite the file.
+
 ## [2.11.1] - 2026-09-09
 
 ### Fixed

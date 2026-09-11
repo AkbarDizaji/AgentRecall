@@ -1,5 +1,6 @@
 using System.Globalization;
 using AgentRecall.Cli;
+using AgentRecall.Cli.ClaudeCode;
 using AgentRecall.Cli.Devcontainer;
 using AgentRecall.Core;
 using AgentRecall.Core.Abstractions;
@@ -244,8 +245,8 @@ public class CliDoctorSurfaceTests
     /// <summary>Writes a CLAUDE.md whose AgentRecall block declares the given contract.</summary>
     private static Task WriteInstructionsAsync(string root, string? declaredContract) =>
         File.WriteAllTextAsync(
-            Path.Combine(root, DevcontainerScaffolder.ClaudeMdRelativePath),
-            $"{DevcontainerScaffolder.ClaudeMdHeading}\n\n"
+            Path.Combine(root, ClaudeMdGuidance.RelativePath),
+            $"{ClaudeMdGuidance.Heading}\n\n"
                 + (declaredContract is null ? "" : $"**AgentRecall contract: {declaredContract}**\n\n")
                 + "Guidance body.\n");
 
@@ -297,7 +298,7 @@ public class CliDoctorSurfaceTests
             Assert.Contains($"contract {AgentContract.Version} matches this build", fixOutput, StringComparison.Ordinal);
 
             var refreshed = await File.ReadAllTextAsync(
-                Path.Combine(root, DevcontainerScaffolder.ClaudeMdRelativePath));
+                Path.Combine(root, ClaudeMdGuidance.RelativePath));
             Assert.Equal(AgentContract.Version, AgentContract.ReadDeclaredVersion(refreshed));
         }
         finally
@@ -315,7 +316,7 @@ public class CliDoctorSurfaceTests
         try
         {
             await File.WriteAllTextAsync(
-                Path.Combine(root, DevcontainerScaffolder.ClaudeMdRelativePath),
+                Path.Combine(root, ClaudeMdGuidance.RelativePath),
                 "# Someone else's instructions\n");
 
             await using var db = await NewDbAsync();

@@ -168,7 +168,7 @@ public static partial class CommandRouter
     /// <summary>Whether this directory has already opted in to AgentRecall's Claude Code wiring.</summary>
     private static bool OptedIn(string projectRoot) =>
         Directory.Exists(Path.Combine(projectRoot, ".claude"))
-        || File.Exists(Path.Combine(projectRoot, Devcontainer.DevcontainerScaffolder.ClaudeMdRelativePath));
+        || File.Exists(Path.Combine(projectRoot, ClaudeCode.ClaudeMdGuidance.RelativePath));
 
     /// <summary>
     /// Whether the directory is somewhere hook wiring is worth reporting on: already opted in, or a
@@ -365,7 +365,7 @@ public static partial class CommandRouter
     {
         const string name = "Instruction contract";
 
-        var path = Path.Combine(projectRoot, Devcontainer.DevcontainerScaffolder.ClaudeMdRelativePath);
+        var path = Path.Combine(projectRoot, ClaudeCode.ClaudeMdGuidance.RelativePath);
         if (!File.Exists(path))
         {
             return null;
@@ -375,7 +375,7 @@ public static partial class CommandRouter
 
         // A project that never opted in has nothing to compare against, and saying so would be
         // noise; CheckHooks already reports when the wiring is missing.
-        if (!text.Contains(Devcontainer.DevcontainerScaffolder.ClaudeMdHeading, StringComparison.Ordinal))
+        if (!text.Contains(ClaudeCode.ClaudeMdGuidance.Heading, StringComparison.Ordinal))
         {
             return null;
         }
@@ -385,7 +385,7 @@ public static partial class CommandRouter
         // Instructions this build can refresh: rewrite the block, then report what it now says.
         if (fix && (declared is null || declared < Core.AgentContract.Version))
         {
-            Devcontainer.DevcontainerScaffolder.EnsureClaudeMdGuidance(projectRoot);
+            ClaudeCode.ClaudeMdGuidance.Ensure(projectRoot);
             declared = Core.AgentContract.ReadDeclaredVersion(File.ReadAllText(path));
         }
 

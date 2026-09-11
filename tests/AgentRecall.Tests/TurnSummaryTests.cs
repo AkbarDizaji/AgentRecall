@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AgentRecall.Cli;
+using AgentRecall.Cli.ClaudeCode;
 using AgentRecall.Cli.Devcontainer;
 using AgentRecall.Core.Abstractions;
 using AgentRecall.Core.Activity;
@@ -700,7 +701,7 @@ public class TurnSummaryTests
     [Fact] // W. CLAUDE.md scaffold includes Turn Summary guidance and forbids manual-call / may-have wording.
     public void Scaffold_IncludesTurnSummaryGuidance()
     {
-        var guidance = DevcontainerScaffolder.ClaudeMdGuidance;
+        var guidance = ClaudeMdGuidance.Text;
         Assert.Contains("Turn Memory Summary", guidance, StringComparison.Ordinal);
         Assert.Contains("agentrecall turn-summary --last", guidance, StringComparison.Ordinal);
         Assert.Contains("source of truth", guidance, StringComparison.Ordinal);

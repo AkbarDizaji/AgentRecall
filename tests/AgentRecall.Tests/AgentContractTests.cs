@@ -1,3 +1,4 @@
+using AgentRecall.Cli.ClaudeCode;
 using AgentRecall.Cli.Devcontainer;
 using AgentRecall.Core;
 using Xunit;
@@ -44,6 +45,6 @@ public class AgentContractTests
     {
         Assert.Equal(
             AgentContract.Version,
-            AgentContract.ReadDeclaredVersion(DevcontainerScaffolder.ClaudeMdGuidance));
+            AgentContract.ReadDeclaredVersion(ClaudeMdGuidance.Text));
     }
 }

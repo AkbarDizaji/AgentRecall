@@ -51,4 +51,13 @@
     <None Include="..\..\README.md" Pack="true" PackagePath="\" Visible="false" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!--
+      The CLAUDE.md guidance AgentRecall writes into a project, compiled in as a document rather
+      than a string literal: five hundred lines of prose belong in a file a reviewer can read, and
+      editing a sentence should not recompile the wiring around it.
+    -->
+    <EmbeddedResource Include="ClaudeCode\AgentGuidance.md" />
+  </ItemGroup>
+
 </Project>

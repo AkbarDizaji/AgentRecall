@@ -1,3 +1,4 @@
+using AgentRecall.Cli.ClaudeCode;
 using System.Text.Json;
 using AgentRecall.Cli;
 using AgentRecall.Core.Abstractions;
@@ -555,7 +556,7 @@ public class CareerImpactTests
     [Fact] // AF. The scaffolded CLAUDE.md documents career-impact behavior and anti-spam guidance.
     public void Scaffold_DocumentsCareerImpact()
     {
-        var scaffold = File.ReadAllText(FindRepoFile(Path.Combine("src", "AgentRecall.Cli", "Devcontainer", "DevcontainerScaffolder.cs")));
+        var scaffold = ClaudeMdGuidance.Text;
         Assert.Contains("Career Impact Pack", scaffold, StringComparison.Ordinal);
         Assert.Contains("should not spam", scaffold, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("not run full journal generation unless", scaffold, StringComparison.OrdinalIgnoreCase);

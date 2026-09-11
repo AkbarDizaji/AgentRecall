@@ -220,16 +220,16 @@ public static partial class CommandRouter
 
             switch (result.GuidanceOutcome)
             {
-                case Devcontainer.GuidanceOutcome.Created:
+                case ClaudeCode.GuidanceOutcome.Created:
                     output.WriteLine($"Wrote {result.ClaudeMdPath} with AgentRecall guidance (recall + capture accepted PR comments as Active).");
                     break;
-                case Devcontainer.GuidanceOutcome.Appended:
+                case ClaudeCode.GuidanceOutcome.Appended:
                     output.WriteLine($"Appended AgentRecall guidance to {result.ClaudeMdPath} (recall + capture accepted PR comments as Active).");
                     break;
-                case Devcontainer.GuidanceOutcome.Updated:
+                case ClaudeCode.GuidanceOutcome.Updated:
                     output.WriteLine($"Updated the AgentRecall guidance block in {result.ClaudeMdPath} in place (refreshed the behavior contract; no duplicate added).");
                     break;
-                case Devcontainer.GuidanceOutcome.AlreadyPresent:
+                case ClaudeCode.GuidanceOutcome.AlreadyPresent:
                     output.WriteLine($"AgentRecall guidance already current in {result.ClaudeMdPath}; left it as is.");
                     break;
             }
