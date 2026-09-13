@@ -146,14 +146,25 @@ public class CaptureJudgeTests
     [InlineData("Scope")]
     public void Validator_EachField_AtExactMaxLength_IsValid_ButOneOverIsInvalid(string field)
     {
-        var atMax = new string('x', CaptureJudgeValidator.FieldMaxLength);
-        var overMax = new string('x', CaptureJudgeValidator.FieldMaxLength + 1);
+        // Condition is filled with a conditional phrase padded to length: a run of x's is not a
+        // usable trigger, and this test is about the length boundary, not about trigger quality.
+        var atMax = Filler(field, CaptureJudgeValidator.FieldMaxLength);
+        var overMax = Filler(field, CaptureJudgeValidator.FieldMaxLength + 1);
 
         Assert.True(CaptureJudgeValidator.Validate(Verdict(rule: WithField(SoundRule(), field, atMax))).IsValid);
 
         var result = CaptureJudgeValidator.Validate(Verdict(rule: WithField(SoundRule(), field, overMax)));
         Assert.False(result.IsValid);
         Assert.Contains("normalized rule field too long", result.Reason, StringComparison.Ordinal);
+    }
+
+    /// <summary>Text of exactly <paramref name="length"/> characters, still shaped like the field.</summary>
+    private static string Filler(string field, int length)
+    {
+        const string ConditionalOpener = "when the x ";
+        return field == "Condition"
+            ? ConditionalOpener + new string('x', length - ConditionalOpener.Length)
+            : new string('x', length);
     }
 
     private static NormalizedRule WithField(NormalizedRule rule, string field, string value) => field switch

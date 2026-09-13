@@ -80,6 +80,18 @@ public static class CaptureJudgeValidator
                     return CaptureJudgeValidation.Invalid("capture is missing because/scope", downgradeToSuggest: true);
                 }
 
+                // The condition becomes the trigger retrieval matches on, so a condition that
+                // cannot match is a rule that will either never surface or surface on every
+                // unrelated turn forever. Neither is visible once stored, so it is caught here and
+                // parked for review rather than stored active with a trigger nobody will revisit.
+                var trigger = TriggerQuality.Inspect(rule!.Condition, rule.Action);
+                if (trigger != TriggerProblem.None)
+                {
+                    return CaptureJudgeValidation.Invalid(
+                        $"condition is not a usable trigger: {TriggerQuality.Describe(trigger)}",
+                        downgradeToSuggest: true);
+                }
+
                 return CaptureJudgeValidation.Valid;
 
             case JudgeDecision.SupersedeExisting:

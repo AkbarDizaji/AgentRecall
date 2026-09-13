@@ -6,6 +6,26 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Triggers are now reviewed from the ledger, and repairable without losing a rule's history.** A
+  trigger decides whether a rule ever reaches work it applies to, and whether it reaches work it
+  does not — and both were already measured and never looked at. On one real database a rule whose
+  trigger was a task description someone typed once ("Refactor Invoice domain model to use a Money
+  value object…") had been injected in 25 of 81 retrievals without ever applying, while two rules
+  carrying byte-identical actions under different triggers were injected 19 times each, and two
+  more had never been retrieved at all. Four things change. `agentrecall rules triggers` audits
+  every rule against its own injection and outcome record, reporting noisy, dormant, duplicate and
+  unusable triggers (`--all`, `--json`); noise requires reported evidence of not applying rather
+  than mere silence, and a standing rule is never called dormant, since it is injected regardless
+  of its words. `agentrecall rules retrigger <id> --trigger "when …"` rewrites just the trigger,
+  keeping the confidence and outcomes the lesson earned — previously the only route was
+  archive-and-recapture, which threw all of that away. Capture-time validation now checks that a
+  judged rule's condition can actually match, parking one that cannot as a pending suggestion
+  instead of storing it active with a trigger nobody will revisit. And retrieval dampens a rule
+  that has been injected repeatedly and reported as not applying every time, down to a floor rather
+  than out of the running — one acceptance, however long ago, exempts a rule entirely, because
+  firing rarely but decisively is what memory is for.
+
 ### Changed
 - **The CLAUDE.md guidance is a document again, not a string literal.** Five hundred lines of agent
   instructions lived as a raw-string literal inside the dev-container scaffolder — a type named for

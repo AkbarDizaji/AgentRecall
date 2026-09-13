@@ -72,6 +72,7 @@ public sealed class ContextInjectionService : IContextInjectionService
     private readonly IConceptExpander _concepts;
     private readonly Conflicts.IRuleConflictDetector _conflictDetector;
     private readonly Conflicts.IRuleResolutionService _resolution;
+    private readonly Abstractions.IRuleOutcomeRepository _outcomes;
 
     public ContextInjectionService(
         IRecallRuleRepository rules,
@@ -80,7 +81,8 @@ public sealed class ContextInjectionService : IContextInjectionService
         IPolicyEngine policy,
         IConceptExpander concepts,
         Conflicts.IRuleConflictDetector conflictDetector,
-        Conflicts.IRuleResolutionService resolution)
+        Conflicts.IRuleResolutionService resolution,
+        Abstractions.IRuleOutcomeRepository outcomes)
     {
         _rules = rules ?? throw new ArgumentNullException(nameof(rules));
         _events = events ?? throw new ArgumentNullException(nameof(events));
@@ -89,6 +91,7 @@ public sealed class ContextInjectionService : IContextInjectionService
         _concepts = concepts ?? throw new ArgumentNullException(nameof(concepts));
         _conflictDetector = conflictDetector ?? throw new ArgumentNullException(nameof(conflictDetector));
         _resolution = resolution ?? throw new ArgumentNullException(nameof(resolution));
+        _outcomes = outcomes ?? throw new ArgumentNullException(nameof(outcomes));
     }
 
     public async Task<ContextInjectionResult> BuildContextAsync(ContextRequest request, CancellationToken cancellationToken = default)
@@ -107,6 +110,11 @@ public sealed class ContextInjectionService : IContextInjectionService
         var concepts = _concepts.Build(taskTokens.Concat(domainTokens));
 
         var all = await _rules.ListAsync(cancellationToken).ConfigureAwait(false);
+
+        // How each rule has actually fared, read once for the whole ranking pass. A rule injected
+        // again and again without ever helping is dampened by its own record rather than waiting
+        // for confidence to drift down.
+        var effectiveness = await EffectivenessByRuleAsync(cancellationToken).ConfigureAwait(false);
         // Excluded rules are dropped from the candidate pool up front, so they are neither
         // ranked/injected nor recorded as used — the single point that de-duplicates a rule
         // across repeated retrievals within one turn (see ContextRequest.ExcludeRuleIds).
@@ -123,7 +131,7 @@ public sealed class ContextInjectionService : IContextInjectionService
         var alwaysApply = new List<Assessment>();
         foreach (var rule in pool)
         {
-            var assessment = Assess(rule, taskTokens, domainTokens, concepts, request);
+            var assessment = Assess(rule, taskTokens, domainTokens, concepts, request, effectiveness);
             if (assessment.AlwaysApply)
             {
                 alwaysApply.Add(assessment);
@@ -175,7 +183,7 @@ public sealed class ContextInjectionService : IContextInjectionService
         {
             foreach (var rule in all.Where(r => r.Status == RuleStatus.Pending && !r.Deprecated && !request.ExcludeRuleIds.Contains(r.Id)))
             {
-                var assessment = Assess(rule, taskTokens, domainTokens, concepts, request) with { Unapproved = true };
+                var assessment = Assess(rule, taskTokens, domainTokens, concepts, request, effectiveness) with { Unapproved = true };
                 if (assessment.Relevance >= RelevanceFloor)
                 {
                     ranked.Add(assessment);
@@ -351,12 +359,30 @@ public sealed class ContextInjectionService : IContextInjectionService
         return retrievalId;
     }
 
+    /// <summary>
+    /// The retrieval dampener for every rule that carries reported outcomes, keyed by rule id.
+    /// Rules with too thin a record are simply absent and score unchanged.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<int, double>> EffectivenessByRuleAsync(CancellationToken cancellationToken)
+    {
+        var outcomes = await _outcomes.ListAsync(cancellationToken).ConfigureAwait(false);
+
+        return outcomes
+            .GroupBy(o => o.RuleId)
+            .ToDictionary(
+                group => group.Key,
+                group => Outcomes.RuleEffectiveness.Factor(
+                    group.Count(o => o.Type == OutcomeType.UserAccepted),
+                    group.Count(o => o.Type == OutcomeType.RuleIgnored)));
+    }
+
     private Assessment Assess(
         RecallRule rule,
         HashSet<string> taskTokens,
         HashSet<string> domainTokens,
         ConceptContext concepts,
-        ContextRequest request)
+        ContextRequest request,
+        IReadOnlyDictionary<int, double> effectiveness)
     {
         var ruleTokens = ContextTokens.FromRule(rule);
         var reasons = new List<string>();
@@ -457,7 +483,14 @@ public sealed class ContextInjectionService : IContextInjectionService
         // Seed rules are dampened so learned rules of equal relevance outrank them.
         var isSeed = rule.Source == RuleSource.BuiltInSeed;
         var sourceFactor = isSeed ? SeedScoreDampening : 1.0;
-        var score = relevance * confidenceFactor * statusFactor * sourceFactor;
+        // Dampened by its own record: injected repeatedly without ever being accepted.
+        var effectivenessFactor = effectiveness.TryGetValue(rule.Id, out var measured) ? measured : 1.0;
+        var score = relevance * confidenceFactor * statusFactor * sourceFactor * effectivenessFactor;
+
+        if (effectivenessFactor < 1.0)
+        {
+            reasons.Add($"dampened by reported outcomes ({effectivenessFactor:0.00})");
+        }
 
         var highTrust = confidence >= 0.8 || rule.Status == RuleStatus.Promoted;
         if (highTrust)

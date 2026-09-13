@@ -496,6 +496,13 @@ public static partial class CommandRouter
                 return 0;
             }
 
+            case "triggers":
+                return await RuleTriggersAsync(
+                    args[1..], scope.ServiceProvider, rules, output, cancellationToken).ConfigureAwait(false);
+
+            case "retrigger":
+                return await RetriggerAsync(args[1..], rules, output, cancellationToken).ConfigureAwait(false);
+
             case "approve":
             case "promote":
             case "archive":
@@ -3001,6 +3008,10 @@ public static partial class CommandRouter
         output.WriteLine("  rules archive <id>   Archive a rule (excluded from search)");
         output.WriteLine("  rules conflicts      List detected rule conflicts and the chosen winner (--json)");
         output.WriteLine("  rules explain <id>   Explain a rule's confidence from its outcome history");
+        output.WriteLine("  rules triggers       Audit every trigger against its injection/outcome record");
+        output.WriteLine("                       (--all, --json)");
+        output.WriteLine("  rules retrigger <id> --trigger \"when …\"");
+        output.WriteLine("                       Rewrite a rule's trigger, keeping its confidence and history");
         output.WriteLine("  outcome record       Record an outcome (TestsPassed, UserAccepted, …) and adjust confidence");
         output.WriteLine("  lessons mine         Mine repeated historical signals into suggested lesson candidates");
         output.WriteLine("  lessons list|show|accept|reject");
