@@ -4,6 +4,16 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **A commit on `main` no longer loses its CI run to the commit after it.** The concurrency group
+  was keyed on the ref, so every push to `main` superseded the one before it — and the usual rhythm
+  here is a feature commit followed minutes later by a release commit, which meant the feature's
+  run was routinely cancelled and that commit went permanently unverified. Superseding is right for
+  a pull request, where only the tip matters, so it is kept there and keyed on the pull request
+  number; a push is now grouped by its own commit, so nothing cancels it.
+
 ## [2.12.0] - 2026-09-13
 
 ### Added

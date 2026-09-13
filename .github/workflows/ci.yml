@@ -6,10 +6,14 @@ on:
   pull_request:
     branches: [main]
 
-# Cancel superseded runs on the same ref.
+# Supersede only where a newer run makes the older one pointless: on a pull request, where only
+# the tip commit matters. A push to main is permanent history, and cancelling its verification
+# because another commit landed moments later leaves that commit unverified for good — which is
+# how a feature commit's run was discarded by the release commit that followed it three minutes
+# later. Keying the group on the commit gives every push to main its own run.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
