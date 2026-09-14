@@ -23,6 +23,21 @@ public sealed class ContextInjectionService : IContextInjectionService
     /// <summary>Minimum relevance for a rule to be considered at all.</summary>
     private const double RelevanceFloor = 0.08;
 
+    /// <summary>
+    /// How often a rule this chat has already read is restated in full rather than reminded. A
+    /// long chat gets compacted, so what was read early may no longer be in view; restating on
+    /// every Nth injection keeps a rule recoverable without paying for it every turn.
+    /// </summary>
+    private const int FullRestateEvery = 6;
+
+    /// <summary>
+    /// Tokens the block spends before any rule: the heading with its contract stamp, the section
+    /// labels, and the retrieval id line. Charged against the budget up front so a full block
+    /// lands inside the number the caller asked for rather than a little over it — capped at a
+    /// quarter of the budget, so a small budget still admits the rule it was asked for.
+    /// </summary>
+    private const int BlockScaffoldingTokens = 60;
+
     /// <summary>Score at or above which a high-trust rule is "must-follow".</summary>
     private const double MustFollowFloor = 0.15;
 
@@ -115,6 +130,10 @@ public sealed class ContextInjectionService : IContextInjectionService
         // again and again without ever helping is dampened by its own record rather than waiting
         // for confidence to drift down.
         var effectiveness = await EffectivenessByRuleAsync(cancellationToken).ConfigureAwait(false);
+
+        // What this chat has already been shown. Re-sending a rule the agent read three turns ago
+        // costs its full price for nothing; a one-line reminder keeps it in view for a fraction.
+        var alreadySeen = await SeenInSessionAsync(request.SessionId, cancellationToken).ConfigureAwait(false);
         // Excluded rules are dropped from the candidate pool up front, so they are neither
         // ranked/injected nor recorded as used — the single point that de-duplicates a rule
         // across repeated retrievals within one turn (see ContextRequest.ExcludeRuleIds).
@@ -200,6 +219,12 @@ public sealed class ContextInjectionService : IContextInjectionService
             .ThenBy(a => a.Rule.Id)
             .ToList();
 
+        // One lesson, said once. Two rules can carry the same action under different triggers —
+        // the same guidance rendered twice, paid for twice, from a duplicate nobody noticed while
+        // capturing it. The better-ranked one is kept and the other is dropped from this retrieval
+        // entirely, so it is not recorded as injected either and no outcome can be claimed for it.
+        ranked = CollapseDuplicateActions(ranked);
+
         // Cap seed rules so starter guidance never floods the context — unless the task is
         // itself about tidying/refactoring, where seed rules are the point.
         ranked = CapSeedRules(ranked, taskTokens, request.TaskType);
@@ -207,7 +232,17 @@ public sealed class ContextInjectionService : IContextInjectionService
         // Cap Pending rules so unreviewed suggestions never flood the context.
         ranked = CapPendingRules(ranked, request.PendingCap);
 
-        var result = PackIntoBudget(ranked, request.TokenBudget, request.Limit, prunedByPolicy, out var trimmed);
+        // Reserve the block's furniture from the budget, but never more than a quarter of it: a
+        // caller who asks for a small budget wants the top rule, not an empty block.
+        var scaffolding = Math.Min(BlockScaffoldingTokens, request.TokenBudget / 4);
+
+        var result = PackIntoBudget(
+            ranked,
+            Math.Max(0, request.TokenBudget - scaffolding),
+            request.Limit,
+            prunedByPolicy,
+            alreadySeen,
+            out var trimmed);
         var beforeConflictResolution = result.All.Count();
 
         // Resolve conflicts among the rules that survived to injection. This catches
@@ -354,6 +389,7 @@ public sealed class ContextInjectionService : IContextInjectionService
             RetrievalId = retrievalId,
             Task = request.Task,
             RuleIds = string.Join(",", retrieved.Select(r => r.Id)),
+            SessionId = request.SessionId ?? string.Empty,
         }, cancellationToken).ConfigureAwait(false);
 
         return retrievalId;
@@ -626,7 +662,13 @@ public sealed class ContextInjectionService : IContextInjectionService
         return ranked.Where(a => !a.Unapproved || keep.Contains(a.Rule.Id)).ToList();
     }
 
-    private static ContextInjectionResult PackIntoBudget(List<Assessment> ranked, int budget, int limit, int prunedByPolicy, out int trimmed)
+    private static ContextInjectionResult PackIntoBudget(
+        List<Assessment> ranked,
+        int budget,
+        int limit,
+        int prunedByPolicy,
+        IReadOnlyDictionary<int, int> seen,
+        out int trimmed)
     {
         var mustFollow = new List<InjectedRule>();
         var warnings = new List<InjectedRule>();
@@ -634,7 +676,7 @@ public sealed class ContextInjectionService : IContextInjectionService
 
         // Bucket first so budgeting can prioritise must-follow and warnings.
         var bucketed = ranked
-            .Select(a => (Assessment: a, Injected: ToInjected(a)))
+            .Select(a => (Assessment: a, Injected: ToInjected(a, seen)))
             .ToList();
 
         var tokensUsed = 0;
@@ -708,7 +750,7 @@ public sealed class ContextInjectionService : IContextInjectionService
         return explanation;
     }
 
-    private static InjectedRule ToInjected(Assessment a)
+    private static InjectedRule ToInjected(Assessment a, IReadOnlyDictionary<int, int> seen)
     {
         var importance = a.Prohibition
             ? RuleImportance.Warning
@@ -734,15 +776,110 @@ public sealed class ContextInjectionService : IContextInjectionService
             Relevance = Math.Round(a.Relevance, 4),
             Explanation = explanation,
             MatchReasons = a.Reasons,
-            EstimatedTokens = EstimateTokens(a.Rule, explanation),
+            EstimatedTokens = EstimateTokens(a.Rule, DetailFor(importance, a.Rule.Id, seen)),
+            Detail = DetailFor(importance, a.Rule.Id, seen),
         };
     }
 
-    private static int EstimateTokens(RecallRule rule, string explanation)
+    /// <summary>
+    /// How many times each rule has already been injected in this chat. Empty when the caller
+    /// gave no session: with no shared history, every rule is new.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<int, int>> SeenInSessionAsync(
+        string? sessionId,
+        CancellationToken cancellationToken)
     {
-        // ~4 characters per token, plus a little structural overhead.
-        var chars = rule.RuleText.Length + rule.Mistake.Length + rule.Trigger.Length + explanation.Length;
-        return (int)Math.Ceiling(chars / 4.0) + 8;
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            return new Dictionary<int, int>();
+        }
+
+        var records = await _retrievals.ListAsync(cancellationToken).ConfigureAwait(false);
+        var counts = new Dictionary<int, int>();
+
+        foreach (var record in records.Where(r => string.Equals(r.SessionId, sessionId, StringComparison.Ordinal)))
+        {
+            foreach (var id in ParseRuleIds(record.RuleIds))
+            {
+                counts[id] = counts.GetValueOrDefault(id) + 1;
+            }
+        }
+
+        return counts;
+    }
+
+    /// <summary>
+    /// The detail a rule is rendered at: full or compact the first time this chat sees it and every
+    /// <see cref="FullRestateEvery"/> injections after, a one-line reminder in between.
+    /// </summary>
+    private static RuleDetail DetailFor(RuleImportance importance, int ruleId, IReadOnlyDictionary<int, int> seen)
+    {
+        var priorInjections = seen.GetValueOrDefault(ruleId);
+        if (priorInjections > 0 && priorInjections % FullRestateEvery != 0)
+        {
+            return RuleDetail.Reminder;
+        }
+
+        return importance == RuleImportance.Suggested ? RuleDetail.Compact : RuleDetail.Full;
+    }
+
+    private static IEnumerable<int> ParseRuleIds(string? csv) =>
+        (csv ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(part => int.TryParse(part, out var id) ? id : (int?)null)
+            .Where(id => id is not null)
+            .Select(id => id!.Value);
+
+    /// <summary>
+    /// Drops rules whose action duplicates one already ranked above them. Compared on normalized
+    /// text, so a re-punctuated copy still counts as the same lesson.
+    /// </summary>
+    private static List<Assessment> CollapseDuplicateActions(List<Assessment> ranked)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var kept = new List<Assessment>(ranked.Count);
+
+        foreach (var assessment in ranked)
+        {
+            var action = NormalizeForComparison(assessment.Rule.RuleText);
+            if (action.Length == 0 || seen.Add(action))
+            {
+                kept.Add(assessment);
+            }
+        }
+
+        return kept;
+    }
+
+    /// <summary>Lowercased, punctuation-free, whitespace-collapsed text for equality comparison.</summary>
+    private static string NormalizeForComparison(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        var letters = text.ToLowerInvariant().Select(c => char.IsLetterOrDigit(c) ? c : ' ').ToArray();
+        return string.Join(
+            ' ',
+            new string(letters).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+    }
+
+    /// <summary>
+    /// What this rule will actually cost, measured on the text that gets injected.
+    ///
+    /// The estimate used to sum the stored fields plus the match explanation — but the explanation
+    /// is never rendered, the rationale always is, and the labels and bullet are not free. Two code
+    /// paths, drifting quietly: measured on a real block the render came to 1.5x the estimate, so a
+    /// budget of 1500 could emit well past 2000. Rendering the rule is cheap and leaves nothing to
+    /// drift, and the detail level is part of the cost because a suggestion is rendered compactly.
+    /// </summary>
+    private static int EstimateTokens(RecallRule rule, RuleDetail detail)
+    {
+        var rendered = ConditionalRuleFormatter.Format(rule, indent: 2, includeSource: true, detail: detail);
+
+        // ~4 characters per token, plus the bullet and newline the section adds around it.
+        return (int)Math.Ceiling(rendered.Length / 4.0) + 2;
     }
 
     private static bool IsProhibition(RecallRule rule)

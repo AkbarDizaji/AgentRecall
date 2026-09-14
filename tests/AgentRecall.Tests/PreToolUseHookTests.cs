@@ -56,7 +56,7 @@ public class PreToolUseHookTests
 
         Assert.Contains("## AgentRecall Technical Context", output.AdditionalContext);
         Assert.Contains("public virtual", output.AdditionalContext);
-        Assert.Contains("Source Rules:", output.AdditionalContext);
+        Assert.Contains("Source: #", output.AdditionalContext);
     }
 
     [Fact]

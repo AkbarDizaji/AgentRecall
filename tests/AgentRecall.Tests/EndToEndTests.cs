@@ -158,7 +158,7 @@ public class HookInjectionE2ETests
 
         Assert.Contains("## AgentRecall Technical Context", output);
         Assert.Contains("real in-memory SQLite DbContext instead of mocking DbContext directly", output);
-        Assert.Contains("Source Rules:", output);
+        Assert.Contains("Source: #", output);
     }
 
     [Fact]
@@ -176,10 +176,10 @@ public class HookInjectionE2ETests
         Assert.Contains("## AgentRecall Technical Context", output);
         Assert.Contains("It.IsAny<T>()", output);
 
-        // The rule surfaces under a strong guidance section. Source Rules is always
+        // The rule surfaces under a strong guidance section. Each rule carries its own
         // emitted when any rule is injected; Must Follow / Preferred Patterns appear
         // when the ranker buckets it there.
-        Assert.Contains("Source Rules:", output);
+        Assert.Contains("Source: #", output);
         Assert.True(
             output.Contains("Must Follow:") || output.Contains("Preferred Patterns:"),
             "Expected the rule under Must Follow or Preferred Patterns.\n" + output);

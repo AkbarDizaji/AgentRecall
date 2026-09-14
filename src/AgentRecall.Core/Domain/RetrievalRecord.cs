@@ -18,5 +18,11 @@ public sealed class RetrievalRecord
     /// <summary>Comma-separated ids of the rules that were injected.</summary>
     public string RuleIds { get; set; } = string.Empty;
 
+    /// <summary>
+    /// The chat this retrieval served, when the caller knows it. It is what lets a later turn in
+    /// the same chat tell a rule the agent has already read from one it has not.
+    /// </summary>
+    public string SessionId { get; set; } = string.Empty;
+
     public DateTimeOffset CreatedAt { get; set; }
 }

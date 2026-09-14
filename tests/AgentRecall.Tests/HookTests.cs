@@ -89,7 +89,7 @@ public class HookTests
         Assert.Contains("## AgentRecall Technical Context", output);
         Assert.Contains("Must Follow:", output);
         Assert.Contains("Moq argument matchers", output);
-        Assert.Contains("Source Rules:", output);
+        Assert.Contains("Source: #", output);
     }
 
     // Which build answered has to reach the agent too. Hooks run the installed CLI, not the

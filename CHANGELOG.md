@@ -14,6 +14,30 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a pull request, where only the tip matters, so it is kept there and keyed on the pull request
   number; a push is now grouped by its own commit, so nothing cancels it.
 
+## [Unreleased]
+
+### Changed
+- **An injected block costs a third of what it did, and its budget now means something.** Five
+  things were measured on a real database and all five were wrong in the same direction. The token
+  budget was estimated from the stored fields plus a match explanation that is never rendered,
+  while omitting the rationale that always is — a real block came to 781 rendered tokens against a
+  521 estimate, so a 1500-token cap could emit well past 2000. Cost is now measured by rendering
+  the rule, and the block's own heading, labels and retrieval line are reserved up front (capped at
+  a quarter of the budget, so a small budget still admits its top rule). A rule offered as merely
+  relevant is rendered compactly — condition, action and source, without the rationale and
+  anti-pattern that make a must-follow rule followable but only restate a suggestion. The trailing
+  id list is gone, since every rule already carries its own `Source: #id`. Lines are trimmed at a
+  sentence or word boundary instead of mid-word, so the allowance is spent on something readable.
+  And two rules carrying the same action under different triggers are injected once — the copy is
+  not recorded as injected either, so no outcome can be claimed for a rule nobody saw.
+- **A rule the same chat has already read is repeated as one line, not restated in full.** Across
+  90 recorded retrievals, 323 rule injections covered 27 distinct rules: 92% of the spend was
+  repetition of something the agent had already been shown. Retrievals now record their session, so
+  a rule this chat has read comes back as `#18 still applies: <action>` — and is restated in full
+  every sixth injection, because a long chat gets compacted and what was read early may no longer
+  be in view. A caller with no session, or a different chat, sees every rule in full. Measured on
+  the same database and prompt: 844 tokens before, 653 on first sighting, **266 on a repeat turn**.
+
 ## [2.12.0] - 2026-09-13
 
 ### Added

@@ -63,6 +63,13 @@ public sealed record ContextRequest
     /// </summary>
     public IReadOnlySet<int> ExcludeRuleIds { get; init; } = EmptyIds;
 
+    /// <summary>
+    /// The chat this retrieval belongs to. When set, a rule the same chat has already been shown
+    /// is repeated as a one-line reminder rather than in full, and restated in full periodically.
+    /// Absent, every rule renders in full — a caller with no session has no shared history to lean on.
+    /// </summary>
+    public string? SessionId { get; init; }
+
     private static readonly IReadOnlySet<int> EmptyIds = new HashSet<int>();
 
     /// <summary>
@@ -109,6 +116,9 @@ public sealed record InjectedRule
 
     /// <summary>Estimated tokens this rule contributes to the context.</summary>
     public required int EstimatedTokens { get; init; }
+
+    /// <summary>How much of the rule is rendered: full, compact, or a one-line reminder.</summary>
+    public RuleDetail Detail { get; init; } = RuleDetail.Full;
 }
 
 /// <summary>The context assembled for a task: rules bucketed by importance.</summary>

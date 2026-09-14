@@ -32,7 +32,7 @@ public static class UserPromptSubmitHook
                 return string.Empty;
             }
 
-            if (!TryReadPrompt(hookInputJson, out var prompt, out var cwd))
+            if (!TryReadPrompt(hookInputJson, out var prompt, out var cwd, out var sessionId))
             {
                 return string.Empty;
             }
@@ -53,6 +53,7 @@ public static class UserPromptSubmitHook
                 PendingCap = options.HookPendingCap,
                 // Rules surfaced to the agent count as retrievals for learning reports.
                 RecordUsage = true,
+                SessionId = sessionId,
             };
 
             await using var scope = services.CreateAsyncScope();
@@ -105,10 +106,11 @@ public static class UserPromptSubmitHook
         }
     }
 
-    private static bool TryReadPrompt(string? json, out string prompt, out string? cwd)
+    private static bool TryReadPrompt(string? json, out string prompt, out string? cwd, out string? sessionId)
     {
         prompt = string.Empty;
         cwd = null;
+        sessionId = null;
 
         if (string.IsNullOrWhiteSpace(json))
         {
@@ -127,6 +129,10 @@ public static class UserPromptSubmitHook
 
         prompt = root?["prompt"]?.GetValue<string>() ?? string.Empty;
         cwd = root?["cwd"]?.GetValue<string>();
+
+        // The chat id, so a rule this chat has already read can be repeated as a reminder.
+        sessionId = root?["session_id"]?.GetValue<string>();
+
         return !string.IsNullOrWhiteSpace(prompt);
     }
 

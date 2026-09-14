@@ -84,6 +84,11 @@ public sealed class AgentRecallDbContext : DbContext
             entity.Property(e => e.RetrievalId).IsRequired();
             entity.HasIndex(e => e.RetrievalId).IsUnique();
             entity.HasIndex(e => e.CreatedAt);
+
+            // Defaulted so the additive reconciler backfills the column on databases created
+            // before retrievals recorded which chat they served.
+            entity.Property(e => e.SessionId).IsRequired().HasDefaultValue(string.Empty);
+            entity.HasIndex(e => e.SessionId);
         });
 
         modelBuilder.Entity<RuleOutcome>(entity =>

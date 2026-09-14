@@ -32,12 +32,9 @@ public static class HookContextFormatter
 
         // Each section renders its rules as conditional blocks (When / Do / Avoid /
         // Because) so the agent receives knowledge in the same shape it is stored.
-        AppendConditionalSection(sb, "Must Follow", result.MustFollow);
-        AppendConditionalSection(sb, "Warnings", result.Warnings);
-        AppendConditionalSection(sb, "Preferred Patterns", result.Suggested);
-
-        // A compact source list stays at the end so the agent can cite every rule.
-        AppendSourceRules(sb, result.All.Select(r => $"#{r.Rule.Id}"));
+        AppendConditionalSection(sb, "Must Follow", result.MustFollow, Context.RuleDetail.Full);
+        AppendConditionalSection(sb, "Warnings", result.Warnings, Context.RuleDetail.Full);
+        AppendConditionalSection(sb, "Preferred Patterns", result.Suggested, Context.RuleDetail.Compact);
 
         // The retrieval id these rules were recorded under. It is the handle an outcome
         // attaches to, and the agent is the only party that can report one — so the id has to
@@ -61,7 +58,11 @@ public static class HookContextFormatter
         return sb.ToString().TrimEnd();
     }
 
-    private static void AppendConditionalSection(StringBuilder sb, string title, IReadOnlyList<Context.InjectedRule> rules)
+    private static void AppendConditionalSection(
+        StringBuilder sb,
+        string title,
+        IReadOnlyList<Context.InjectedRule> rules,
+        Context.RuleDetail detail)
     {
         if (rules.Count == 0)
         {
@@ -73,8 +74,13 @@ public static class HookContextFormatter
         foreach (var injected in rules)
         {
             // The block's own lines are indented; the "- " bullet sits in front of
-            // the condition so the Do/Avoid/Because lines nest beneath it.
-            var block = Context.ConditionalRuleFormatter.Format(injected.Rule, indent: 2, includeSource: true);
+            // the condition so the Do/Avoid/Because lines nest beneath it. A rule this chat has
+            // already read carries its own detail, set when it was costed against the budget.
+            var block = Context.ConditionalRuleFormatter.Format(
+                injected.Rule,
+                indent: 2,
+                includeSource: true,
+                detail: injected.Detail == Context.RuleDetail.Reminder ? Context.RuleDetail.Reminder : detail);
             var lines = block.Replace("\r", string.Empty, StringComparison.Ordinal).Split('\n');
             sb.AppendLine($"- {Truncate(lines[0], MaxItemLength)}");
             for (var i = 1; i < lines.Length; i++)
@@ -84,27 +90,27 @@ public static class HookContextFormatter
         }
     }
 
-    private static void AppendSourceRules(StringBuilder sb, IEnumerable<string> ids)
+    /// <summary>
+    /// Trims to the last sentence end, or failing that the last word, inside the cap. Cutting
+    /// mid-word spends the whole allowance on text that stops in the middle of a thought: the
+    /// tokens are paid for either way, so they may as well end somewhere a reader can act on.
+    /// </summary>
+    private static string Truncate(string value, int max)
     {
-        var list = ids
-            .Where(i => !string.IsNullOrWhiteSpace(i))
-            .Select(i => i.Trim())
-            .Distinct()
-            .ToList();
-
-        if (list.Count == 0)
+        if (value.Length <= max)
         {
-            return;
+            return value;
         }
 
-        sb.AppendLine();
-        sb.AppendLine("Source Rules:");
-        foreach (var item in list)
+        var window = value[..(max - 1)];
+
+        var sentence = window.LastIndexOfAny(['.', '!', '?', ';', ':']);
+        if (sentence >= max / 2)
         {
-            sb.AppendLine($"- {item}");
+            return window[..(sentence + 1)] + " …";
         }
+
+        var word = window.LastIndexOf(' ');
+        return (word >= max / 2 ? window[..word] : window) + " …";
     }
-
-    private static string Truncate(string value, int max) =>
-        value.Length <= max ? value : value[..(max - 1)] + "…";
 }

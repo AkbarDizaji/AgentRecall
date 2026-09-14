@@ -61,6 +61,12 @@ public sealed class TurnFinalizer : ITurnFinalizer
     // How many relevant existing rules to surface to the judge for dedupe/reinforce.
     private const int MaxRelevantRules = 12;
 
+    /// <summary>
+    /// Longest rationale worth storing: the injected block trims each line at 200 characters, so
+    /// anything past this is paid for on every retrieval and then cut before it is read.
+    /// </summary>
+    private const int MaxRationaleLength = 180;
+
     private readonly ICaptureJudge _judge;
     private readonly IPolicyEngine _policy;
     private readonly IRuleLifecycleService _lifecycle;
@@ -447,7 +453,7 @@ public sealed class TurnFinalizer : ITurnFinalizer
             Trigger = Trim(normalized.Condition),
             RuleText = Trim(normalized.Action),
             Mistake = Trim(normalized.Avoid),
-            TechnicalContext = Trim(normalized.Because),
+            TechnicalContext = TrimRationale(normalized.Because),
             Tags = BuildTags(normalized.Tags),
             Confidence = outcome.Confidence,
             AlwaysApply = alwaysApply,
@@ -658,6 +664,26 @@ public sealed class TurnFinalizer : ITurnFinalizer
             .Select(s => int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id) ? id : (int?)null)
             .Where(id => id is not null)
             .Select(id => id!.Value);
+
+    /// <summary>
+    /// The stored rationale, capped at what an injected block will actually show. Injection trims
+    /// each line, so a longer rationale is stored, paid for on retrieval, and then cut mid-thought
+    /// anyway; capping it here at a sentence boundary means what is kept is what is read.
+    /// </summary>
+    internal static string TrimRationale(string? because)
+    {
+        var text = Trim(because);
+        if (text.Length <= MaxRationaleLength)
+        {
+            return text;
+        }
+
+        var window = text[..MaxRationaleLength];
+        var sentence = window.LastIndexOfAny(['.', '!', '?', ';']);
+        return sentence >= MaxRationaleLength / 2
+            ? window[..(sentence + 1)]
+            : window[..(window.LastIndexOf(' ') is var space && space >= MaxRationaleLength / 2 ? space : MaxRationaleLength)].TrimEnd();
+    }
 
     private static string Trim(string? value) => value?.Trim() ?? string.Empty;
 
