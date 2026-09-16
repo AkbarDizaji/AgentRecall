@@ -5,6 +5,7 @@ using AgentRecall.Core.Context;
 using AgentRecall.Core.Domain;
 using AgentRecall.Core.Finalization;
 using AgentRecall.Core.Mining;
+using AgentRecall.Core.Text;
 
 namespace AgentRecall.Core.Activity;
 
@@ -32,7 +33,7 @@ public static class ActivityNoticeFactory
         return new ActivityNotice
         {
             Type = ActivityType.ContextFetched,
-            Summary = $"fetched {rules.Count} relevant {Plural(rules.Count, "rule")}.",
+            Summary = $"fetched {rules.Count} relevant {Plural.Of(rules.Count, "rule")}.",
             Details = rules.Select(r => $"#{r.Rule.Id} {Short(r.Rule)}").ToList(),
             RuleIds = rules.Select(r => r.Rule.Id).ToList(),
             Source = source,
@@ -57,8 +58,8 @@ public static class ActivityNoticeFactory
 
         var ruleIds = result.Applied.Select(a => a.RuleId).Distinct().ToList();
         var summary = result.Applied.Count > 0
-            ? $"recorded outcomes for {ruleIds.Count} {Plural(ruleIds.Count, "rule")}."
-            : $"refused {result.Rejected.Count} reported {Plural(result.Rejected.Count, "outcome")}.";
+            ? $"recorded outcomes for {ruleIds.Count} {Plural.Of(ruleIds.Count, "rule")}."
+            : $"refused {result.Rejected.Count} reported {Plural.Of(result.Rejected.Count, "outcome")}.";
 
         return new ActivityNotice
         {
@@ -94,7 +95,7 @@ public static class ActivityNoticeFactory
             Type = ActivityType.RuleOutcomesUnreported,
             Summary =
                 $"no outcome reported for {result.Unreported.Count} injected " +
-                $"{Plural(result.Unreported.Count, "rule")}.",
+                $"{Plural.Of(result.Unreported.Count, "rule")}.",
             Details = [.. result.Unreported.Select(id => $"#{id} awaiting an outcome")],
             RuleIds = result.Unreported,
             Source = source,
@@ -114,7 +115,7 @@ public static class ActivityNoticeFactory
         return new ActivityNotice
         {
             Type = ActivityType.ConflictResolved,
-            Summary = $"resolved {conflicts.Count} rule {Plural(conflicts.Count, "conflict")}.",
+            Summary = $"resolved {conflicts.Count} rule {Plural.Of(conflicts.Count, "conflict")}.",
             Details = conflicts.Select(DescribeConflict).ToList(),
             RuleIds = ruleIds,
             Source = source,
@@ -144,8 +145,8 @@ public static class ActivityNoticeFactory
         }
 
         var details = new List<string>();
-        details.AddRange(result.Captured.Select(l => $"#{l.RuleId} captured: {Trim(l.Text)}"));
-        details.AddRange(result.Suggested.Select(l => $"#{l.RuleId} suggested: {Trim(l.Text)}"));
+        details.AddRange(result.Captured.Select(l => $"#{l.RuleId} captured: {Label(l.Text)}"));
+        details.AddRange(result.Suggested.Select(l => $"#{l.RuleId} suggested: {Label(l.Text)}"));
         details.AddRange(result.Skipped.Select(s => $"skipped: {s.Reason}"));
 
         return new ActivityNotice
@@ -280,7 +281,7 @@ public static class ActivityNoticeFactory
         return new ActivityNotice
         {
             Type = ActivityType.LessonMined,
-            Summary = $"mined {count} lesson {Plural(count, "candidate")}.",
+            Summary = $"mined {count} lesson {Plural.Of(count, "candidate")}.",
             Details = result.Suggested
                 .Take(5)
                 .Select(c => $"#{c.Id} {Truncate(c.Title, LabelLength)} (seen {c.OccurrenceCount}x)")
@@ -308,7 +309,7 @@ public static class ActivityNoticeFactory
         return new ActivityNotice
         {
             Type = ActivityType.LifecycleRecommended,
-            Summary = $"suggested {recommendations.Count} lifecycle {Plural(recommendations.Count, "action")}.",
+            Summary = $"suggested {recommendations.Count} lifecycle {Plural.Of(recommendations.Count, "action")}.",
             Details = byType,
             RecommendationIds = recommendations.Select(r => r.Id).Where(id => id > 0).ToList(),
             RuleIds = recommendations.Select(r => r.RuleId).Distinct().ToList(),
@@ -330,7 +331,7 @@ public static class ActivityNoticeFactory
 
         var statusWord = result.Status == RuleStatus.Active ? "active" : "suggested";
         var parts = new List<string>();
-        if (added > 0) parts.Add($"{added} {statusWord} {Plural(added, "rule")}");
+        if (added > 0) parts.Add($"{added} {statusWord} {Plural.Of(added, "rule")}");
         if (restored > 0) parts.Add($"{restored} restored");
 
         return new ActivityNotice
@@ -358,7 +359,7 @@ public static class ActivityNoticeFactory
         return new ActivityNotice
         {
             Type = ActivityType.SeedReinforced,
-            Summary = $"seed rule confidence increased after repeated successful use ({count} {Plural(count, "rule")}).",
+            Summary = $"seed rule confidence increased after repeated successful use ({count} {Plural.Of(count, "rule")}).",
             Details = result.Adjustments
                 .Select(a => $"#{a.RuleId} {Truncate(a.Title, LabelLength)}: {a.PreviousConfidence:0.00} → {a.NewConfidence:0.00}")
                 .ToList(),
@@ -530,15 +531,11 @@ public static class ActivityNoticeFactory
         return Truncate(label, LabelLength);
     }
 
-    private static string Trim(string text) => Truncate((text ?? string.Empty).Trim(), LabelLength);
+    /// <summary>A rule's text as a one-line label, trimmed and capped at <see cref="LabelLength"/>.</summary>
+    private static string Label(string? text) => Truncate(text, LabelLength);
 
-    private static string Truncate(string value, int max)
-    {
-        value = (value ?? string.Empty).Trim();
-        return value.Length <= max ? value : value[..(max - 1)] + "…";
-    }
-
-    private static string Plural(int count, string singular) => count == 1 ? singular : singular + "s";
+    private static string Truncate(string? value, int max) =>
+        TextTruncation.Ellipsize(value?.Trim(), max);
 
     /// <summary>True when the capture reason evidences a real, observed agent mistake.</summary>
     private static bool IsObservedMistake(CaptureReason reason) => reason is

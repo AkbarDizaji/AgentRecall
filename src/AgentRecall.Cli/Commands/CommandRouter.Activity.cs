@@ -1,6 +1,7 @@
 using AgentRecall.Core.Abstractions;
 using AgentRecall.Core.Activity;
 using AgentRecall.Core.Domain;
+using AgentRecall.Core.Text;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AgentRecall.Cli;
@@ -56,17 +57,12 @@ public static partial class CommandRouter
             return 0;
         }
 
-        var limit = 10;
-        if (options.TryGetValue("limit", out var rawLimit))
+        if (!TryReadIntOption(options, "limit", output, out var limit))
         {
-            if (!int.TryParse(rawLimit, out limit) || limit <= 0)
-            {
-                output.WriteLine($"Invalid --limit '{rawLimit}'. Expected a positive integer.");
-                return 1;
-            }
+            return 1;
         }
 
-        var recent = await recorder.ListAsync(limit, cancellationToken).ConfigureAwait(false);
+        var recent = await recorder.ListAsync(limit ?? 10, cancellationToken).ConfigureAwait(false);
         if (json)
         {
             WriteJson(output, recent.Select(ActivityJson).ToList());
@@ -92,7 +88,7 @@ public static partial class CommandRouter
     /// Projects an activity to its JSON shape. Fields are plain (no Markdown); the only
     /// styled value is <c>rendered_notice</c>, a compact one-line render.
     /// </summary>
-    private static object ActivityJson(AgentRecall.Core.Domain.AgentRecallActivity activity) => new
+    private static object ActivityJson(AgentRecallActivity activity) => new
     {
         id = activity.Id,
         timestamp = activity.CreatedAt.ToString("O"),
@@ -101,21 +97,12 @@ public static partial class CommandRouter
         details = string.IsNullOrEmpty(activity.Details)
             ? Array.Empty<string>()
             : activity.Details.Split('\n', StringSplitOptions.RemoveEmptyEntries),
-        ruleIds = ParseIdList(activity.RuleIds),
-        candidateIds = ParseIdList(activity.CandidateIds),
-        recommendationIds = ParseIdList(activity.RecommendationIds),
+        ruleIds = IdList.Parse(activity.RuleIds).ToArray(),
+        candidateIds = IdList.Parse(activity.CandidateIds).ToArray(),
+        recommendationIds = IdList.Parse(activity.RecommendationIds).ToArray(),
         source = activity.Source,
         noticeLevel = activity.NoticeLevel.ToString(),
         operationHash = activity.OperationHash,
         renderedNotice = ActivityNoticeRenderer.RenderCompact(ActivityNotice.FromEntity(activity), NoticeLevel.Normal),
     };
-
-    private static int[] ParseIdList(string? value) =>
-        string.IsNullOrEmpty(value)
-            ? []
-            : value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Select(s => int.TryParse(s, out var n) ? n : (int?)null)
-                .Where(n => n is not null)
-                .Select(n => n!.Value)
-                .ToArray();
 }

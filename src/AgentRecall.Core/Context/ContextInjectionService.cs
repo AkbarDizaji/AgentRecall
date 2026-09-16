@@ -1,6 +1,7 @@
 using AgentRecall.Core.Abstractions;
 using AgentRecall.Core.Domain;
 using AgentRecall.Core.Policy;
+using AgentRecall.Core.Text;
 
 namespace AgentRecall.Core.Context;
 
@@ -388,7 +389,7 @@ public sealed class ContextInjectionService : IContextInjectionService
         {
             RetrievalId = retrievalId,
             Task = request.Task,
-            RuleIds = string.Join(",", retrieved.Select(r => r.Id)),
+            RuleIds = IdList.Join(retrieved.Select(r => r.Id)),
             SessionId = request.SessionId ?? string.Empty,
         }, cancellationToken).ConfigureAwait(false);
 
@@ -799,7 +800,7 @@ public sealed class ContextInjectionService : IContextInjectionService
 
         foreach (var record in records.Where(r => string.Equals(r.SessionId, sessionId, StringComparison.Ordinal)))
         {
-            foreach (var id in ParseRuleIds(record.RuleIds))
+            foreach (var id in IdList.Parse(record.RuleIds))
             {
                 counts[id] = counts.GetValueOrDefault(id) + 1;
             }
@@ -823,13 +824,6 @@ public sealed class ContextInjectionService : IContextInjectionService
         return importance == RuleImportance.Suggested ? RuleDetail.Compact : RuleDetail.Full;
     }
 
-    private static IEnumerable<int> ParseRuleIds(string? csv) =>
-        (csv ?? string.Empty)
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(part => int.TryParse(part, out var id) ? id : (int?)null)
-            .Where(id => id is not null)
-            .Select(id => id!.Value);
-
     /// <summary>
     /// Drops rules whose action duplicates one already ranked above them. Compared on normalized
     /// text, so a re-punctuated copy still counts as the same lesson.
@@ -841,7 +835,7 @@ public sealed class ContextInjectionService : IContextInjectionService
 
         foreach (var assessment in ranked)
         {
-            var action = NormalizeForComparison(assessment.Rule.RuleText);
+            var action = TextNormalization.Collapse(assessment.Rule.RuleText);
             if (action.Length == 0 || seen.Add(action))
             {
                 kept.Add(assessment);
@@ -849,20 +843,6 @@ public sealed class ContextInjectionService : IContextInjectionService
         }
 
         return kept;
-    }
-
-    /// <summary>Lowercased, punctuation-free, whitespace-collapsed text for equality comparison.</summary>
-    private static string NormalizeForComparison(string? text)
-    {
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return string.Empty;
-        }
-
-        var letters = text.ToLowerInvariant().Select(c => char.IsLetterOrDigit(c) ? c : ' ').ToArray();
-        return string.Join(
-            ' ',
-            new string(letters).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
     }
 
     /// <summary>

@@ -1,6 +1,7 @@
 using AgentRecall.Core.Abstractions;
 using AgentRecall.Core.Configuration;
 using AgentRecall.Core.Domain;
+using AgentRecall.Core.Text;
 
 namespace AgentRecall.Core.Outcomes;
 
@@ -123,7 +124,7 @@ public sealed class OutcomeTrackingService : IOutcomeTrackingService
                 return ([], request.RetrievalId, $"No retrieval found with id '{request.RetrievalId}'.");
             }
 
-            return (ParseRuleIds(record.RuleIds), request.RetrievalId, null);
+            return ([.. IdList.Parse(record.RuleIds).Distinct()], request.RetrievalId, null);
         }
 
         return ([], null, "An outcome needs either --rule-id or --retrieval-id.");
@@ -134,12 +135,4 @@ public sealed class OutcomeTrackingService : IOutcomeTrackingService
             o.RuleId == ruleId &&
             o.Type == type &&
             string.Equals(o.RetrievalId, retrievalId, StringComparison.Ordinal));
-
-    private static IReadOnlyList<int> ParseRuleIds(string csv) =>
-        csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(s => int.TryParse(s, out var id) ? id : (int?)null)
-            .Where(id => id is not null)
-            .Select(id => id!.Value)
-            .Distinct()
-            .ToList();
 }

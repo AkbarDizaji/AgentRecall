@@ -1,5 +1,6 @@
 using AgentRecall.Core.Domain;
 using AgentRecall.Core.Policy;
+using AgentRecall.Core.Text;
 
 namespace AgentRecall.Core.Compression;
 
@@ -197,21 +198,7 @@ internal static class RuleSimilarity
         return strongest;
     }
 
-    private static HashSet<string> Tokenize(string text)
-    {
-        var tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var normalized = new string(text.Select(c => char.IsLetterOrDigit(c) ? char.ToLowerInvariant(c) : ' ').ToArray());
-
-        foreach (var token in normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries))
-        {
-            if (token.Length >= 2 && !Noise.Contains(token))
-            {
-                tokens.Add(token);
-            }
-        }
-
-        return tokens;
-    }
+    private static HashSet<string> Tokenize(string text) => TextNormalization.SubjectTokens(text, Noise);
 
     private static double Jaccard(HashSet<string> a, HashSet<string> b)
     {

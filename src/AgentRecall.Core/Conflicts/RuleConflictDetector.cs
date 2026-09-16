@@ -1,4 +1,5 @@
 using AgentRecall.Core.Domain;
+using AgentRecall.Core.Text;
 
 namespace AgentRecall.Core.Conflicts;
 
@@ -165,21 +166,7 @@ public sealed class RuleConflictDetector : IRuleConflictDetector
     private static bool NotInForce(RecallRule rule) =>
         rule.Deprecated || rule.Status is RuleStatus.Superseded or RuleStatus.Archived or RuleStatus.Retired;
 
-    private static HashSet<string> Subject(string text)
-    {
-        var subject = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var normalized = new string(text.Select(c => char.IsLetterOrDigit(c) ? char.ToLowerInvariant(c) : ' ').ToArray());
-
-        foreach (var token in normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries))
-        {
-            if (token.Length >= 2 && !Noise.Contains(token))
-            {
-                subject.Add(token);
-            }
-        }
-
-        return subject;
-    }
+    private static HashSet<string> Subject(string text) => TextNormalization.SubjectTokens(text, Noise);
 
     private static double Jaccard(HashSet<string> a, HashSet<string> b)
     {

@@ -1,3 +1,5 @@
+using AgentRecall.Core.Text;
+
 namespace AgentRecall.Core.Hooks;
 
 /// <summary>
@@ -49,15 +51,6 @@ public static class PromptGate
         return false;
     }
 
-    private static HashSet<string> Tokenize(string text)
-    {
-        var words = new HashSet<string>(StringComparer.Ordinal);
-        var normalized = new string(text.Select(c => char.IsLetterOrDigit(c) ? c : ' ').ToArray());
-        foreach (var token in normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries))
-        {
-            words.Add(token);
-        }
-
-        return words;
-    }
+    private static HashSet<string> Tokenize(string text) =>
+        new(TextNormalization.Words(text), StringComparer.Ordinal);
 }

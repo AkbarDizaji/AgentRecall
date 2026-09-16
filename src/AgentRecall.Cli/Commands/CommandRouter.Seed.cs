@@ -192,7 +192,7 @@ public static partial class CommandRouter
         }
 
         var statusWord = result.Status == RuleStatus.Active ? "Active" : "Suggested";
-        output.WriteLine($"🧠 **AgentRecall:** installed seed pack `{result.Pack}`.");
+        output.WriteLine($"{ActivityNoticeRenderer.Badge} installed seed pack `{result.Pack}`.");
         if (result.Added > 0)
         {
             output.WriteLine($"- {result.Added} seed rules installed as {statusWord} with moderate confidence.");

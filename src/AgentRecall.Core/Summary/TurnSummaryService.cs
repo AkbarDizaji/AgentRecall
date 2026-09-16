@@ -1,7 +1,7 @@
-using System.Globalization;
 using AgentRecall.Core.Abstractions;
 using AgentRecall.Core.Domain;
 using AgentRecall.Core.Finalization;
+using AgentRecall.Core.Text;
 
 namespace AgentRecall.Core.Summary;
 
@@ -115,8 +115,8 @@ public sealed class TurnSummaryService : ITurnSummaryService
 
         if (finalization is not null)
         {
-            capturedIds.AddRange(ParseIds(finalization.CapturedRuleIds));
-            suggestedIds.AddRange(ParseIds(finalization.SuggestedRuleIds));
+            capturedIds.AddRange(IdList.Parse(finalization.CapturedRuleIds));
+            suggestedIds.AddRange(IdList.Parse(finalization.SuggestedRuleIds));
             skips.AddRange(SplitLines(finalization.SkippedReasons).Select(r => new TurnSummarySkip { Reason = r }));
             errors.AddRange(SplitParts(finalization.ErrorSummary, ';'));
         }
@@ -126,10 +126,10 @@ public sealed class TurnSummaryService : ITurnSummaryService
             switch (activity.ActivityType)
             {
                 case ActivityType.RuleCaptured:
-                    capturedIds.AddRange(ParseIds(activity.RuleIds));
+                    capturedIds.AddRange(IdList.Parse(activity.RuleIds));
                     break;
                 case ActivityType.RuleSuggested:
-                    suggestedIds.AddRange(ParseIds(activity.RuleIds));
+                    suggestedIds.AddRange(IdList.Parse(activity.RuleIds));
                     break;
                 case ActivityType.CandidateSkipped:
                     skips.Add(new TurnSummarySkip { Reason = SkipReason(activity) });
@@ -272,7 +272,7 @@ public sealed class TurnSummaryService : ITurnSummaryService
         var ids = new List<int>();
         foreach (var activity in activities.Where(a => a.ActivityType == type))
         {
-            ids.AddRange(ParseIds(activity.RuleIds));
+            ids.AddRange(IdList.Parse(activity.RuleIds));
         }
 
         return Distinct(ids);
@@ -325,12 +325,6 @@ public sealed class TurnSummaryService : ITurnSummaryService
 
         return ordered;
     }
-
-    private static IEnumerable<int> ParseIds(string? csv) =>
-        SplitParts(csv, ',')
-            .Select(s => int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id) ? id : (int?)null)
-            .Where(id => id is not null)
-            .Select(id => id!.Value);
 
     private static IReadOnlyList<string> SplitLines(string? value) =>
         SplitParts(value, '\n');

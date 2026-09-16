@@ -1,4 +1,5 @@
 using AgentRecall.Core.Domain;
+using AgentRecall.Core.Text;
 
 namespace AgentRecall.Core.Activity;
 
@@ -41,9 +42,9 @@ public sealed record ActivityNotice
             Type = activity.ActivityType,
             Summary = activity.Summary,
             Details = SplitLines(activity.Details),
-            RuleIds = ParseIds(activity.RuleIds),
-            CandidateIds = ParseIds(activity.CandidateIds),
-            RecommendationIds = ParseIds(activity.RecommendationIds),
+            RuleIds = [.. IdList.Parse(activity.RuleIds)],
+            CandidateIds = [.. IdList.Parse(activity.CandidateIds)],
+            RecommendationIds = [.. IdList.Parse(activity.RecommendationIds)],
             Source = activity.Source,
             OperationHash = activity.OperationHash,
             TurnId = activity.TurnId,
@@ -54,13 +55,4 @@ public sealed record ActivityNotice
         string.IsNullOrEmpty(value)
             ? []
             : value.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-
-    private static IReadOnlyList<int> ParseIds(string? value) =>
-        string.IsNullOrEmpty(value)
-            ? []
-            : value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Select(s => int.TryParse(s, out var n) ? n : (int?)null)
-                .Where(n => n is not null)
-                .Select(n => n!.Value)
-                .ToList();
 }

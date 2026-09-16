@@ -1,4 +1,5 @@
 using AgentRecall.Core.Domain;
+using AgentRecall.Core.Text;
 
 namespace AgentRecall.Core.Conflicts;
 
@@ -131,18 +132,8 @@ public sealed class RuleResolutionService : IRuleResolutionService
         (rule.LastUsedAt ?? rule.UpdatedAt).UtcTicks;
 
     /// <summary>Trigger specificity proxy: the count of content tokens in the trigger.</summary>
-    private static int TriggerSpecificity(string? trigger)
-    {
-        if (string.IsNullOrWhiteSpace(trigger))
-        {
-            return 0;
-        }
-
-        var normalized = new string(trigger.Select(c => char.IsLetterOrDigit(c) ? char.ToLowerInvariant(c) : ' ').ToArray());
-        return normalized
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
-            .Count(t => t.Length >= 2 && !TriggerNoise.Contains(t));
-    }
+    private static int TriggerSpecificity(string? trigger) =>
+        TextNormalization.Words(trigger).Count(t => t.Length >= 2 && !TriggerNoise.Contains(t));
 
     private static readonly HashSet<string> TriggerNoise = new(StringComparer.OrdinalIgnoreCase)
     {

@@ -1,6 +1,7 @@
 using AgentRecall.Core.Abstractions;
 using AgentRecall.Core.Configuration;
 using AgentRecall.Core.Domain;
+using AgentRecall.Core.Text;
 
 namespace AgentRecall.Core.Activity;
 
@@ -60,5 +61,5 @@ public sealed class ActivityRecorder : IActivityRecorder
         _repository.ListRecentAsync(limit, cancellationToken);
 
     private static string? JoinIds(IReadOnlyList<int> ids) =>
-        ids.Count == 0 ? null : string.Join(',', ids);
+        ids.Count == 0 ? null : IdList.Join(ids);
 }

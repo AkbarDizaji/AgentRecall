@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using AgentRecall.Core.Text;
 
 namespace AgentRecall.Core.Extraction;
 
@@ -9,6 +10,9 @@ namespace AgentRecall.Core.Extraction;
 /// </summary>
 internal static class ExtractionHeuristics
 {
+    /// <summary>Longest trigger a normalization will emit; longer conditions are ellipsized.</summary>
+    private const int MaxTriggerLength = 90;
+
     /// <summary>Markers of positive ("do this") guidance.</summary>
     public static readonly string[] Prescriptive =
         ["use ", "prefer ", "always ", "ensure ", "make sure", "should ", "must ", "need to", "favor "];
@@ -114,7 +118,7 @@ internal static class ExtractionHeuristics
         if (ConditionalOpeners.Contains(first))
         {
             var cleaned = char.ToUpperInvariant(text[0]) + text[1..];
-            return Truncate(cleaned, 90);
+            return TextTruncation.Ellipsize(cleaned, MaxTriggerLength);
         }
 
         string condition;
@@ -131,7 +135,7 @@ internal static class ExtractionHeuristics
             condition = $"working on {text}";
         }
 
-        return Truncate("When " + condition, 90);
+        return TextTruncation.Ellipsize("When " + condition, MaxTriggerLength);
     }
 
     /// <summary>
@@ -220,22 +224,6 @@ internal static class ExtractionHeuristics
         return union > 0 && (double)intersection / union >= 0.8;
     }
 
-    public static string Truncate(string value, int max) =>
-        value.Length <= max ? value : value[..(max - 1)] + "…";
-
-    private static HashSet<string> SubjectTokens(string text)
-    {
-        var tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var normalized = new string(text.Select(c => char.IsLetterOrDigit(c) ? char.ToLowerInvariant(c) : ' ').ToArray());
-
-        foreach (var token in normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries))
-        {
-            if (token.Length >= 2 && !SubjectNoise.Contains(token))
-            {
-                tokens.Add(token);
-            }
-        }
-
-        return tokens;
-    }
+    private static HashSet<string> SubjectTokens(string text) =>
+        TextNormalization.SubjectTokens(text, SubjectNoise);
 }

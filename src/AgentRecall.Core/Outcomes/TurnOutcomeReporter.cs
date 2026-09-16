@@ -1,6 +1,7 @@
 using AgentRecall.Core.Abstractions;
 using AgentRecall.Core.Configuration;
 using AgentRecall.Core.Domain;
+using AgentRecall.Core.Text;
 
 namespace AgentRecall.Core.Outcomes;
 
@@ -92,8 +93,9 @@ public sealed class TurnOutcomeReporter : ITurnOutcomeReporter
                 continue;
             }
 
-            var ruleIds = report.RuleId is { } single ? [single] : ParseRuleIds(retrieval.RuleIds);
-            if (report.RuleId is { } target && !ParseRuleIds(retrieval.RuleIds).Contains(target))
+            var injectedHere = IdList.Parse(retrieval.RuleIds).ToList();
+            var ruleIds = report.RuleId is { } single ? [single] : injectedHere;
+            if (report.RuleId is { } target && !injectedHere.Contains(target))
             {
                 rejected.Add(
                     $"Retrieval {retrieval.RetrievalId} did not inject rule #{target}, so the outcome " +
@@ -192,7 +194,7 @@ public sealed class TurnOutcomeReporter : ITurnOutcomeReporter
         [
             .. activities
                 .Where(a => a.ActivityType == ActivityType.ContextFetched)
-                .SelectMany(a => ParseRuleIds(a.RuleIds))
+                .SelectMany(a => IdList.Parse(a.RuleIds))
                 .Distinct(),
         ];
     }
@@ -214,14 +216,7 @@ public sealed class TurnOutcomeReporter : ITurnOutcomeReporter
         return report.RuleId is { } ruleId
             ? retrievals
                 .OrderByDescending(r => r.Id)
-                .FirstOrDefault(r => ParseRuleIds(r.RuleIds).Contains(ruleId))
+                .FirstOrDefault(r => IdList.Parse(r.RuleIds).Contains(ruleId))
             : null;
     }
-
-    private static IReadOnlyList<int> ParseRuleIds(string? csv) =>
-        string.IsNullOrWhiteSpace(csv)
-            ? []
-            : [.. csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Select(part => int.TryParse(part, out var id) ? id : 0)
-                .Where(id => id > 0)];
 }

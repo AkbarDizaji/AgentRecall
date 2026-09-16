@@ -1,6 +1,8 @@
 using AgentRecall.Core.Abstractions;
+using AgentRecall.Core.Activity;
 using AgentRecall.Core.Domain;
 using AgentRecall.Core.Finalization;
+using AgentRecall.Core.Text;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -133,17 +135,17 @@ public static partial class CommandRouter
     {
         if (matched == 0)
         {
-            output.WriteLine("🧠 **AgentRecall:** found 0 noisy pending rules. Nothing to clean up.");
+            output.WriteLine($"{ActivityNoticeRenderer.Badge} found 0 noisy pending rules. Nothing to clean up.");
             return;
         }
 
         if (apply)
         {
-            output.WriteLine($"🧠 **AgentRecall:** archived {archived} noisy pending {Plural(archived, "rule")}.");
+            output.WriteLine($"{ActivityNoticeRenderer.Badge} archived {archived} noisy pending {Plural.Of(archived, "rule")}.");
         }
         else
         {
-            output.WriteLine($"🧠 **AgentRecall:** found {matched} noisy pending {Plural(matched, "rule")}.");
+            output.WriteLine($"{ActivityNoticeRenderer.Badge} found {matched} noisy pending {Plural.Of(matched, "rule")}.");
         }
 
         foreach (var (reason, count) in reasons)
@@ -198,8 +200,6 @@ public static partial class CommandRouter
 
         return RuleStatus.Pending;
     }
-
-    private static string Plural(int count, string singular) => count == 1 ? singular : singular + "s";
 
     private static string ReasonLabel(string reason) => reason switch
     {

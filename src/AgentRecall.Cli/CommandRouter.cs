@@ -12,6 +12,7 @@ using AgentRecall.Core.Reporting;
 using AgentRecall.Core.Search;
 using AgentRecall.Core.Services;
 using AgentRecall.Core.Summary;
+using AgentRecall.Core.Text;
 using AgentRecall.Infrastructure.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -450,7 +451,7 @@ public static partial class CommandRouter
                 foreach (var rule in all)
                 {
                     var scopeText = $"{rule.ScopeLevel}:{rule.ScopeValue}";
-                    output.WriteLine($"{rule.Id,-4} {rule.Status,-10} {Truncate(scopeText, 22),-22} {Truncate(rule.Trigger, 50)}");
+                    output.WriteLine($"{rule.Id,-4} {rule.Status,-10} {TextTruncation.Ellipsize(scopeText, 22),-22} {TextTruncation.Ellipsize(rule.Trigger, 50)}");
                 }
 
                 return 0;
@@ -761,7 +762,7 @@ public static partial class CommandRouter
                 output.WriteLine($"{"ID",-4} {"TYPE",-16} {"STATUS",-10} {"RULE",-5} {"CONF",-5} REASON");
                 foreach (var r in all)
                 {
-                    output.WriteLine($"{r.Id,-4} {r.RecommendationType,-16} {r.Status,-10} #{r.RuleId,-4} {r.Confidence,-5:0.00} {Truncate(r.Reason, 50)}");
+                    output.WriteLine($"{r.Id,-4} {r.RecommendationType,-16} {r.Status,-10} #{r.RuleId,-4} {r.Confidence,-5:0.00} {TextTruncation.Ellipsize(r.Reason, 50)}");
                 }
 
                 return 0;
@@ -939,7 +940,7 @@ public static partial class CommandRouter
                 output.WriteLine($"{"ID",-4} {"STATUS",-10} {"OCC",-4} {"CONF",-5} TITLE");
                 foreach (var c in all)
                 {
-                    output.WriteLine($"{c.Id,-4} {c.Status,-10} {c.OccurrenceCount,-4} {c.Confidence,-5:0.00} {Truncate(c.Title, 60)}");
+                    output.WriteLine($"{c.Id,-4} {c.Status,-10} {c.OccurrenceCount,-4} {c.Confidence,-5:0.00} {TextTruncation.Ellipsize(c.Title, 60)}");
                 }
 
                 return 0;
@@ -1213,7 +1214,7 @@ public static partial class CommandRouter
             var selected = byId[it.Resolution.SelectedRuleId];
             output.WriteLine();
             output.WriteLine($"[{it.Conflict.ConflictType}] rules {string.Join(", ", it.Conflict.RuleIds.Select(id => $"#{id}"))} — {it.Conflict.Summary}");
-            output.WriteLine($"  Selected: #{selected.Id} {Truncate(selected.RuleText, 80)}");
+            output.WriteLine($"  Selected: #{selected.Id} {TextTruncation.Ellipsize(selected.RuleText, 80)}");
             output.WriteLine($"  Why: {string.Join("; ", it.Resolution.Explanation)}");
             output.WriteLine($"  Ignored: {string.Join(", ", it.Resolution.IgnoredRuleIds.Select(id => $"#{id}"))}");
         }
@@ -1372,15 +1373,14 @@ public static partial class CommandRouter
             RecordUsage = true,
         };
 
-        if (options.TryGetValue("limit", out var rawLimit))
+        if (!TryReadIntOption(options, "limit", output, out var limit))
         {
-            if (!int.TryParse(rawLimit, out var limit) || limit <= 0)
-            {
-                output.WriteLine($"Invalid --limit '{rawLimit}'. Expected a positive integer.");
-                return 1;
-            }
+            return 1;
+        }
 
-            request = request with { Limit = limit };
+        if (limit is { } injectLimit)
+        {
+            request = request with { Limit = injectLimit };
         }
 
         await using var scope = services.CreateAsyncScope();
@@ -1512,15 +1512,14 @@ public static partial class CommandRouter
             searchOptions = searchOptions with { ScopeValue = scopeValue };
         }
 
-        if (options.TryGetValue("limit", out var rawLimit))
+        if (!TryReadIntOption(options, "limit", output, out var limit))
         {
-            if (!int.TryParse(rawLimit, out var limit) || limit <= 0)
-            {
-                output.WriteLine($"Invalid --limit '{rawLimit}'. Expected a positive integer.");
-                return 1;
-            }
+            return 1;
+        }
 
-            searchOptions = searchOptions with { Limit = limit };
+        if (limit is { } searchLimit)
+        {
+            searchOptions = searchOptions with { Limit = searchLimit };
         }
 
         await using var scope = services.CreateAsyncScope();
@@ -1541,7 +1540,7 @@ public static partial class CommandRouter
             {
                 var rule = result.Rule;
                 output.WriteLine($"  #{rule.Id} [{rule.Status}] score={result.Score:0.00} conf={rule.Confidence:0.00} {rule.ScopeLevel}:{rule.ScopeValue}");
-                output.WriteLine($"      {Truncate(rule.RuleText, 90)}");
+                output.WriteLine($"      {TextTruncation.Ellipsize(rule.RuleText, 90)}");
             }
 
             return 0;
@@ -2341,27 +2340,21 @@ public static partial class CommandRouter
 
             case "usage":
             {
-                var usageOptions = new UsageReportOptions { AsOf = DateTimeOffset.UtcNow };
-                if (options.TryGetValue("top", out var rawTop))
+                if (!TryReadIntOption(options, "top", output, out var usageTop)
+                    || !TryReadIntOption(options, "stale-days", output, out var staleDays, minimum: 0))
                 {
-                    if (!int.TryParse(rawTop, out var top) || top <= 0)
-                    {
-                        output.WriteLine($"Invalid --top '{rawTop}'. Expected a positive integer.");
-                        return 1;
-                    }
-
-                    usageOptions = usageOptions with { Top = top };
+                    return 1;
                 }
 
-                if (options.TryGetValue("stale-days", out var rawStale))
+                var usageOptions = new UsageReportOptions { AsOf = DateTimeOffset.UtcNow };
+                if (usageTop is { } usageTopValue)
                 {
-                    if (!int.TryParse(rawStale, out var staleDays) || staleDays < 0)
-                    {
-                        output.WriteLine($"Invalid --stale-days '{rawStale}'. Expected a non-negative integer.");
-                        return 1;
-                    }
+                    usageOptions = usageOptions with { Top = usageTopValue };
+                }
 
-                    usageOptions = usageOptions with { StaleDays = staleDays };
+                if (staleDays is { } staleDaysValue)
+                {
+                    usageOptions = usageOptions with { StaleDays = staleDaysValue };
                 }
 
                 var report = await reports.GetUsageReportAsync(usageOptions, cancellationToken).ConfigureAwait(false);
@@ -2372,17 +2365,12 @@ public static partial class CommandRouter
 
             case "dna":
             {
-                var top = 5;
-                if (options.TryGetValue("top", out var rawTop))
+                if (!TryReadIntOption(options, "top", output, out var dnaTop))
                 {
-                    if (!int.TryParse(rawTop, out top) || top <= 0)
-                    {
-                        output.WriteLine($"Invalid --top '{rawTop}'. Expected a positive integer.");
-                        return 1;
-                    }
+                    return 1;
                 }
 
-                var report = await reports.GetDnaReportAsync(top, cancellationToken).ConfigureAwait(false);
+                var report = await reports.GetDnaReportAsync(dnaTop ?? 5, cancellationToken).ConfigureAwait(false);
                 if (json) { WriteJson(output, report); return 0; }
                 WriteDnaReport(output, report);
                 return 0;
@@ -2479,7 +2467,7 @@ public static partial class CommandRouter
             output.WriteLine("Most Improved Rules:");
             foreach (var rule in r.MostImprovedRules)
             {
-                output.WriteLine($"  #{rule.RuleId} {Truncate(rule.RuleText, 70)} ({rule.NetConfidenceChange:+0.00;-0.00;0.00})");
+                output.WriteLine($"  #{rule.RuleId} {TextTruncation.Ellipsize(rule.RuleText, 70)} ({rule.NetConfidenceChange:+0.00;-0.00;0.00})");
             }
         }
 
@@ -2489,7 +2477,7 @@ public static partial class CommandRouter
             output.WriteLine("Most Degraded Rules:");
             foreach (var rule in r.MostDegradedRules)
             {
-                output.WriteLine($"  #{rule.RuleId} {Truncate(rule.RuleText, 70)} ({rule.NetConfidenceChange:+0.00;-0.00;0.00})");
+                output.WriteLine($"  #{rule.RuleId} {TextTruncation.Ellipsize(rule.RuleText, 70)} ({rule.NetConfidenceChange:+0.00;-0.00;0.00})");
             }
         }
     }
@@ -2519,7 +2507,7 @@ public static partial class CommandRouter
             var rank = 1;
             foreach (var rule in r.TopRetrievedRules)
             {
-                output.WriteLine($"  {rank}. {Truncate(rule.RuleText, 80)}");
+                output.WriteLine($"  {rank}. {TextTruncation.Ellipsize(rule.RuleText, 80)}");
                 output.WriteLine($"     Retrieved: {rule.RetrievalCount} times");
                 rank++;
             }
@@ -2537,7 +2525,7 @@ public static partial class CommandRouter
             var rank = 1;
             foreach (var lesson in r.MostValuableLessons)
             {
-                output.WriteLine($"  {rank}. {Truncate(lesson.RuleText, 80)}");
+                output.WriteLine($"  {rank}. {TextTruncation.Ellipsize(lesson.RuleText, 80)}");
                 output.WriteLine($"     Score: {lesson.Score:0.0}  (retrieved {lesson.RetrievalCount}x × confidence {lesson.Confidence:0.00})");
                 rank++;
             }
@@ -2571,7 +2559,7 @@ public static partial class CommandRouter
             foreach (var rule in r.StaleRules)
             {
                 var lastRetrieved = rule.DaysSinceLastRetrieved is { } days ? $"{days} days ago" : "never retrieved";
-                output.WriteLine($"  {rank}. {Truncate(rule.RuleText, 80)}");
+                output.WriteLine($"  {rank}. {TextTruncation.Ellipsize(rule.RuleText, 80)}");
                 output.WriteLine($"     Last Retrieved: {lastRetrieved}  |  Confidence: {rule.Confidence:0.00}");
                 rank++;
             }
@@ -2589,7 +2577,7 @@ public static partial class CommandRouter
             var rank = 1;
             foreach (var rule in r.TopConflictingRules)
             {
-                output.WriteLine($"  {rank}. #{rule.RuleId} {Truncate(rule.RuleText, 80)}");
+                output.WriteLine($"  {rank}. #{rule.RuleId} {TextTruncation.Ellipsize(rule.RuleText, 80)}");
                 output.WriteLine($"     In {rule.ConflictCount} conflict(s)");
                 rank++;
             }
@@ -2610,7 +2598,7 @@ public static partial class CommandRouter
             var rank = 1;
             foreach (var rule in r.FrequentlyRetrievedButRarelyValidated)
             {
-                output.WriteLine($"  {rank}. #{rule.RuleId} {Truncate(rule.RuleText, 80)}");
+                output.WriteLine($"  {rank}. #{rule.RuleId} {TextTruncation.Ellipsize(rule.RuleText, 80)}");
                 output.WriteLine($"     Retrieved {rule.RetrievalCount}x, no outcomes recorded");
                 rank++;
             }
@@ -2644,7 +2632,7 @@ public static partial class CommandRouter
         var rank = 1;
         foreach (var rule in rules)
         {
-            output.WriteLine($"  {rank}. #{rule.RuleId} {Truncate(rule.RuleText, 80)}");
+            output.WriteLine($"  {rank}. #{rule.RuleId} {TextTruncation.Ellipsize(rule.RuleText, 80)}");
             output.WriteLine($"     Net {rule.NetConfidenceChange:+0.00;-0.00;0.00} over {rule.OutcomeCount} outcome(s)");
             rank++;
         }
@@ -2664,7 +2652,7 @@ public static partial class CommandRouter
         {
             foreach (var convention in r.TopConventions)
             {
-                output.WriteLine($"  {convention.Rank}. {Truncate(convention.RuleText, 90)}");
+                output.WriteLine($"  {convention.Rank}. {TextTruncation.Ellipsize(convention.RuleText, 90)}");
             }
         }
 
@@ -2706,15 +2694,12 @@ public static partial class CommandRouter
             return 1;
         }
 
-        var top = 5;
-        if (options.TryGetValue("top", out var rawTop))
+        if (!TryReadIntOption(options, "top", output, out var requestedTop))
         {
-            if (!int.TryParse(rawTop, out top) || top <= 0)
-            {
-                output.WriteLine($"Invalid --top '{rawTop}'. Expected a positive integer.");
-                return 1;
-            }
+            return 1;
         }
+
+        var top = requestedTop ?? 5;
 
         ScopeLevel? scopeLevel = null;
         if (options.TryGetValue("scope-level", out var rawLevel))
@@ -2804,7 +2789,7 @@ public static partial class CommandRouter
 
             foreach (var item in section.Items)
             {
-                output.WriteLine($"  - {Truncate(item.Text, 100)}");
+                output.WriteLine($"  - {TextTruncation.Ellipsize(item.Text, 100)}");
             }
         }
     }
@@ -2849,6 +2834,45 @@ public static partial class CommandRouter
     /// <summary>Ensures the database exists before a command touches it.</summary>
     private static Task EnsureInitializedAsync(AsyncServiceScope scope, CancellationToken cancellationToken) =>
         scope.ServiceProvider.GetRequiredService<IDatabaseInitializer>().InitializeAsync(cancellationToken);
+
+    /// <summary>
+    /// Reads an optional integer <c>--name</c> option. <paramref name="value"/> is null when
+    /// the option was not given, so the caller keeps its own default; it is the parsed number
+    /// when the option was given and is at least <paramref name="minimum"/>.
+    ///
+    /// Returns false — having already written the error line — when the option is present but
+    /// unusable, so every command rejects a bad <c>--limit</c> or <c>--top</c> with the same
+    /// wording instead of each one spelling the check out again.
+    /// </summary>
+    private static bool TryReadIntOption(
+        IReadOnlyDictionary<string, string> options,
+        string name,
+        TextWriter output,
+        out int? value,
+        int minimum = 1)
+    {
+        value = null;
+        if (!options.TryGetValue(name, out var raw))
+        {
+            return true;
+        }
+
+        if (!int.TryParse(raw, out var parsed) || parsed < minimum)
+        {
+            var expected = minimum switch
+            {
+                1 => "a positive integer",
+                0 => "a non-negative integer",
+                _ => $"an integer of at least {minimum}",
+            };
+
+            output.WriteLine($"Invalid --{name} '{raw}'. Expected {expected}.");
+            return false;
+        }
+
+        value = parsed;
+        return true;
+    }
 
     /// <summary>
     /// Parses <c>--key value</c> pairs into a dictionary. A flag with no
@@ -2961,9 +2985,6 @@ public static partial class CommandRouter
         output.WriteLine("Net confidence change:");
         output.WriteLine($"{netChange:+0.00;-0.00;0.00}");
     }
-
-    private static string Truncate(string value, int max) =>
-        value.Length <= max ? value : value[..(max - 1)] + "…";
 
     /// <summary>
     /// A human scope label for `rules explain`. A user/communication preference is scoped

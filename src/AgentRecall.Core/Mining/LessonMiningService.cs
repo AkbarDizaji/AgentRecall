@@ -3,6 +3,7 @@ using AgentRecall.Core.Capture;
 using AgentRecall.Core.Domain;
 using AgentRecall.Core.Feedback;
 using AgentRecall.Core.Memory;
+using AgentRecall.Core.Text;
 
 namespace AgentRecall.Core.Mining;
 
@@ -17,6 +18,9 @@ namespace AgentRecall.Core.Mining;
 /// </summary>
 public sealed class LessonMiningService : ILessonMiningService
 {
+    /// <summary>How much of the mined rule a candidate title carries before it is ellipsized.</summary>
+    private const int TitleLength = 60;
+
     private static readonly RecallEventType[] SignalTypes =
         [RecallEventType.MistakeObserved, RecallEventType.RuleRejected];
 
@@ -261,7 +265,7 @@ public sealed class LessonMiningService : ILessonMiningService
     }
 
     private static string BuildTitle(int occurrence, string suggestedRule) =>
-        $"Repeated lesson (×{occurrence}): {Truncate(suggestedRule, 60)}";
+        $"Repeated lesson (×{occurrence}): {TextTruncation.Ellipsize(suggestedRule, TitleLength)}";
 
     private static string ToSentence(string text)
     {
@@ -274,9 +278,6 @@ public sealed class LessonMiningService : ILessonMiningService
         var body = char.ToUpperInvariant(trimmed[0]) + trimmed[1..];
         return body.EndsWith('.') || body.EndsWith('!') || body.EndsWith('?') ? body : body + ".";
     }
-
-    private static string Truncate(string value, int max) =>
-        value.Length <= max ? value : value[..(max - 1)] + "…";
 
     private static HashSet<string> Tokenize(string normalizedKey) =>
         new(normalizedKey.Split(' ', StringSplitOptions.RemoveEmptyEntries), StringComparer.Ordinal);

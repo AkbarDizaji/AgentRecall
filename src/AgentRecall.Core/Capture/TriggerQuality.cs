@@ -1,3 +1,5 @@
+using AgentRecall.Core.Text;
+
 namespace AgentRecall.Core.Capture;
 
 /// <summary>What is wrong with a rule's trigger, or <see cref="None"/> when it is usable.</summary>
@@ -115,24 +117,11 @@ public static class TriggerQuality
             return false;
         }
 
-        var normalizedTrigger = Normalize(trigger);
-        var normalizedAction = Normalize(action);
+        var normalizedTrigger = TextNormalization.Collapse(trigger);
+        var normalizedAction = TextNormalization.Collapse(action);
 
         return normalizedTrigger.Length > 0
             && (normalizedAction.StartsWith(normalizedTrigger, StringComparison.Ordinal)
                 || normalizedAction == normalizedTrigger);
-    }
-
-    /// <summary>Lowercases, drops punctuation, and collapses whitespace so only the words compare.</summary>
-    private static string Normalize(string text)
-    {
-        var words = text
-            .ToLowerInvariant()
-            .Select(c => char.IsLetterOrDigit(c) ? c : ' ')
-            .ToArray();
-
-        return string.Join(
-            ' ',
-            new string(words).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
     }
 }

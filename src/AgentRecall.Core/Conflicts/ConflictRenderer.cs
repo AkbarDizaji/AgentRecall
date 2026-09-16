@@ -1,4 +1,5 @@
 using System.Text;
+using AgentRecall.Core.Text;
 
 namespace AgentRecall.Core.Conflicts;
 
@@ -47,7 +48,7 @@ public static class ConflictRenderer
         sb.AppendLine();
 
         sb.AppendLine("Selected:");
-        sb.AppendLine($"- #{selected.Id} {Truncate(selected.RuleText)}");
+        sb.AppendLine($"- #{selected.Id} {TextTruncation.Ellipsize(selected.RuleText, MaxRuleTextLength)}");
         sb.AppendLine();
 
         sb.AppendLine("Why:");
@@ -97,7 +98,4 @@ public static class ConflictRenderer
             ? $"because it is {string.Join(" and ", reasons)}."
             : "because the selected rule scored higher.";
     }
-
-    private static string Truncate(string value) =>
-        value.Length <= MaxRuleTextLength ? value : value[..(MaxRuleTextLength - 1)] + "…";
 }

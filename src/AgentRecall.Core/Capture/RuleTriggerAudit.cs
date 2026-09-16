@@ -1,4 +1,5 @@
 using AgentRecall.Core.Domain;
+using AgentRecall.Core.Text;
 
 namespace AgentRecall.Core.Capture;
 
@@ -87,7 +88,7 @@ public static class RuleTriggerAudit
         // Same lesson, different trigger: the earliest rule id is treated as the original, so the
         // report points at one rule to keep rather than flagging both as each other's duplicate.
         var byAction = all
-            .GroupBy(h => NormalizeAction(h.Rule.RuleText), StringComparer.Ordinal)
+            .GroupBy(h => TextNormalization.Collapse(h.Rule.RuleText), StringComparer.Ordinal)
             .Where(g => g.Key.Length > 0 && g.Count() > 1)
             .SelectMany(g =>
             {
@@ -146,19 +147,5 @@ public static class RuleTriggerAudit
                 .ThenByDescending(r => r.Injections)
                 .ThenBy(r => r.RuleId),
         ];
-    }
-
-    /// <summary>Lowercased, punctuation-free, whitespace-collapsed action text, for duplicate matching.</summary>
-    private static string NormalizeAction(string? action)
-    {
-        if (string.IsNullOrWhiteSpace(action))
-        {
-            return string.Empty;
-        }
-
-        var letters = action.ToLowerInvariant().Select(c => char.IsLetterOrDigit(c) ? c : ' ').ToArray();
-        return string.Join(
-            ' ',
-            new string(letters).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
     }
 }

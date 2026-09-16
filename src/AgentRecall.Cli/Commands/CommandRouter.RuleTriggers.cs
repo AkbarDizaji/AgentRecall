@@ -1,6 +1,7 @@
 using AgentRecall.Core.Abstractions;
 using AgentRecall.Core.Capture;
 using AgentRecall.Core.Domain;
+using AgentRecall.Core.Text;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AgentRecall.Cli;
@@ -68,7 +69,7 @@ public static partial class CommandRouter
         {
             output.WriteLine(
                 $"#{report.RuleId}  injected {report.Injections}x, accepted {report.Accepted}, ignored {report.Ignored}");
-            output.WriteLine($"    trigger: {Truncate(report.Trigger, 100)}");
+            output.WriteLine($"    trigger: {TextTruncation.Ellipsize(report.Trigger, 100)}");
             foreach (var finding in report.Findings)
             {
                 output.WriteLine($"    - {DescribeFinding(finding, report)}");
@@ -97,7 +98,7 @@ public static partial class CommandRouter
         var injections = new Dictionary<int, int>();
         foreach (var record in retrievals)
         {
-            foreach (var id in ParseRuleIdCsv(record.RuleIds))
+            foreach (var id in IdList.Parse(record.RuleIds))
             {
                 injections[id] = injections.GetValueOrDefault(id) + 1;
             }
@@ -165,8 +166,8 @@ public static partial class CommandRouter
         await rules.UpdateAsync(rule, cancellationToken).ConfigureAwait(false);
 
         output.WriteLine($"Rule #{ruleId} retriggered (v{rule.Version}), confidence {rule.Confidence:0.00} kept.");
-        output.WriteLine($"  was: {Truncate(previous, 100)}");
-        output.WriteLine($"  now: {Truncate(trigger, 100)}");
+        output.WriteLine($"  was: {TextTruncation.Ellipsize(previous, 100)}");
+        output.WriteLine($"  now: {TextTruncation.Ellipsize(trigger, 100)}");
         return 0;
     }
 
@@ -182,11 +183,4 @@ public static partial class CommandRouter
             $"unusable trigger: {TriggerQuality.Describe(report.Problem)}",
         _ => finding.ToString(),
     };
-
-    private static IEnumerable<int> ParseRuleIdCsv(string? csv) =>
-        (csv ?? string.Empty)
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(part => int.TryParse(part, out var id) ? id : (int?)null)
-            .Where(id => id is not null)
-            .Select(id => id!.Value);
 }

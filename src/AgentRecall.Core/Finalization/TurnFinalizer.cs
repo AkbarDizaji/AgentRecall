@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using AgentRecall.Core.Abstractions;
@@ -9,6 +8,7 @@ using AgentRecall.Core.Domain;
 using AgentRecall.Core.Feedback;
 using AgentRecall.Core.Policy;
 using AgentRecall.Core.Services;
+using AgentRecall.Core.Text;
 
 namespace AgentRecall.Core.Finalization;
 
@@ -171,10 +171,10 @@ public sealed class TurnFinalizer : ITurnFinalizer
             {
                 Cwd = input.Cwd ?? string.Empty,
                 Source = input.Source,
-                CapturedRuleIds = Join(captured.Select(c => c.RuleId)),
-                SuggestedRuleIds = Join(suggested.Select(s => s.RuleId)),
+                CapturedRuleIds = IdList.Join(captured.Select(c => c.RuleId)),
+                SuggestedRuleIds = IdList.Join(suggested.Select(s => s.RuleId)),
                 SkippedReasons = string.Join('\n', skipped.Select(s => s.Reason)),
-                DuplicateRuleIds = Join(duplicates),
+                DuplicateRuleIds = IdList.Join(duplicates),
                 ErrorSummary = string.Join("; ", errors),
                 RawHash = hash,
                 TurnId = turnId ?? string.Empty,
@@ -551,7 +551,7 @@ public sealed class TurnFinalizer : ITurnFinalizer
         CancellationToken cancellationToken)
     {
         var captured = new List<FinalizedLesson>();
-        foreach (var id in ParseIds(finalization.CapturedRuleIds))
+        foreach (var id in IdList.Parse(finalization.CapturedRuleIds))
         {
             if (await _rules.GetAsync(id, cancellationToken).ConfigureAwait(false) is { } rule)
             {
@@ -560,7 +560,7 @@ public sealed class TurnFinalizer : ITurnFinalizer
         }
 
         var suggested = new List<FinalizedLesson>();
-        foreach (var id in ParseIds(finalization.SuggestedRuleIds))
+        foreach (var id in IdList.Parse(finalization.SuggestedRuleIds))
         {
             if (await _rules.GetAsync(id, cancellationToken).ConfigureAwait(false) is { } rule)
             {
@@ -577,7 +577,7 @@ public sealed class TurnFinalizer : ITurnFinalizer
             ? Array.Empty<string>()
             : finalization.ErrorSummary.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-        var duplicateIds = ParseIds(finalization.DuplicateRuleIds).ToList();
+        var duplicateIds = IdList.Parse(finalization.DuplicateRuleIds).ToList();
 
         return new TurnFinalizationResult
         {
@@ -654,16 +654,6 @@ public sealed class TurnFinalizer : ITurnFinalizer
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(payload));
         return Convert.ToHexString(bytes);
     }
-
-    private static string Join(IEnumerable<int> ids) =>
-        string.Join(',', ids.Select(i => i.ToString(CultureInfo.InvariantCulture)));
-
-    private static IEnumerable<int> ParseIds(string? csv) =>
-        (csv ?? string.Empty)
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(s => int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id) ? id : (int?)null)
-            .Where(id => id is not null)
-            .Select(id => id!.Value);
 
     /// <summary>
     /// The stored rationale, capped at what an injected block will actually show. Injection trims

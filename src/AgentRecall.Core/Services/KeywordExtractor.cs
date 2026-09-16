@@ -1,3 +1,5 @@
+using AgentRecall.Core.Text;
+
 namespace AgentRecall.Core.Services;
 
 /// <summary>
@@ -22,17 +24,8 @@ public static class KeywordExtractor
 
     public static IReadOnlyList<string> Extract(string text)
     {
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return [];
-        }
-
-        // Split on anything that isn't a letter or digit so "code_review" and
-        // "auth-token" become separate words.
-        var separated = new string(text.Select(c => char.IsLetterOrDigit(c) ? char.ToLowerInvariant(c) : ' ').ToArray());
-
         var keywords = new List<string>();
-        foreach (var token in separated.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        foreach (var token in TextNormalization.Words(text))
         {
             if (token.Length >= 2 && !StopWords.Contains(token) && !keywords.Contains(token))
             {
