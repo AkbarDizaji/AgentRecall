@@ -594,4 +594,45 @@ public class ContextInjectionTests
         // relevance gating and (sharing no keywords) drop out.
         Assert.Equal(5, result.All.Count());
     }
+
+    // ---- Duplicate actions ----------------------------------------------------
+
+    // The same lesson stored twice under different triggers is injected once. Rules are
+    // compared on the normalized action, so a re-cased, re-punctuated copy still counts as
+    // the same guidance rather than being paid for twice in the same block.
+    [Fact]
+    public async Task SameActionUnderDifferentTriggers_IsInjectedOnce()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        var kept = await Seed(
+            db,
+            "Validate tenant scope before returning data.",
+            trigger: "When querying tenant data",
+            confidence: 0.95);
+        var copy = await Seed(
+            db,
+            "  validate TENANT scope, before returning data!!  ",
+            trigger: "When querying tenant data",
+            confidence: 0.6);
+
+        var result = await Build(db, new ContextRequest
+        {
+            Task = "validate tenant scope when querying data",
+            RecordUsage = true,
+        });
+
+        // The stronger of the two survives; the re-cased, re-punctuated copy is dropped.
+        var injected = Assert.Single(result.All);
+        Assert.Equal(kept, injected.Rule.Id);
+        Assert.DoesNotContain(copy, result.All.Select(a => a.Rule.Id));
+
+        // The copy is not recorded as injected either, so no outcome can be claimed for a
+        // rule that never reached the agent.
+        await using var scope = db.CreateScope();
+        var retrieval = Assert.Single(
+            await scope.ServiceProvider.GetRequiredService<IRetrievalRecordRepository>().ListAsync());
+        Assert.Equal(kept.ToString(), retrieval.RuleIds);
+    }
 }

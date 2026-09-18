@@ -195,6 +195,25 @@ public class RuleTriggerAuditTests
         Assert.Equal(15, duplicate.DuplicateOf);
     }
 
+    // A copy that was re-typed rather than pasted is still a copy. Actions are compared on
+    // normalized text, so a difference of casing, punctuation or spacing does not buy the
+    // duplicate a place in every matching block alongside the rule it repeats.
+    [Fact]
+    public void Audit_TwoRulesWhoseActionsDifferOnlyInPunctuation_AreStillDuplicates()
+    {
+        var reports = RuleTriggerAudit.Audit(
+        [
+            new RuleTriggerHistory(
+                Rule(15, "when editing the payments file", "Guard every refund path with an idempotency key."), 18, 0, 4),
+            new RuleTriggerHistory(
+                Rule(16, "when working on refunds", "  guard every REFUND path, with an idempotency key!!  "), 18, 0, 4),
+        ]);
+
+        var duplicate = Assert.Single(reports, r => r.Findings.Contains(TriggerFinding.Duplicate));
+        Assert.Equal(16, duplicate.RuleId);
+        Assert.Equal(15, duplicate.DuplicateOf);
+    }
+
     [Fact]
     public void Audit_AnUnusableTrigger_IsReportedWithItsProblem()
     {

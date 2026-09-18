@@ -276,4 +276,44 @@ public class OutcomeTrackingTests
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         Assert.DoesNotContain(Path.Combine(home, ".agentrecall"), db.Options.DatabasePath);
     }
+
+    // The rule ids a retrieval recorded are read back exactly as written. Injection stores
+    // them as one comma-separated column and outcome reporting parses that column, so the
+    // writer and the reader have to agree; an outcome targeted at the retrieval must reach
+    // every rule that was injected, and only those.
+    [Fact]
+    public async Task OutcomeByRetrievalId_ReachesEveryInjectedRule()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        await SeedRule(db, 0.5, "Use parameterized queries.");
+        await SeedRule(db, 0.5, "Validate tenant scope before returning data.");
+        await SeedRule(db, 0.5, "Never log a connection string.");
+
+        ContextInjectionResult injection;
+        await using (var scope = db.CreateScope())
+        {
+            injection = await scope.ServiceProvider
+                .GetRequiredService<IContextInjectionService>()
+                .BuildContextAsync(new ContextRequest
+                {
+                    Task = "write a tenant-scoped SQL query without logging the connection string",
+                    RecordUsage = true,
+                });
+        }
+
+        var injectedIds = injection.All.Select(a => a.Rule.Id).OrderBy(id => id).ToList();
+        Assert.Equal(3, injectedIds.Count);
+        Assert.NotNull(injection.RetrievalId);
+
+        var result = await Record(db, new OutcomeRequest
+        {
+            RetrievalId = injection.RetrievalId,
+            Type = OutcomeType.UserAccepted,
+        });
+
+        Assert.Null(result.Error);
+        Assert.Equal(injectedIds, result.Adjustments.Select(a => a.RuleId).OrderBy(id => id));
+    }
 }
