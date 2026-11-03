@@ -97,6 +97,8 @@ public static partial class CommandRouter
             ["capture-status"] = new DelegateCommand((a, s, o, _, ct) => FinalizeTurnAsync("capture-status", a, s, o, ct)),
             ["turn-summary"] = new DelegateCommand((a, s, o, _, ct) => TurnSummaryAsync(a, s, o, ct)),
             ["activity"] = new DelegateCommand((a, s, o, _, ct) => ActivityAsync(a, s, o, ct)),
+            ["glossary"] = new DelegateCommand((a, s, o, _, ct) => GlossaryAsync(a, s, o, ct)),
+            ["concept"] = new DelegateCommand((a, s, o, _, ct) => ConceptAsync(a, s, o, ct)),
             ["seed"] = new DelegateCommand((a, s, o, l, ct) => SeedAsync(a, s, o, l, ct)),
             ["career"] = new DelegateCommand((a, s, o, l, ct) => CareerAsync(a, s, o, l, ct)),
             ["document"] = new DelegateCommand((a, s, o, l, ct) => DocumentAsync(a, s, o, l, ct)),
@@ -504,6 +506,9 @@ public static partial class CommandRouter
             case "retrigger":
                 return await RetriggerAsync(args[1..], rules, output, cancellationToken).ConfigureAwait(false);
 
+            case "anchor":
+                return await AnchorRuleAsync(args[1..], scope.ServiceProvider, output, cancellationToken).ConfigureAwait(false);
+
             case "approve":
             case "promote":
             case "archive":
@@ -640,6 +645,7 @@ public static partial class CommandRouter
                 output.WriteLine("  agentrecall rules promote <id>");
                 output.WriteLine("  agentrecall rules supersede <oldId> <newId>");
                 output.WriteLine("  agentrecall rules archive <id>");
+                output.WriteLine("  agentrecall rules anchor <id> add|remove <anchor>...");
                 output.WriteLine("  agentrecall rules report-bad <id> [--reason <text>]");
                 output.WriteLine("  agentrecall rules delete <id> [--force]");
                 output.WriteLine("  agentrecall rules conflicts [--scope-level <level>] [--scope-value <text>] [--json]");
@@ -2915,6 +2921,8 @@ public static partial class CommandRouter
         output.WriteLine($"  Tags:              {rule.Tags}");
         output.WriteLine($"  Confidence:        {rule.Confidence:0.00}");
         output.WriteLine($"  Scope:             {rule.ScopeLevel}:{rule.ScopeValue}");
+        var anchors = RuleAnchors.Parse(rule.Anchors);
+        output.WriteLine($"  Anchored to:       {(anchors.Count == 0 ? "-" : string.Join(", ", anchors))}");
         output.WriteLine($"  Superseded by:     {(rule.SupersededById?.ToString() ?? "-")}");
         output.WriteLine($"  Created:           {rule.CreatedAt:u}");
         output.WriteLine($"  Updated:           {rule.UpdatedAt:u}");
@@ -3027,6 +3035,8 @@ public static partial class CommandRouter
         output.WriteLine("  rules supersede <oldId> <newId>");
         output.WriteLine("                       Replace one rule with another");
         output.WriteLine("  rules archive <id>   Archive a rule (excluded from search)");
+        output.WriteLine("  rules anchor <id> add|remove <anchor>...");
+        output.WriteLine("                       Pin a rule to where it belongs: path:<pattern> or symbol:<name>");
         output.WriteLine("  rules conflicts      List detected rule conflicts and the chosen winner (--json)");
         output.WriteLine("  rules explain <id>   Explain a rule's confidence from its outcome history");
         output.WriteLine("  rules triggers       Audit every trigger against its injection/outcome record");
@@ -3069,6 +3079,15 @@ public static partial class CommandRouter
         output.WriteLine("                       (--json, --detailed, --compact)");
         output.WriteLine("  activity last        Show the latest AgentRecall activity notice (--json)");
         output.WriteLine("  activity list        Show recent activity notices (--limit <n>, --json)");
+        output.WriteLine("  glossary add \"<term>\" \"<english term>\"");
+        output.WriteLine("                       Map a word you use (e.g. in Persian) to the English term rules use");
+        output.WriteLine("  glossary list        Show the glossary (--json)");
+        output.WriteLine("  glossary remove \"<term>\"");
+        output.WriteLine("                       Remove a glossary entry");
+        output.WriteLine("  concept add \"<term>\" \"<definition>\"");
+        output.WriteLine("                       Save what a business or technical term means (--aliases, --paths,");
+        output.WriteLine("                       --symbols, --global)");
+        output.WriteLine("  concept list         Show saved concepts (--json)");
         output.WriteLine("  seed list            List built-in seed packs (curated starter rules)");
         output.WriteLine("  seed show <pack>     Show a seed pack's rules, defaults, and provenance");
         output.WriteLine("  seed install <pack>  Install a seed pack (--active, --suggested, --force, --json)");

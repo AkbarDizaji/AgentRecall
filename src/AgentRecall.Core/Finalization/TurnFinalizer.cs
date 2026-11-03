@@ -459,6 +459,7 @@ public sealed class TurnFinalizer : ITurnFinalizer
             AlwaysApply = alwaysApply,
             ScopeLevel = scopeLevel,
             ScopeValue = scopeValue,
+            Anchors = Context.RuleAnchors.Format(normalized.Anchors),
         };
     }
 

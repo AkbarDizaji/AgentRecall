@@ -6,7 +6,44 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Rules can say where they belong, and arrive when the work gets there.** A rule now carries
+  anchors — path patterns relative to the repository (`tests/**`, `src/Billing`,
+  `**/*Controller.cs`) and class or other symbol names (`OrderService`). The judge sets them on a
+  verdict (`normalized_rule.anchors`), `anchor_rule` and `agentrecall rules anchor` set them on an
+  existing rule, and a repeat of a rule adds the anchors it names. An anchored rule is delivered
+  when the files in play match, when a file declares the symbol, or when the task names it — even
+  if it shares no words with the task — and is held back from work that is plainly somewhere else.
+  Anchors stay within their rule's repository, since `tests/**` is a different place in each one.
+- **Reading a file now recalls what is anchored to it.** The PreToolUse hook also fires on `Read`
+  and delivers only the rules and concepts anchored to that file or to the types it declares,
+  because the plan for a change forms while reading and the edit comes too late to steer it. Reads
+  are frequent, so nothing reaches the context on keyword relevance alone there. Re-running
+  `agentrecall claude-code init` widens an existing hook registration's matcher in place.
+- **Domain concepts: what a term means here.** `save_concept` and `agentrecall concept add` store
+  the business and technical knowledge code cannot explain — the term, its definition, the names
+  it goes by, and the code it lives in. A concept is delivered in its own "Domain Concepts"
+  section when a task names it or reaches its code, is never presented as a rule to obey or a
+  mistake to avoid, and never conflicts with a rule. A name in another script is added to the
+  glossary, so "ایونت" finds the concept and every rule about events.
+- **A glossary, so a prompt in your own language reaches rules written in English.** Recall
+  matches words and has no model to translate with, so a Persian prompt asking about "ایونت" shared
+  no word with a rule about "event" and nothing was injected. `agentrecall glossary add "ایونت"
+  "event"` records the mapping once; from then on the term is replaced by its English form before
+  injection and search rank rules, and a prompt that names a glossary term passes the hook's
+  keyword gate even when it carries none of the English keywords. Terms match as whole words or
+  phrases, the longer phrase winning, and Arabic yeh and kaf are folded to their Persian forms so
+  the same word typed on another keyboard still matches.
+
 ### Fixed
+- **Standing rules reach every prompt, as promised.** The hook's keyword gate ran before anything
+  else, so a prompt without one of its English development keywords — any prompt in another
+  language, or "why is this slow?" — received no standing rule at all, though standing rules are
+  the ones that apply to every task. Such a prompt now gets the standing rules and nothing else.
+- **A linked worktree shares its repository's rules.** In a worktree `.git` is a file, not a
+  directory, so the worktree was not recognised as part of the repository and its rules were
+  recalled and captured under a scope of their own. It is now scoped to the main checkout. The
+  four copies of this lookup the hooks kept are now one.
 - **A commit on `main` no longer loses its CI run to the commit after it.** The concurrency group
   was keyed on the ref, so every push to `main` superseded the one before it — and the usual rhythm
   here is a feature commit followed minutes later by a release commit, which meant the feature's

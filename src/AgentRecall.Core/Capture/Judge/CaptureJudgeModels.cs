@@ -39,6 +39,14 @@ public sealed record NormalizedRule
 
     /// <summary>Free-form tags the judge attached to the rule.</summary>
     public IReadOnlyList<string> Tags { get; init; } = [];
+
+    /// <summary>
+    /// Where in the code the rule belongs, when it belongs somewhere specific: path patterns
+    /// relative to the repository (<c>tests/**</c>) and class or other symbol names
+    /// (<c>OrderService</c>). Stored on <see cref="Domain.RecallRule.Anchors"/>; entries that do
+    /// not parse are dropped rather than failing the capture.
+    /// </summary>
+    public IReadOnlyList<Context.RuleAnchor> Anchors { get; init; } = [];
 }
 
 /// <summary>

@@ -25,6 +25,7 @@ public sealed class AgentRecallDbContext : DbContext
     public DbSet<AgentRecallActivity> Activities => Set<AgentRecallActivity>();
     public DbSet<CareerImpactCandidate> CareerImpactCandidates => Set<CareerImpactCandidate>();
     public DbSet<DocOpportunityCandidate> DocOpportunityCandidates => Set<DocOpportunityCandidate>();
+    public DbSet<GlossaryTerm> GlossaryTerms => Set<GlossaryTerm>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -54,6 +55,9 @@ public sealed class AgentRecallDbContext : DbContext
             // Chat/session correlation for the capture-approval gate. Stored with a default so
             // the additive schema reconciler can backfill the column on older databases.
             entity.Property(e => e.SessionId).HasDefaultValue(string.Empty);
+            // Where in the code the rule belongs. Stored with a default so the additive schema
+            // reconciler can backfill the column on databases created before anchors.
+            entity.Property(e => e.Anchors).HasDefaultValue(string.Empty);
             entity.HasIndex(e => new { e.ScopeLevel, e.ScopeValue });
             entity.HasIndex(e => e.Status);
             entity.HasIndex(e => e.Deprecated);
@@ -89,6 +93,14 @@ public sealed class AgentRecallDbContext : DbContext
             // before retrievals recorded which chat they served.
             entity.Property(e => e.SessionId).IsRequired().HasDefaultValue(string.Empty);
             entity.HasIndex(e => e.SessionId);
+        });
+
+        modelBuilder.Entity<GlossaryTerm>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Term).IsRequired();
+            entity.Property(e => e.Canonical).IsRequired();
+            entity.HasIndex(e => e.Term).IsUnique();
         });
 
         modelBuilder.Entity<RuleOutcome>(entity =>

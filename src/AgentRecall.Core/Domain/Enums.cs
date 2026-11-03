@@ -94,6 +94,15 @@ public enum RuleCategory
     /// communication surface; scoped to the user, never to a repository.
     /// </summary>
     CommunicationPreference = 5,
+
+    /// <summary>
+    /// What a business or technical term means here — knowledge the code cannot tell you, such
+    /// as what a "venue migration" is or why an "event" is published only after commit. Stored
+    /// as a definition (the trigger holds the term, the rule text its meaning), delivered in its
+    /// own section when the task names the term or touches the code it is anchored to, and never
+    /// treated as a rule to follow or a prohibition.
+    /// </summary>
+    DomainConcept = 6,
 }
 
 /// <summary>The kind of activity recorded by a <see cref="RecallEvent"/>.</summary>

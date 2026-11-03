@@ -88,6 +88,22 @@ public sealed record ContextRequest
     public int? PendingCap { get; init; }
 
     /// <summary>
+    /// When true, only rules anchored to the files or symbols in this request are considered —
+    /// nothing reaches the context on keyword relevance alone, and standing rules are left to the
+    /// prompt. The PreToolUse hook sets this when the agent reads a file: reading is frequent, so
+    /// only guidance pinned to that exact place is worth the interruption.
+    /// </summary>
+    public bool AnchoredOnly { get; init; }
+
+    /// <summary>
+    /// When true, only standing (always-apply) rules are considered. The UserPromptSubmit hook sets
+    /// this for a prompt its keyword gate turned away: such a prompt is not worth a relevance
+    /// search, but a standing rule applies to every task by definition, so it must not depend on
+    /// the prompt happening to contain an English development keyword.
+    /// </summary>
+    public bool StandingOnly { get; init; }
+
+    /// <summary>
     /// When true, records that the selected rules were retrieved: a RuleApplied
     /// event per rule plus a LastUsedAt bump, so learning reports can measure
     /// which rules are actually helping. Off by default so pure ranking (and its

@@ -60,6 +60,18 @@ public static class ConditionalRuleFormatter
         var pad = new string(' ', indent);
         var sb = new StringBuilder();
 
+        // A concept is a definition, not a condition and an action: the term and what it means.
+        if (rule.Category == RuleCategory.DomainConcept)
+        {
+            sb.Append(rule.Trigger.Trim()).Append(": ").Append(rule.RuleText.Trim());
+            if (includeSource && detail != RuleDetail.Reminder)
+            {
+                sb.AppendLine().Append(pad).Append("Source: #").Append(rule.Id);
+            }
+
+            return sb.ToString();
+        }
+
         var condition = string.IsNullOrWhiteSpace(rule.Trigger)
             ? "Always"
             : rule.Trigger.Trim().TrimEnd(':', '.', ' ');

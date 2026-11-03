@@ -350,29 +350,5 @@ public static class CaptureHook
     }
 
     /// <summary>Repository name = the nearest ancestor with a .git, else the cwd's name.</summary>
-    private static string? RepositoryName(string? cwd)
-    {
-        if (string.IsNullOrWhiteSpace(cwd))
-        {
-            return null;
-        }
-
-        try
-        {
-            var dir = new DirectoryInfo(cwd);
-            for (var current = dir; current is not null; current = current.Parent)
-            {
-                if (Directory.Exists(Path.Combine(current.FullName, ".git")))
-                {
-                    return current.Name;
-                }
-            }
-
-            return dir.Name;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
-        {
-            return null;
-        }
-    }
+    private static string? RepositoryName(string? cwd) => TurnPayload.RepositoryScopeName(cwd);
 }

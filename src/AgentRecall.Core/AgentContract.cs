@@ -26,12 +26,14 @@ namespace AgentRecall.Core;
 ///   <item>Deterministic recall and capture hooks (<c>inject_context</c>, <c>capture_feedback</c>).</item>
 ///   <item>Semantic capture judge and Stop-hook judgment enforcement (<c>submit_capture_judgment</c>).</item>
 ///   <item>Reported rule outcomes against a retrieval id (<c>rule_outcomes</c>).</item>
+///   <item>Knowledge placed in the code: rule anchors (<c>normalized_rule.anchors</c>, <c>anchor_rule</c>),
+///   domain concepts (<c>save_concept</c>), and the glossary.</item>
 /// </list>
 /// </summary>
 public static class AgentContract
 {
     /// <summary>The contract this build implements. See the type remarks for what each number covers.</summary>
-    public const int Version = 3;
+    public const int Version = 4;
 
     /// <summary>The literal the declaration line starts with, in instructions and in the parser.</summary>
     public const string MarkerPrefix = "AgentRecall contract:";

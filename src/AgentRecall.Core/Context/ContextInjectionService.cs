@@ -50,6 +50,17 @@ public sealed class ContextInjectionService : IContextInjectionService
     private const int AlwaysApplyCap = 5;
 
     /// <summary>
+    /// Relevance given to a rule whose anchor matches this work, or a concept the task names.
+    /// Where the work is, or what it is called, is a sharper signal than keyword overlap, so such
+    /// a rule is kept even when the task shares few words with it — and, being specific to this
+    /// place, it is eligible for must-follow like a project-scoped rule.
+    /// </summary>
+    private const double PinnedRelevance = 0.5;
+
+    /// <summary>Most domain concepts injected per retrieval, so definitions never crowd out rules.</summary>
+    private const int ConceptCap = 3;
+
+    /// <summary>
     /// Score multiplier applied to built-in seed rules so a locally learned rule of equal
     /// relevance always ranks above generic starter guidance. Repeated successful local use
     /// raises a seed rule's confidence, which lifts its score back up over time.
@@ -89,6 +100,7 @@ public sealed class ContextInjectionService : IContextInjectionService
     private readonly Conflicts.IRuleConflictDetector _conflictDetector;
     private readonly Conflicts.IRuleResolutionService _resolution;
     private readonly Abstractions.IRuleOutcomeRepository _outcomes;
+    private readonly IGlossaryTermRepository _glossary;
 
     public ContextInjectionService(
         IRecallRuleRepository rules,
@@ -98,7 +110,8 @@ public sealed class ContextInjectionService : IContextInjectionService
         IConceptExpander concepts,
         Conflicts.IRuleConflictDetector conflictDetector,
         Conflicts.IRuleResolutionService resolution,
-        Abstractions.IRuleOutcomeRepository outcomes)
+        Abstractions.IRuleOutcomeRepository outcomes,
+        IGlossaryTermRepository glossary)
     {
         _rules = rules ?? throw new ArgumentNullException(nameof(rules));
         _events = events ?? throw new ArgumentNullException(nameof(events));
@@ -108,16 +121,22 @@ public sealed class ContextInjectionService : IContextInjectionService
         _conflictDetector = conflictDetector ?? throw new ArgumentNullException(nameof(conflictDetector));
         _resolution = resolution ?? throw new ArgumentNullException(nameof(resolution));
         _outcomes = outcomes ?? throw new ArgumentNullException(nameof(outcomes));
+        _glossary = glossary ?? throw new ArgumentNullException(nameof(glossary));
     }
 
     public async Task<ContextInjectionResult> BuildContextAsync(ContextRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var taskTokens = ContextTokens.FromTask(request.Task);
+        // Rules are written in English; the glossary lets a task phrased in the user's own
+        // words ("ایونت") match them as if it had named the English term ("event").
+        var glossary = await _glossary.ListAsync(cancellationToken).ConfigureAwait(false);
+        var translatedTask = Glossary.Translate(request.Task, glossary);
+        var taskTokens = ContextTokens.FromTask(translatedTask);
+        var namedInTask = " " + Glossary.Normalize(translatedTask) + " ";
         var domainTokens = ContextTokens.FromIdentifiers(request.FileNames.Concat(request.ChangedEntities));
 
-        if (taskTokens.Count == 0 && domainTokens.Count == 0)
+        if (taskTokens.Count == 0 && domainTokens.Count == 0 && !request.StandingOnly)
         {
             return Empty(request.TokenBudget, "No task keywords or changed entities to match on.");
         }
@@ -151,12 +170,17 @@ public sealed class ContextInjectionService : IContextInjectionService
         var alwaysApply = new List<Assessment>();
         foreach (var rule in pool)
         {
-            var assessment = Assess(rule, taskTokens, domainTokens, concepts, request, effectiveness);
+            var assessment = Assess(rule, taskTokens, domainTokens, concepts, request, effectiveness, namedInTask);
+            if (!IsInPlace(assessment, request))
+            {
+                continue;
+            }
+
             if (assessment.AlwaysApply)
             {
                 alwaysApply.Add(assessment);
             }
-            else if (assessment.Relevance >= RelevanceFloor)
+            else if (assessment.Pinned || assessment.Relevance >= RelevanceFloor)
             {
                 assessments[rule.Id] = assessment;
             }
@@ -183,8 +207,9 @@ public sealed class ContextInjectionService : IContextInjectionService
             }
         }
 
-        // Let the policy engine prune conflicts, supersedes and overrides.
-        var relevantRules = assessments.Values.Select(a => a.Rule).ToList();
+        // Let the policy engine prune conflicts, supersedes and overrides. Concepts are
+        // definitions, not guidance, so they neither conflict with a rule nor override one.
+        var relevantRules = assessments.Values.Where(a => !a.IsConcept).Select(a => a.Rule).ToList();
         var resolution = _policy.Resolve(relevantRules, new PolicyContext
         {
             ScopeLevel = request.ScopeLevel,
@@ -195,16 +220,18 @@ public sealed class ContextInjectionService : IContextInjectionService
 
         var ranked = resolution.Effective
             .Select(v => assessments[v.Rule.Id])
+            .Concat(assessments.Values.Where(a => a.IsConcept))
             .ToList();
 
         // Optionally fold in Pending rules — scored the same way, but never elevated
         // to must-follow since they haven't been approved.
-        if (request.IncludePending)
+        if (request.IncludePending && !request.StandingOnly)
         {
             foreach (var rule in all.Where(r => r.Status == RuleStatus.Pending && !r.Deprecated && !request.ExcludeRuleIds.Contains(r.Id)))
             {
-                var assessment = Assess(rule, taskTokens, domainTokens, concepts, request, effectiveness) with { Unapproved = true };
-                if (assessment.Relevance >= RelevanceFloor)
+                var assessment = Assess(rule, taskTokens, domainTokens, concepts, request, effectiveness, namedInTask) with { Unapproved = true };
+                if (IsInPlace(assessment, request) && !assessment.AlwaysApply
+                    && (assessment.Pinned || assessment.Relevance >= RelevanceFloor))
                 {
                     ranked.Add(assessment);
                 }
@@ -232,6 +259,9 @@ public sealed class ContextInjectionService : IContextInjectionService
 
         // Cap Pending rules so unreviewed suggestions never flood the context.
         ranked = CapPendingRules(ranked, request.PendingCap);
+
+        // Cap concepts so definitions never crowd out the rules.
+        ranked = CapConcepts(ranked);
 
         // Reserve the block's furniture from the budget, but never more than a quarter of it: a
         // caller who asks for a small budget wants the top rule, not an empty block.
@@ -284,7 +314,7 @@ public sealed class ContextInjectionService : IContextInjectionService
     /// </summary>
     private ContextInjectionResult ResolveInjectedConflicts(ContextInjectionResult result)
     {
-        var injected = result.All.Select(r => r.Rule).ToList();
+        var injected = result.All.Select(r => r.Rule).Where(r => r.Category != RuleCategory.DomainConcept).ToList();
         if (injected.Count < 2)
         {
             return result;
@@ -419,7 +449,8 @@ public sealed class ContextInjectionService : IContextInjectionService
         HashSet<string> domainTokens,
         ConceptContext concepts,
         ContextRequest request,
-        IReadOnlyDictionary<int, double> effectiveness)
+        IReadOnlyDictionary<int, double> effectiveness,
+        string namedInTask)
     {
         var ruleTokens = ContextTokens.FromRule(rule);
         var reasons = new List<string>();
@@ -512,6 +543,35 @@ public sealed class ContextInjectionService : IContextInjectionService
             TaskTypeWeight * taskType +
             ScopeWeight * scope;
 
+        // 6. Place: an anchor that matches this work, or a concept the task calls by name. Both
+        // are held to the rule's own repository, since an anchor like tests/** means a different
+        // place in every repository and a term can mean something else in another product.
+        var isConcept = rule.Category == RuleCategory.DomainConcept;
+        var anchors = RuleAnchors.Parse(rule.Anchors);
+        var inThisRepository = rule.ScopeLevel != ScopeLevel.Repository
+            || string.IsNullOrWhiteSpace(request.ScopeValue)
+            || string.Equals(rule.ScopeValue, request.ScopeValue, StringComparison.OrdinalIgnoreCase);
+        var anchorHit = inThisRepository
+            ? RuleAnchors.FirstMatch(anchors, request.FileNames, request.ChangedEntities, request.Task)
+            : null;
+        var named = isConcept && inThisRepository && IsNamed(rule, namedInTask);
+        if (anchorHit is { } hit)
+        {
+            projectScoped = true;
+            reasons.Add($"anchored to {hit}");
+        }
+
+        if (named)
+        {
+            reasons.Add($"the task names {rule.Trigger.Trim()}");
+        }
+
+        var pinned = anchorHit is not null || named;
+        if (pinned)
+        {
+            relevance = Math.Max(relevance, PinnedRelevance);
+        }
+
         // Confidence weighting: confidence scales relevance without zeroing it,
         // and promoted rules get a small lift.
         var confidence = Math.Clamp(rule.Confidence, 0.0, 1.0);
@@ -540,7 +600,9 @@ public sealed class ContextInjectionService : IContextInjectionService
             reasons.Add("seed rule (starter guidance)");
         }
 
-        return new Assessment(rule, relevance, score, reasons, projectScoped, highTrust, IsProhibition(rule), false, isSeed, rule.AlwaysApply);
+        return new Assessment(
+            rule, relevance, score, reasons, projectScoped, highTrust, !isConcept && IsProhibition(rule), false, isSeed,
+            rule.AlwaysApply && !isConcept, isConcept, Anchored: anchors.Count > 0, Pinned: pinned, AnchorHit: anchorHit is not null);
     }
 
     /// <summary>
@@ -602,6 +664,55 @@ public sealed class ContextInjectionService : IContextInjectionService
     private static bool IsWithinDirectory(string filePath, string dirPath) =>
         filePath.StartsWith(dirPath + "/", StringComparison.OrdinalIgnoreCase)
         || filePath.Contains("/" + dirPath + "/", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Whether a rule may be considered for this work at all, given where the work is. A request
+    /// made on reading a file admits only rules pinned to that file. Otherwise an anchored rule is
+    /// held back when the request names files and none of them is its place: the work is known to
+    /// be somewhere else. With no files — a prompt — an anchored rule competes like any other,
+    /// since a prompt cannot say where the work will land.
+    /// </summary>
+    private static bool IsInPlace(Assessment assessment, ContextRequest request)
+    {
+        if (request.StandingOnly)
+        {
+            return assessment.AlwaysApply;
+        }
+
+        if (request.AnchoredOnly)
+        {
+            return assessment.AnchorHit;
+        }
+
+        return !assessment.Anchored || assessment.AnchorHit || assessment.Pinned || request.FileNames.Count == 0;
+    }
+
+    /// <summary>
+    /// Whether the task calls a concept by name: its term or one of its other names (kept in its
+    /// tags) appears as whole words in the task, after the glossary has mapped the user's words to
+    /// English. <paramref name="namedInTask"/> is the normalized task padded with spaces.
+    /// </summary>
+    private static bool IsNamed(RecallRule concept, string namedInTask)
+    {
+        var names = concept.Tags.Split(',', StringSplitOptions.RemoveEmptyEntries).Prepend(concept.Trigger);
+        foreach (var name in names)
+        {
+            var normalized = Glossary.Normalize(name);
+            if (normalized.Length > 0 && namedInTask.Contains(" " + normalized + " ", StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Keeps the <see cref="ConceptCap"/> best-ranked concepts; rules are never dropped by it.</summary>
+    private static List<Assessment> CapConcepts(List<Assessment> ranked)
+    {
+        var kept = 0;
+        return ranked.Where(a => !a.IsConcept || kept++ < ConceptCap).ToList();
+    }
 
     /// <summary>
     /// Keeps at most <see cref="SeedInjectionCap"/> seed rules (highest-ranked first) unless
@@ -753,7 +864,10 @@ public sealed class ContextInjectionService : IContextInjectionService
 
     private static InjectedRule ToInjected(Assessment a, IReadOnlyDictionary<int, int> seen)
     {
-        var importance = a.Prohibition
+        // A concept is a definition to know, never a rule to obey or a mistake to avoid.
+        var importance = a.IsConcept
+            ? RuleImportance.Suggested
+            : a.Prohibition
             ? RuleImportance.Warning
             // A standing (always-apply) rule is must-follow regardless of relevance score — it is a
             // universal constraint, not a task match. Unapproved (Pending) rules and seed rules are
@@ -893,5 +1007,9 @@ public sealed class ContextInjectionService : IContextInjectionService
         bool Prohibition,
         bool Unapproved,
         bool IsSeed,
-        bool AlwaysApply);
+        bool AlwaysApply,
+        bool IsConcept,
+        bool Anchored,
+        bool Pinned,
+        bool AnchorHit);
 }

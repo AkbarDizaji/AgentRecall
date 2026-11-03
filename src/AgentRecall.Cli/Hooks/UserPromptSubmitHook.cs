@@ -6,6 +6,7 @@ using AgentRecall.Core.Configuration;
 using AgentRecall.Core.Context;
 using AgentRecall.Core.Domain;
 using AgentRecall.Core.Hooks;
+using AgentRecall.Core.Text;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AgentRecall.Cli.Hooks;
@@ -37,10 +38,11 @@ public static class UserPromptSubmitHook
                 return string.Empty;
             }
 
-            if (!PromptGate.IsRelevant(prompt, options.HookKeywords))
-            {
-                return string.Empty;
-            }
+            // A prompt the keyword gate turns away still gets the standing rules: they apply to
+            // every task, so they cannot hinge on the prompt containing an English keyword.
+            await using var scope = services.CreateAsyncScope();
+            var standingOnly = !PromptGate.IsRelevant(prompt, options.HookKeywords)
+                && !await MentionsGlossaryAsync(scope.ServiceProvider, prompt, options, cancellationToken).ConfigureAwait(false);
 
             var repository = RepositoryName(cwd);
             var request = new ContextRequest
@@ -54,9 +56,9 @@ public static class UserPromptSubmitHook
                 // Rules surfaced to the agent count as retrievals for learning reports.
                 RecordUsage = true,
                 SessionId = sessionId,
+                StandingOnly = standingOnly,
             };
 
-            await using var scope = services.CreateAsyncScope();
             // Initialize the database once per process; the reconciler is wasted work on
             // every subsequent prompt. Usage recording itself is a single batched write.
             await HookDatabaseGuard.EnsureInitializedAsync(scope.ServiceProvider, cancellationToken)
@@ -106,6 +108,27 @@ public static class UserPromptSubmitHook
         }
     }
 
+    /// <summary>
+    /// True when a prompt the keyword gate turned away still names a glossary term, or passes
+    /// the gate once its words are mapped to English. The gate's keywords are English, so
+    /// without this a prompt in another language could never reach the rules; a term the user
+    /// put in the glossary is one they care about, so naming it is reason enough to look.
+    /// Only consulted for prompts the gate rejected, so an English prompt pays nothing extra.
+    /// </summary>
+    private static async Task<bool> MentionsGlossaryAsync(
+        IServiceProvider scopedServices,
+        string prompt,
+        AgentRecallOptions options,
+        CancellationToken cancellationToken)
+    {
+        await HookDatabaseGuard.EnsureInitializedAsync(scopedServices, cancellationToken).ConfigureAwait(false);
+        var glossary = await scopedServices.GetRequiredService<IGlossaryTermRepository>()
+            .ListAsync(cancellationToken).ConfigureAwait(false);
+
+        return Glossary.Matches(prompt, glossary).Count > 0
+            || PromptGate.IsRelevant(Glossary.Translate(prompt, glossary), options.HookKeywords);
+    }
+
     private static bool TryReadPrompt(string? json, out string prompt, out string? cwd, out string? sessionId)
     {
         prompt = string.Empty;
@@ -137,29 +160,5 @@ public static class UserPromptSubmitHook
     }
 
     /// <summary>Repository name = the nearest ancestor with a .git, else the cwd's name.</summary>
-    private static string? RepositoryName(string? cwd)
-    {
-        if (string.IsNullOrWhiteSpace(cwd))
-        {
-            return null;
-        }
-
-        try
-        {
-            var dir = new DirectoryInfo(cwd);
-            for (var current = dir; current is not null; current = current.Parent)
-            {
-                if (Directory.Exists(Path.Combine(current.FullName, ".git")))
-                {
-                    return current.Name;
-                }
-            }
-
-            return dir.Name;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
-        {
-            return null;
-        }
-    }
+    private static string? RepositoryName(string? cwd) => TurnPayload.RepositoryScopeName(cwd);
 }

@@ -60,7 +60,7 @@ public static class TurnPayload
         var hostResumed = AsBool(obj["stop_hook_active"]) ?? false;
 
         var (userText, assistantText, rawTranscript) = ResolveText(obj, diagnostics);
-        var repository = RepositoryName(cwd);
+        var repository = RepositoryScopeName(cwd);
 
         return new TurnFinalizationInput
         {
@@ -232,7 +232,44 @@ public static class TurnPayload
             Scope = AsString(rule["scope"]),
             AlwaysApply = AsBool(rule["always_apply"]) ?? false,
             Tags = tags,
+            Anchors = ParseAnchors(rule["anchors"]),
         };
+    }
+
+    /// <summary>
+    /// Reads a rule's anchors, given either as <c>{ "paths": [...], "symbols": [...] }</c> or as
+    /// an array of <c>"path:…"</c> / <c>"symbol:…"</c> strings. Entries that do not parse are
+    /// dropped: a bad anchor costs the anchor, never the capture.
+    /// </summary>
+    private static IReadOnlyList<Core.Context.RuleAnchor> ParseAnchors(JsonNode? node)
+    {
+        var written = new List<string>();
+        switch (node)
+        {
+            case JsonObject obj:
+                written.AddRange(Strings(obj["paths"]).Select(p => "path:" + p));
+                written.AddRange(Strings(obj["symbols"]).Select(p => "symbol:" + p));
+                break;
+            case JsonArray:
+                written.AddRange(Strings(node));
+                break;
+        }
+
+        var anchors = new List<Core.Context.RuleAnchor>();
+        foreach (var text in written)
+        {
+            if (Core.Context.RuleAnchors.TryParse(text, out var anchor) && !anchors.Contains(anchor))
+            {
+                anchors.Add(anchor);
+            }
+        }
+
+        return anchors;
+
+        static IEnumerable<string> Strings(JsonNode? array) =>
+            array is JsonArray items
+                ? items.Select(AsString).Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t!)
+                : [];
     }
 
     // The document-opportunity judge's verdict is produced by the host and arrives as a
@@ -482,13 +519,16 @@ public static class TurnPayload
     }
 
     /// <summary>
-    /// Repository name = the nearest ancestor with a .git, else the cwd's name. Public because the
-    /// <c>submit_capture_judgment</c> tool derives the same scope for a verdict submitted mid-turn,
-    /// and a verdict must not land in a different scope than the Stop hook would have used.
+    /// Repository name = the nearest ancestor with a .git, else the cwd's name. Every hook and
+    /// tool derives scope through this one method, because a rule captured in one scope must be
+    /// recalled in the same one: the <c>submit_capture_judgment</c> tool must not land a verdict
+    /// somewhere other than the Stop hook would have, and recall must look where capture wrote.
+    ///
+    /// In a linked worktree <c>.git</c> is a file pointing into the main checkout's
+    /// <c>.git/worktrees/</c>; the worktree is named after the main checkout, so its rules are the
+    /// repository's rules rather than a scope of their own that nothing was ever captured into.
     /// </summary>
-    public static string? RepositoryScopeName(string? cwd) => RepositoryName(cwd);
-
-    private static string? RepositoryName(string? cwd)
+    public static string? RepositoryScopeName(string? cwd)
     {
         if (string.IsNullOrWhiteSpace(cwd))
         {
@@ -500,9 +540,15 @@ public static class TurnPayload
             var dir = new DirectoryInfo(cwd);
             for (var current = dir; current is not null; current = current.Parent)
             {
-                if (Directory.Exists(Path.Combine(current.FullName, ".git")))
+                var git = Path.Combine(current.FullName, ".git");
+                if (Directory.Exists(git))
                 {
                     return current.Name;
+                }
+
+                if (File.Exists(git))
+                {
+                    return MainCheckoutName(git) ?? current.Name;
                 }
             }
 
@@ -512,6 +558,30 @@ public static class TurnPayload
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// The main checkout's directory name for a worktree's <c>.git</c> file
+    /// (<c>gitdir: /src/AgentRecall/.git/worktrees/feature</c> → <c>AgentRecall</c>), or null when
+    /// the file points anywhere else — a submodule, say, which is a repository of its own.
+    /// </summary>
+    private static string? MainCheckoutName(string gitFile)
+    {
+        var line = File.ReadLines(gitFile).FirstOrDefault()?.Trim();
+        if (line is null || !line.StartsWith("gitdir:", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var gitDir = line["gitdir:".Length..].Trim().Replace('\\', '/');
+        var marker = gitDir.LastIndexOf("/.git/worktrees/", StringComparison.Ordinal);
+        if (marker <= 0)
+        {
+            return null;
+        }
+
+        var name = Path.GetFileName(gitDir[..marker]);
+        return string.IsNullOrEmpty(name) ? null : name;
     }
 
     private static string? SafeCurrentDirectory()

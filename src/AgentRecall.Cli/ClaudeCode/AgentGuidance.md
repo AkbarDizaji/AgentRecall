@@ -9,13 +9,14 @@ holds memory-worthy content, and AgentRecall only validates that decision and
 persists it.
 
 **{{contract-marker}}** — these instructions were written for that contract:
-the semantic capture judge, Stop-hook judgment enforcement, and reported rule outcomes.
+the semantic capture judge, Stop-hook judgment enforcement, reported rule outcomes, and
+rules placed in the code (anchors, domain concepts, the glossary).
 Hooks run the globally installed `agentrecall`, never this repository's source, so the
 two can drift apart. Every injected context block names the contract the installed build
 actually implements, in its heading: `## AgentRecall Technical Context (agentrecall
 <version>, contract <n>)`. If that stamp is missing, or names a lower contract than the
 line above, the installed CLI predates these instructions and cannot accept
-`submit_capture_judgment` or `rule_outcomes` — nothing else reports that, and capture
+`submit_capture_judgment`, `rule_outcomes`, `anchors`, or `save_concept` — nothing else reports that, and capture
 silently stops happening. Run `agentrecall doctor` and tell the user what it says rather
 than retrying the calls.
 
@@ -84,7 +85,8 @@ where `<payload>` is:
           "because": "...",
           "scope": "...",
           "always_apply": false,
-          "tags": ["..."]
+          "tags": ["..."],
+          "anchors": { "paths": ["tests/**"], "symbols": ["OrderService"] }
         },
         "evidence": "...",
         "why_not_saved": "...",
@@ -438,6 +440,31 @@ if they mention specific methods — e.g. "When implementing Events backend gate
 use `IsEventsFeatureEnabled` instead of `IsVenueMigratedFor`." Store
 **engineering lessons** for reusable why/patterns that survive refactors — e.g.
 "Frontend and backend feature gate definitions must match."
+
+### Put knowledge where it belongs
+
+A rule that holds only in one place — a folder, a file pattern, a class — gets
+**anchors**, so it reaches the agent when the work gets there (even when only reading
+a file) and stays out of the way elsewhere:
+
+- In a verdict, set `normalized_rule.anchors`: `paths` are patterns relative to the
+  repository (`tests/**`, `src/Billing`, `**/*Controller.cs`), `symbols` are class or
+  other symbol names (`OrderService`). Leave it out for a rule that holds everywhere.
+- When the user says an existing rule is for a specific place, call `anchor_rule`
+  (CLI: `agentrecall rules anchor <id> add path:tests/**`).
+
+Knowledge that is not a coding rule — what a business or technical term **means**
+here (what a "venue migration" is, why an "event" waits for the commit) — is a
+**domain concept**. When the user explains one, call `save_concept` with the term and
+definition in English, the names the user says it by (in any language) as `aliases`,
+and the code it lives in as `paths`/`symbols`. It is delivered under "Domain
+Concepts" whenever a task names the term or reaches that code. Do not route a
+concept through `submit_capture_judgment`.
+
+Rules are stored in English. The **glossary** maps the words the user uses, in any
+language, to those English terms (`agentrecall glossary add "ایونت" "event"`), so a
+prompt in the user's language still reaches the rules. A concept's non-English
+aliases are added to the glossary automatically.
 
 ### User preferences are memory too
 

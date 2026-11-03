@@ -241,6 +241,28 @@ public sealed class SubmitCaptureJudgmentTool : IMcpTool
             ["because"] = Prop("string", "Why it matters."),
             ["scope"] = Prop("string", "The scope it belongs to (e.g. a repository name)."),
             ["always_apply"] = Prop("boolean", "True for a universal constraint that applies to every task."),
+            ["anchors"] = new JsonObject
+            {
+                ["type"] = "object",
+                ["description"] =
+                    "Where in the code the rule belongs, when it belongs somewhere specific. The rule is then " +
+                    "delivered when the work reaches that place, even when only reading the file.",
+                ["properties"] = new JsonObject
+                {
+                    ["paths"] = new JsonObject
+                    {
+                        ["type"] = "array",
+                        ["items"] = new JsonObject { ["type"] = "string" },
+                        ["description"] = "Path patterns relative to the repository, e.g. \"tests/**\" or \"src/Billing\".",
+                    },
+                    ["symbols"] = new JsonObject
+                    {
+                        ["type"] = "array",
+                        ["items"] = new JsonObject { ["type"] = "string" },
+                        ["description"] = "Class or other symbol names, e.g. \"OrderService\".",
+                    },
+                },
+            },
             ["tags"] = new JsonObject
             {
                 ["type"] = "array",

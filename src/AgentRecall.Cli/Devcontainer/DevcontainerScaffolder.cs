@@ -94,7 +94,7 @@ public static class DevcontainerScaffolder
     /// The tool matcher the pre-tool-use hook binds to: only the file-mutating tools, so the
     /// hook is never spawned for reads, searches, or shell commands.
     /// </summary>
-    public const string PreToolUseHookMatcher = "Edit|Write|MultiEdit";
+    public const string PreToolUseHookMatcher = "Read|Edit|Write|MultiEdit";
 
     /// <summary>
     /// The self-contained setup script. Pins the data directory onto the persisted
@@ -458,12 +458,25 @@ public static class DevcontainerScaffolder
         var existingCommand = AgentRecallHooks.FindRegistration(matchers, hook);
         if (existingCommand is not null)
         {
-            if (existingCommand["command"]?.GetValue<string>() == command)
+            // The matcher is part of the registration too: when the set of tools a hook listens
+            // to grows, an older registration is widened in place rather than left firing on the
+            // old set.
+            var group = matchers.OfType<JsonObject>()
+                .FirstOrDefault(m => m["hooks"] is JsonArray inner && inner.Any(h => ReferenceEquals(h, existingCommand)));
+            var matcherStale = matcher is not null && group is not null
+                && group["matcher"]?.GetValue<string>() != matcher;
+
+            if (existingCommand["command"]?.GetValue<string>() == command && !matcherStale)
             {
                 return HookSetupOutcome.AlreadyPresent;
             }
 
             existingCommand["command"] = command;
+            if (matcherStale)
+            {
+                group!["matcher"] = matcher;
+            }
+
             File.WriteAllText(path, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
             return HookSetupOutcome.Merged;
         }

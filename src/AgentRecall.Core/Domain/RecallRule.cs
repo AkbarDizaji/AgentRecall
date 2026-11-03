@@ -98,6 +98,15 @@ public sealed class RecallRule
     /// <summary>The scope identifier (e.g. repo name, language, file path).</summary>
     public string ScopeValue { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Where in the code this rule belongs, one anchor per line: <c>path:tests/**</c> for a
+    /// path pattern, <c>symbol:OrderService</c> for a class or other named symbol. An anchored
+    /// rule is delivered when the work reaches that place — including when the agent only reads
+    /// the file — and is held back from work that is plainly somewhere else. Empty for a rule
+    /// that is not tied to a place. See <see cref="Context.RuleAnchors"/>.
+    /// </summary>
+    public string Anchors { get; set; } = string.Empty;
+
     /// <summary>Id of the rule that replaced this one, if any.</summary>
     public int? SupersededById { get; set; }
 

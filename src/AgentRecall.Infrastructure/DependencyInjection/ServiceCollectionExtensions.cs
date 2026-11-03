@@ -60,6 +60,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IRecallScopeRepository, RecallScopeRepository>();
         services.AddScoped<IRetrievalRecordRepository, RetrievalRecordRepository>();
         services.AddScoped<IRuleOutcomeRepository, RuleOutcomeRepository>();
+        services.AddScoped<IGlossaryTermRepository, GlossaryTermRepository>();
         services.AddScoped<ILessonCandidateRepository, LessonCandidateRepository>();
         services.AddScoped<IRuleLifecycleRecommendationRepository, RuleLifecycleRecommendationRepository>();
         services.AddScoped<ITurnFinalizationRepository, TurnFinalizationRepository>();
@@ -99,6 +100,7 @@ public static class ServiceCollectionExtensions
         // Smart context injection: relevance-ranked rule retrieval for a task.
         services.AddSingleton<IConceptExpander, DomainConceptExpander>();
         services.AddScoped<IContextInjectionService, ContextInjectionService>();
+        services.AddScoped<Core.Concepts.KnowledgePlacement>();
 
         // Memory compression: dedupe and distil rules into canonical guidance.
         services.AddSingleton<ICanonicalRuleGenerator, DeterministicCanonicalRuleGenerator>();

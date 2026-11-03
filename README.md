@@ -238,6 +238,8 @@ agentrecall eval retrieval --dataset ./my-eval.json
 | `rules promote <id>` | Promote a rule. |
 | `rules supersede <oldId> <newId>` | Replace one rule with another (versioned). |
 | `rules archive <id>` | Archive a rule (excluded from search). |
+| `rules anchor <id> add\|remove <anchor>...` | Pin a rule to where it belongs — `path:tests/**`, `symbol:OrderService` — so it is delivered when the work reaches that place, even on reading a file. |
+| `concept add "<term>" "<definition>"` / `concept list` | Save what a business or technical term means (`--aliases`, `--paths`, `--symbols`, `--global`); delivered under "Domain Concepts" when a task names it or touches its code. |
 | `rules archive --all-pending [--session <id>]` | Reject (archive) every rule awaiting capture approval in one chat. |
 | `import build-log / test-log / lint-log <file>` | Ingest failures. |
 | `import pr-comments <file>` | Capture PR review comments as rules (`--task`, `--scope-level`, `--scope-value`, `--tags`, `--accepted`). |
@@ -245,6 +247,7 @@ agentrecall eval retrieval --dataset ./my-eval.json
 | `dna` | Summarise the repo's engineering personality (`--markdown`, `--json`, `--top <n>`, `--scope-level`, `--scope-value`, `--output <file>`). |
 | `eval retrieval` | Evaluate retrieval quality (`--dataset <path>`); non-zero exit below baseline. |
 | `activity last` / `activity list` | Show recent activity notices (`--json`, `--limit <n>`). |
+| `glossary add "<term>" "<english term>"` / `glossary list` / `glossary remove "<term>"` | Map a word you use (e.g. in Persian) to the English term rules are written in, so recall finds them (`list --json`). |
 | `turn-summary --last` | Aggregated Turn Memory Summary for the last turn (`--json`, `--detailed`, `--compact`). |
 | `seed list` / `show <pack>` / `install <pack>` / `remove <pack>` / `status` | Manage seed packs (`--active`, `--suggested`, `--force`, `--json`). |
 | `career impact --last` / `career journal --last` / `career status` | Career-impact pack commands (`--json`, `--detailed`, `--file <path>`). |

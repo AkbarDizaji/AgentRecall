@@ -34,7 +34,16 @@ public static class HookContextFormatter
         // Because) so the agent receives knowledge in the same shape it is stored.
         AppendConditionalSection(sb, "Must Follow", result.MustFollow, Context.RuleDetail.Full);
         AppendConditionalSection(sb, "Warnings", result.Warnings, Context.RuleDetail.Full);
-        AppendConditionalSection(sb, "Preferred Patterns", result.Suggested, Context.RuleDetail.Compact);
+        AppendConditionalSection(
+            sb, "Preferred Patterns",
+            result.Suggested.Where(r => r.Rule.Category != Domain.RuleCategory.DomainConcept).ToList(),
+            Context.RuleDetail.Compact);
+
+        // What the terms in this work mean — definitions to know, kept apart from rules to follow.
+        AppendConditionalSection(
+            sb, "Domain Concepts",
+            result.Suggested.Where(r => r.Rule.Category == Domain.RuleCategory.DomainConcept).ToList(),
+            Context.RuleDetail.Compact);
 
         // The retrieval id these rules were recorded under. It is the handle an outcome
         // attaches to, and the agent is the only party that can report one — so the id has to

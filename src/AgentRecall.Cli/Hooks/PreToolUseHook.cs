@@ -29,7 +29,10 @@ public readonly record struct PreToolUseInjection(string AdditionalContext, stri
 /// Runs the PreToolUse hook: when the agent is about to write or edit a file, it
 /// recalls the rules relevant to that file (keyed on the file's path and the code
 /// being written, not the turn's opening prompt) and returns a compact context block
-/// to inject just before the write.
+/// to inject just before the write. When the agent is about to read a file, it recalls
+/// only the rules and concepts anchored to that file or the types it declares — the plan
+/// for a change takes shape while reading, so that is when place-specific guidance helps,
+/// and reads are frequent enough that nothing less specific is worth the interruption.
 ///
 /// This closes the gap the UserPromptSubmit hook leaves: a high-level prompt like
 /// "implement login feature" carries no signal that a service class is coming, so
@@ -41,10 +44,17 @@ public readonly record struct PreToolUseInjection(string AdditionalContext, stri
 /// </summary>
 public static class PreToolUseHook
 {
-    // The tools that mutate a file's contents. Read/search/run tools carry no artifact
-    // to recall against, so they are ignored.
+    // The tools that mutate a file's contents. Search/run tools carry no artifact to recall
+    // against, so they are ignored.
     private static readonly HashSet<string> FileMutatingTools =
         new(StringComparer.Ordinal) { "Edit", "Write", "MultiEdit" };
+
+    // The tool that opens a file to read it; it recalls only what is anchored to that file.
+    private const string ReadTool = "Read";
+
+    // How much of the file on disk is scanned for the types it declares. Declarations sit near
+    // the top of a file, and the hook is on the synchronous tool path.
+    private const int MaxDeclarationScanBytes = 64 * 1024;
 
     // The code snippet fed into the recall query is bounded: enough to identify the
     // types and members involved, without letting a large file dominate the request.
@@ -69,7 +79,8 @@ public static class PreToolUseHook
                 return PreToolUseInjection.None;
             }
 
-            if (!FileMutatingTools.Contains(toolName))
+            var reading = toolName == ReadTool;
+            if (!reading && !FileMutatingTools.Contains(toolName))
             {
                 return PreToolUseInjection.None;
             }
@@ -100,16 +111,27 @@ public static class PreToolUseHook
                 .ConfigureAwait(false);
 
             var repository = RepositoryName(cwd);
-            var snippet = ExtractCode(toolName, toolInput);
+            var snippet = reading ? null : ExtractCode(toolName, toolInput);
+
+            // The types the file declares, and any the write introduces, so a rule anchored to a
+            // class reaches the file that holds it.
+            var declared = RuleAnchors.DeclaredSymbols(ReadHead(filePath))
+                .Concat(RuleAnchors.DeclaredSymbols(snippet))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+
             var request = new ContextRequest
             {
                 // The recall query describes the write: the file name anchors domain
                 // matching, and the code snippet lets semantic search see the types and
-                // members involved (e.g. "class LoginService").
-                Task = BuildTaskText(filePath, snippet),
+                // members involved (e.g. "class LoginService"). A read carries no code of its
+                // own, so it matches on place alone.
+                Task = reading ? $"Reading {Path.GetFileName(filePath)}" : BuildTaskText(filePath, snippet),
                 ScopeLevel = repository is null ? null : ScopeLevel.Repository,
                 ScopeValue = repository,
                 FileNames = [filePath],
+                ChangedEntities = declared,
+                AnchoredOnly = reading,
                 Limit = options.HookMaxRules,
                 IncludePending = options.HookIncludePending,
                 PendingCap = options.HookPendingCap,
@@ -198,6 +220,31 @@ public static class PreToolUseHook
     }
 
     private static readonly IReadOnlySet<int> EmptyIds = new HashSet<int>();
+
+    /// <summary>
+    /// The start of the file on disk, or null when it does not exist yet (a new file being
+    /// written) or cannot be read. Never throws: a file the hook cannot open simply contributes
+    /// no declared types.
+    /// </summary>
+    private static string? ReadHead(string filePath)
+    {
+        try
+        {
+            if (!File.Exists(filePath))
+            {
+                return null;
+            }
+
+            using var stream = File.OpenRead(filePath);
+            var buffer = new byte[(int)Math.Min(stream.Length, MaxDeclarationScanBytes)];
+            var read = stream.ReadAtLeast(buffer, buffer.Length, throwOnEndOfStream: false);
+            return Encoding.UTF8.GetString(buffer, 0, read);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
 
     private static string BuildTaskText(string filePath, string? snippet)
     {
@@ -332,31 +379,7 @@ public static class PreToolUseHook
     }
 
     /// <summary>Repository name = the nearest ancestor with a .git, else the cwd's name.</summary>
-    private static string? RepositoryName(string? cwd)
-    {
-        if (string.IsNullOrWhiteSpace(cwd))
-        {
-            return null;
-        }
-
-        try
-        {
-            var dir = new DirectoryInfo(cwd);
-            for (var current = dir; current is not null; current = current.Parent)
-            {
-                if (Directory.Exists(Path.Combine(current.FullName, ".git")))
-                {
-                    return current.Name;
-                }
-            }
-
-            return dir.Name;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
-        {
-            return null;
-        }
-    }
+    private static string? RepositoryName(string? cwd) => TurnPayload.RepositoryScopeName(cwd);
 
     private static string? ReadString(JsonNode? node) =>
         node is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;

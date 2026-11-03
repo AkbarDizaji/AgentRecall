@@ -48,6 +48,8 @@ public sealed class McpServer
         new CompressMemoryTool(),
         new InjectContextTool(),
         new ImportPrCommentsTool(),
+        new SaveConceptTool(),
+        new AnchorRuleTool(),
     ];
 
     /// <summary>The tools this server exposes, keyed by name.</summary>

@@ -1,6 +1,7 @@
 using AgentRecall.Core.Abstractions;
 using AgentRecall.Core.Domain;
 using AgentRecall.Core.Search;
+using AgentRecall.Core.Text;
 
 namespace AgentRecall.Core.Services;
 
@@ -61,11 +62,16 @@ public sealed class KeywordRecallSearchService : IRecallSearchService
 
     private readonly IRecallRuleRepository _rules;
     private readonly IEmbeddingProvider _embeddings;
+    private readonly IGlossaryTermRepository _glossary;
 
-    public KeywordRecallSearchService(IRecallRuleRepository rules, IEmbeddingProvider embeddings)
+    public KeywordRecallSearchService(
+        IRecallRuleRepository rules,
+        IEmbeddingProvider embeddings,
+        IGlossaryTermRepository glossary)
     {
         _rules = rules ?? throw new ArgumentNullException(nameof(rules));
         _embeddings = embeddings ?? throw new ArgumentNullException(nameof(embeddings));
+        _glossary = glossary ?? throw new ArgumentNullException(nameof(glossary));
     }
 
     public async Task<IReadOnlyList<SearchResult>> SearchAsync(
@@ -75,7 +81,10 @@ public sealed class KeywordRecallSearchService : IRecallSearchService
     {
         options ??= new SearchOptions();
 
-        var terms = Tokenize(query);
+        // A query in the user's own words searches the English terms the glossary maps them
+        // to, since rules are written in English.
+        var glossary = await _glossary.ListAsync(cancellationToken).ConfigureAwait(false);
+        var terms = Tokenize(Glossary.Translate(query, glossary));
         if (terms.Count == 0)
         {
             return [];

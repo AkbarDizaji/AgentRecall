@@ -52,6 +52,13 @@ public interface IRetrievalRecordRepository : IRepository<RetrievalRecord>
 {
 }
 
+/// <summary>Persistence for <see cref="GlossaryTerm"/>.</summary>
+public interface IGlossaryTermRepository : IRepository<GlossaryTerm>
+{
+    /// <summary>The entry for an already-normalized term, or null when there is none.</summary>
+    Task<GlossaryTerm?> FindByTermAsync(string normalizedTerm, CancellationToken cancellationToken = default);
+}
+
 /// <summary>Persistence for <see cref="RuleOutcome"/>.</summary>
 public interface IRuleOutcomeRepository : IRepository<RuleOutcome>
 {

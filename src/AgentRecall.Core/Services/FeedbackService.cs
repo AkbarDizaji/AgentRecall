@@ -288,8 +288,16 @@ public sealed class FeedbackService : IFeedbackService
         // so telling the model "always X" lands even when a matching contextual rule already exists.
         var promoteAlwaysApply = request.Rule.AlwaysApply && !existing.AlwaysApply;
 
-        if (backfillReason || promoteAlwaysApply)
+        // A repeat that says where the rule belongs pins the existing rule there too, so placing
+        // a rule does not need it to be captured afresh.
+        var mergedAnchors = Context.RuleAnchors.Format(
+            Context.RuleAnchors.Parse(existing.Anchors).Concat(Context.RuleAnchors.Parse(request.Rule.Anchors)));
+        var addAnchors = !string.Equals(mergedAnchors, existing.Anchors, StringComparison.Ordinal);
+
+        if (backfillReason || promoteAlwaysApply || addAnchors)
         {
+            existing.Anchors = mergedAnchors;
+
             if (backfillReason)
             {
                 existing.CaptureReason = request.DomainReason;
