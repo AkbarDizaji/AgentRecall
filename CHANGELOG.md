@@ -4,7 +4,7 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.13.0] - 2026-11-03
 
 ### Added
 - **Rules can say where they belong, and arrive when the work gets there.** A rule now carries
@@ -35,24 +35,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   phrases, the longer phrase winning, and Arabic yeh and kaf are folded to their Persian forms so
   the same word typed on another keyboard still matches.
 
-### Fixed
-- **Standing rules reach every prompt, as promised.** The hook's keyword gate ran before anything
-  else, so a prompt without one of its English development keywords — any prompt in another
-  language, or "why is this slow?" — received no standing rule at all, though standing rules are
-  the ones that apply to every task. Such a prompt now gets the standing rules and nothing else.
-- **A linked worktree shares its repository's rules.** In a worktree `.git` is a file, not a
-  directory, so the worktree was not recognised as part of the repository and its rules were
-  recalled and captured under a scope of their own. It is now scoped to the main checkout. The
-  four copies of this lookup the hooks kept are now one.
-- **A commit on `main` no longer loses its CI run to the commit after it.** The concurrency group
-  was keyed on the ref, so every push to `main` superseded the one before it — and the usual rhythm
-  here is a feature commit followed minutes later by a release commit, which meant the feature's
-  run was routinely cancelled and that commit went permanently unverified. Superseding is right for
-  a pull request, where only the tip matters, so it is kept there and keyed on the pull request
-  number; a push is now grouped by its own commit, so nothing cancels it.
-
-## [Unreleased]
-
 ### Changed
 - **An injected block costs a third of what it did, and its budget now means something.** Five
   things were measured on a real database and all five were wrong in the same direction. The token
@@ -74,6 +56,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   every sixth injection, because a long chat gets compacted and what was read early may no longer
   be in view. A caller with no session, or a different chat, sees every rule in full. Measured on
   the same database and prompt: 844 tokens before, 653 on first sighting, **266 on a repeat turn**.
+
+### Fixed
+- **Standing rules reach every prompt, as promised.** The hook's keyword gate ran before anything
+  else, so a prompt without one of its English development keywords — any prompt in another
+  language, or "why is this slow?" — received no standing rule at all, though standing rules are
+  the ones that apply to every task. Such a prompt now gets the standing rules and nothing else.
+- **A linked worktree shares its repository's rules.** In a worktree `.git` is a file, not a
+  directory, so the worktree was not recognised as part of the repository and its rules were
+  recalled and captured under a scope of their own. It is now scoped to the main checkout. The
+  four copies of this lookup the hooks kept are now one.
+- **A commit on `main` no longer loses its CI run to the commit after it.** The concurrency group
+  was keyed on the ref, so every push to `main` superseded the one before it — and the usual rhythm
+  here is a feature commit followed minutes later by a release commit, which meant the feature's
+  run was routinely cancelled and that commit went permanently unverified. Superseding is right for
+  a pull request, where only the tip matters, so it is kept there and keyed on the pull request
+  number; a push is now grouped by its own commit, so nothing cancels it.
 
 ## [2.12.0] - 2026-09-13
 
