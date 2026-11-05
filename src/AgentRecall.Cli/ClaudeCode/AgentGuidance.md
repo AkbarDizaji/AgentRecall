@@ -86,7 +86,8 @@ where `<payload>` is:
           "scope": "...",
           "always_apply": false,
           "tags": ["..."],
-          "anchors": { "paths": ["tests/**"], "symbols": ["OrderService"] }
+          "anchors": { "paths": ["tests/**"], "symbols": ["OrderService"] },
+          "glossary": { "ایونت": "event", "reservation": "booking" }
         },
         "evidence": "...",
         "why_not_saved": "...",
@@ -465,6 +466,12 @@ Rules are stored in English. The **glossary** maps the words the user uses, in a
 language, to those English terms (`agentrecall glossary add "ایونت" "event"`), so a
 prompt in the user's language still reaches the rules. A concept's non-English
 aliases are added to the glossary automatically.
+
+When you capture, reinforce, or supersede a rule, pass the words the user used for
+its subject in `normalized_rule.glossary`, each mapped to the English term the rule
+uses — whatever language the conversation is in. A word in another language is added
+to the glossary; an English synonym ("reservation" for a rule about "booking") is
+added to the rule's tags, so it reaches the rule without rewriting other prompts.
 
 ### User preferences are memory too
 

@@ -73,6 +73,7 @@ public sealed class TurnFinalizer : ITurnFinalizer
     private readonly IFeedbackService _feedback;
     private readonly IRecallRuleRepository _rules;
     private readonly ITurnFinalizationRepository _finalizations;
+    private readonly Concepts.KnowledgePlacement _placement;
     private readonly AgentRecallOptions _options;
 
     public TurnFinalizer(
@@ -82,6 +83,7 @@ public sealed class TurnFinalizer : ITurnFinalizer
         IFeedbackService feedback,
         IRecallRuleRepository rules,
         ITurnFinalizationRepository finalizations,
+        Concepts.KnowledgePlacement placement,
         AgentRecallOptions options)
     {
         _judge = judge ?? throw new ArgumentNullException(nameof(judge));
@@ -90,6 +92,7 @@ public sealed class TurnFinalizer : ITurnFinalizer
         _feedback = feedback ?? throw new ArgumentNullException(nameof(feedback));
         _rules = rules ?? throw new ArgumentNullException(nameof(rules));
         _finalizations = finalizations ?? throw new ArgumentNullException(nameof(finalizations));
+        _placement = placement ?? throw new ArgumentNullException(nameof(placement));
         _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
@@ -145,11 +148,12 @@ public sealed class TurnFinalizer : ITurnFinalizer
         var skipped = new List<SkippedLesson>();
         var duplicates = new List<int>();
         var errors = new List<string>();
+        var glossary = new List<GlossaryTerm>();
         var decision = TurnJudgeDecision.None;
 
         try
         {
-            decision = await JudgeTurnAsync(input, captured, suggested, skipped, duplicates, cancellationToken)
+            decision = await JudgeTurnAsync(input, captured, suggested, skipped, duplicates, glossary, errors, cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -203,6 +207,7 @@ public sealed class TurnFinalizer : ITurnFinalizer
             Skipped = skipped,
             Duplicates = duplicates,
             Errors = errors,
+            GlossaryTerms = glossary,
             Id = id,
             Source = input.Source,
             TurnId = turnId,
@@ -224,6 +229,8 @@ public sealed class TurnFinalizer : ITurnFinalizer
         List<FinalizedLesson> suggested,
         List<SkippedLesson> skipped,
         List<int> duplicates,
+        List<GlossaryTerm> glossary,
+        List<string> errors,
         CancellationToken cancellationToken)
     {
         var relevant = await BuildRelevantRulesAsync(input, cancellationToken).ConfigureAwait(false);
@@ -269,20 +276,57 @@ public sealed class TurnFinalizer : ITurnFinalizer
         {
             case JudgePersistAction.AutoCapture:
             case JudgePersistAction.Suggest:
-                return await PersistCaptureAsync(input, outcome, captured, suggested, duplicates, skipped, summary, cancellationToken)
+                summary = await PersistCaptureAsync(input, outcome, captured, suggested, duplicates, skipped, summary, cancellationToken)
                     .ConfigureAwait(false);
+                break;
 
             case JudgePersistAction.Supersede:
-                return await SupersedeAsync(input, outcome, captured, duplicates, summary, cancellationToken)
+                summary = await SupersedeAsync(input, outcome, captured, duplicates, summary, cancellationToken)
                     .ConfigureAwait(false);
+                break;
 
             case JudgePersistAction.Reinforce:
-                return await ReinforceAsync(outcome, skipped, duplicates, summary, cancellationToken)
+                summary = await ReinforceAsync(outcome, skipped, duplicates, summary, cancellationToken)
                     .ConfigureAwait(false);
+                break;
 
             default:
                 skipped.Add(new SkippedLesson { Reason = outcome.Reason });
                 return summary;
+        }
+
+        await PlaceVocabularyAsync(outcome, captured, suggested, summary, glossary, errors, cancellationToken)
+            .ConfigureAwait(false);
+        return summary;
+    }
+
+    /// <summary>
+    /// Keeps the words the user said for the rule this turn stored or reinforced, so a later
+    /// prompt in the same words reaches it. A failure here costs the words, never the capture.
+    /// </summary>
+    private async Task PlaceVocabularyAsync(
+        CaptureJudgeOutcome outcome,
+        List<FinalizedLesson> captured,
+        List<FinalizedLesson> suggested,
+        TurnJudgeDecision summary,
+        List<GlossaryTerm> glossary,
+        List<string> errors,
+        CancellationToken cancellationToken)
+    {
+        // A superseding rule is the one the words now belong to, not the target it replaced.
+        var ruleId = captured.Concat(suggested).Select(l => (int?)l.RuleId).FirstOrDefault() ?? summary.TargetRuleId;
+        if (outcome.Rule is not { Glossary.Count: > 0 } rule || ruleId is not { } id)
+        {
+            return;
+        }
+
+        try
+        {
+            glossary.AddRange(await _placement.PlaceVocabularyAsync(id, rule.Glossary, cancellationToken).ConfigureAwait(false));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            errors.Add($"Could not save the glossary terms: {ex.Message}");
         }
     }
 

@@ -4,6 +4,16 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **A captured rule keeps the words it was said in.** The judge passes the user's own words for
+  a rule's subject on the verdict (`normalized_rule.glossary`, e.g. `{ "ایونت": "event" }`), and
+  capturing, reinforcing, or superseding the rule stores them: a word in another language goes to
+  the glossary, so a prompt in that language reaches the rule next time without a manual
+  `glossary add`, and an English synonym is added to the rule's tags. `submit_capture_judgment`
+  reports the glossary entries it wrote. A skipped turn writes nothing.
+
 ## [2.13.0] - 2026-11-03
 
 ### Added

@@ -194,6 +194,15 @@ public sealed class SubmitCaptureJudgmentTool : IMcpTool
         node["finalization_id"] = finalization.Id;
         node["captured_rule_ids"] = ToIdArray(finalization.Captured.Select(l => l.RuleId));
         node["suggested_rule_ids"] = ToIdArray(finalization.Suggested.Select(l => l.RuleId));
+        if (finalization.GlossaryTerms.Count > 0)
+        {
+            node["glossary"] = new JsonArray([.. finalization.GlossaryTerms.Select(t => (JsonNode)new JsonObject
+            {
+                ["term"] = t.Term,
+                ["canonical"] = t.Canonical,
+            })]);
+        }
+
         node["summary"] = TurnFinalizationFormatter.SummaryLine(finalization);
         return node;
     }
@@ -262,6 +271,16 @@ public sealed class SubmitCaptureJudgmentTool : IMcpTool
                         ["description"] = "Class or other symbol names, e.g. \"OrderService\".",
                     },
                 },
+            },
+            ["glossary"] = new JsonObject
+            {
+                ["type"] = "object",
+                ["description"] =
+                    "The words the user used in this turn for what the rule is about, each mapped to the " +
+                    "English term the rule uses, e.g. {\"ایونت\": \"event\", \"reservation\": \"booking\"}. " +
+                    "A word in another language is added to the glossary so a prompt in that language " +
+                    "reaches the rule; an English synonym becomes a tag on the rule.",
+                ["additionalProperties"] = new JsonObject { ["type"] = "string" },
             },
             ["tags"] = new JsonObject
             {

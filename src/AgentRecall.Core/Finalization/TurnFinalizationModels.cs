@@ -140,6 +140,12 @@ public sealed record TurnFinalizationResult
     public IReadOnlyList<int> Duplicates { get; init; } = [];
     public IReadOnlyList<string> Errors { get; init; } = [];
 
+    /// <summary>
+    /// The glossary entries this turn wrote for the rule it stored or reinforced. Not persisted
+    /// with the finalization, so empty on a result read back later.
+    /// </summary>
+    public IReadOnlyList<GlossaryTerm> GlossaryTerms { get; init; } = [];
+
     /// <summary>The persisted <see cref="TurnFinalization"/> id, when stored.</summary>
     public int? Id { get; init; }
 

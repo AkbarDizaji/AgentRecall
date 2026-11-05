@@ -44,6 +44,7 @@ public sealed class KnowledgePlacement
 {
     private const int MaxTermLength = 100;
     private const int MaxDefinitionLength = 1000;
+    private const int MaxVocabulary = 12;
 
     private readonly IRecallRuleRepository _rules;
     private readonly IGlossaryTermRepository _glossary;
@@ -154,6 +155,54 @@ public sealed class KnowledgePlacement
         var anchors = RuleAnchors.Parse(rule.Anchors).Concat(add).Where(a => !remove.Contains(a));
         rule.Anchors = RuleAnchors.Format(anchors);
         return await _rules.UpdateAsync(rule, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Keeps the words the user said for a rule's subject with the rule: a word in another script
+    /// is mapped in the glossary to the English term, and an English synonym is added to the
+    /// rule's tags. Returns the glossary entries written. A mapping whose English side is not
+    /// English, that maps a word to itself, or that is too long is dropped.
+    /// </summary>
+    public async Task<IReadOnlyList<GlossaryTerm>> PlaceVocabularyAsync(
+        int ruleId,
+        IReadOnlyList<TermMapping> mappings,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(mappings);
+
+        var usable = mappings
+            .Where(m => m.Term.Trim().Length is > 0 and <= MaxTermLength
+                && m.Canonical.Trim().Length is > 0 and <= MaxTermLength
+                && !IsOtherScript(m.Canonical)
+                && !string.Equals(Glossary.Normalize(m.Term), Glossary.Normalize(m.Canonical), StringComparison.Ordinal))
+            .Take(MaxVocabulary)
+            .ToList();
+        if (usable.Count == 0)
+        {
+            return [];
+        }
+
+        var glossaryTerms = new List<GlossaryTerm>();
+        foreach (var mapping in usable.Where(m => IsOtherScript(m.Term)))
+        {
+            glossaryTerms.Add(await MapAsync(mapping.Term, mapping.Canonical, cancellationToken).ConfigureAwait(false));
+        }
+
+        // English synonyms stay on the rule: put in the glossary they would rewrite every English
+        // prompt that uses the word, and the rules written with it would stop matching.
+        var synonyms = usable.Where(m => !IsOtherScript(m.Term)).Select(m => m.Term.Trim().Replace(",", " ", StringComparison.Ordinal)).ToList();
+        if (synonyms.Count > 0 && await _rules.GetAsync(ruleId, cancellationToken).ConfigureAwait(false) is { } rule)
+        {
+            var current = rule.Tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var merged = string.Join(",", current.Concat(synonyms).Distinct(StringComparer.OrdinalIgnoreCase));
+            if (!string.Equals(merged, rule.Tags, StringComparison.Ordinal))
+            {
+                rule.Tags = merged;
+                await _rules.UpdateAsync(rule, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        return glossaryTerms;
     }
 
     /// <summary>Points a glossary term at <paramref name="canonical"/>, adding it when new.</summary>

@@ -1,9 +1,11 @@
 using AgentRecall.Cli;
 using AgentRecall.Cli.Hooks;
+using AgentRecall.Cli.Mcp.Tools;
 using AgentRecall.Core.Abstractions;
 using AgentRecall.Core.Context;
 using AgentRecall.Core.Domain;
 using AgentRecall.Core.Text;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -209,5 +211,130 @@ public class GlossaryTests
 
         Assert.Equal(1, code);
         Assert.Contains("agentrecall glossary add", output);
+    }
+
+    // ---- Captured with a rule -------------------------------------------------
+
+    private static async Task<JsonNode> Judge(TestDatabase db, JsonObject verdict)
+    {
+        await using var scope = db.CreateScope();
+        return await new SubmitCaptureJudgmentTool().InvokeAsync(verdict, scope.ServiceProvider, default);
+    }
+
+    private static JsonObject EventRule(JsonObject glossary) => new()
+    {
+        ["title"] = "Publish events after commit",
+        ["condition"] = "when changing event handlers",
+        ["action"] = "publish an event only after the transaction commits",
+        ["because"] = "a rolled-back transaction must not have announced anything",
+        ["scope"] = "repository",
+        ["glossary"] = glossary,
+    };
+
+    [Fact]
+    public async Task JudgedCapture_KeepsTheUsersWordsWithTheRule()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        var result = await Judge(db, new JsonObject
+        {
+            ["decision"] = "Capture",
+            ["memory_type"] = "EngineeringLesson",
+            ["capture_reason"] = "UserCorrection",
+            ["confidence"] = 0.9,
+            ["prompt"] = "ایونت رو بعد از کامیت بفرست",
+            ["assistant_response"] = "Moved the publish after the commit.",
+            ["normalized_rule"] = EventRule(new JsonObject
+            {
+                ["ایونت"] = "event",
+                ["كاميت"] = "commit",
+                ["notification"] = "event",
+                ["event"] = "Event",
+                ["رویداد"] = "رویداد",
+            }),
+        });
+
+        Assert.True(result["submitted"]!.GetValue<bool>());
+        var written = result["glossary"]!.AsArray().Select(t => t!["term"]!.GetValue<string>()).ToList();
+        Assert.Equal(["ایونت", "کامیت"], written);
+
+        await using var read = db.CreateScope();
+        var glossary = await read.ServiceProvider.GetRequiredService<IGlossaryTermRepository>().ListAsync();
+        Assert.Equal(
+            [("ایونت", "event"), ("کامیت", "commit")],
+            glossary.OrderBy(t => t.Id).Select(t => (t.Term, t.Canonical)));
+
+        // An English synonym reaches the rule through its tags, not by rewriting English prompts.
+        var rule = Assert.Single(await read.ServiceProvider.GetRequiredService<IRecallRuleRepository>().ListAsync());
+        Assert.Contains("notification", rule.Tags.Split(','));
+        Assert.Equal("event", Glossary.Translate("ایونت", glossary));
+    }
+
+    [Fact]
+    public async Task ReinforcingARule_AlsoKeepsTheWordsItWasSaidIn()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+        await SeedEventRule(db);
+        int ruleId;
+        await using (var scope = db.CreateScope())
+        {
+            ruleId = Assert.Single(await scope.ServiceProvider.GetRequiredService<IRecallRuleRepository>().ListAsync()).Id;
+        }
+
+        await Judge(db, new JsonObject
+        {
+            ["decision"] = "ReinforceExisting",
+            ["memory_type"] = "EngineeringLesson",
+            ["capture_reason"] = "RepeatedMistake",
+            ["confidence"] = 0.9,
+            ["target_existing_rule_id"] = ruleId,
+            ["dedupe_notes"] = "same rule, said in Persian",
+            ["prompt"] = "باز هم ایونت قبل از کامیت رفت",
+            ["assistant_response"] = "Fixed it again.",
+            ["normalized_rule"] = EventRule(new JsonObject { ["ایونت"] = "event" }),
+        });
+
+        await using var read = db.CreateScope();
+        var term = Assert.Single(await read.ServiceProvider.GetRequiredService<IGlossaryTermRepository>().ListAsync());
+        Assert.Equal(("ایونت", "event"), (term.Term, term.Canonical));
+    }
+
+    [Fact]
+    public async Task SkippedTurn_WritesNoGlossary()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        await Judge(db, new JsonObject
+        {
+            ["decision"] = "Skip",
+            ["memory_type"] = "NotMemory",
+            ["capture_reason"] = "NotReusable",
+            ["why_not_saved"] = "ordinary work",
+            ["prompt"] = "ایونت رو درست کن",
+            ["assistant_response"] = "Fixed it.",
+            ["normalized_rule"] = EventRule(new JsonObject { ["ایونت"] = "event" }),
+        });
+
+        await using var read = db.CreateScope();
+        Assert.Empty(await read.ServiceProvider.GetRequiredService<IGlossaryTermRepository>().ListAsync());
+    }
+
+    [Fact]
+    public void ParseVerdict_AcceptsTheGlossaryAsAnArrayOfEntries()
+    {
+        var verdict = TurnPayload.ParseVerdict(JsonNode.Parse("""
+        {
+          "decision": "Capture", "memory_type": "RepositoryConvention", "capture_reason": "UserCorrection",
+          "normalized_rule": { "condition": "when x", "action": "do y",
+            "glossary": [{ "term": "رزرو", "english": "booking" }, { "term": "سالن", "canonical": "venue" }, { "term": "خالی" }] }
+        }
+        """), TextWriter.Null);
+
+        Assert.Equal(
+            [new TermMapping("رزرو", "booking"), new TermMapping("سالن", "venue")],
+            verdict!.NormalizedRule!.Glossary);
     }
 }

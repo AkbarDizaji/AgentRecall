@@ -18,3 +18,10 @@ public sealed class GlossaryTerm
 
     public DateTimeOffset CreatedAt { get; set; }
 }
+
+/// <summary>
+/// A word the user said for something a rule talks about, and the English term the rule uses
+/// for it ("ایونت" → "event", "reservation" → "booking"). Supplied by the judge with a captured
+/// rule, so the user's own vocabulary is kept with the rule it was said about.
+/// </summary>
+public sealed record TermMapping(string Term, string Canonical);

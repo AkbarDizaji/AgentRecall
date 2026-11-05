@@ -47,6 +47,14 @@ public sealed record NormalizedRule
     /// not parse are dropped rather than failing the capture.
     /// </summary>
     public IReadOnlyList<Context.RuleAnchor> Anchors { get; init; } = [];
+
+    /// <summary>
+    /// The words the user used in the turn for what the rule is about, each paired with the
+    /// English term the rule uses. A word in another language goes to the glossary, so a prompt
+    /// in that language reaches the rule; an English synonym becomes a tag on the rule. Bad
+    /// entries are dropped rather than failing the capture.
+    /// </summary>
+    public IReadOnlyList<TermMapping> Glossary { get; init; } = [];
 }
 
 /// <summary>

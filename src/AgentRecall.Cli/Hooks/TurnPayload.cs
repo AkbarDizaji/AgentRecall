@@ -233,7 +233,45 @@ public static class TurnPayload
             AlwaysApply = AsBool(rule["always_apply"]) ?? false,
             Tags = tags,
             Anchors = ParseAnchors(rule["anchors"]),
+            Glossary = ParseGlossary(rule["glossary"]),
         };
+    }
+
+    /// <summary>
+    /// Reads the user's words for what a rule is about, given either as an object mapping each
+    /// word to its English term (<c>{ "ایونت": "event" }</c>) or as an array of
+    /// <c>{ "term": …, "english": … }</c> entries. An entry missing either side is dropped.
+    /// </summary>
+    private static IReadOnlyList<TermMapping> ParseGlossary(JsonNode? node)
+    {
+        var mappings = new List<TermMapping>();
+        switch (node)
+        {
+            case JsonObject obj:
+                foreach (var (term, english) in obj)
+                {
+                    Add(term, AsString(english));
+                }
+
+                break;
+            case JsonArray items:
+                foreach (var item in items.OfType<JsonObject>())
+                {
+                    Add(AsString(item["term"]), AsString(item["english"]) ?? AsString(item["canonical"]));
+                }
+
+                break;
+        }
+
+        return mappings;
+
+        void Add(string? term, string? english)
+        {
+            if (!string.IsNullOrWhiteSpace(term) && !string.IsNullOrWhiteSpace(english))
+            {
+                mappings.Add(new TermMapping(term.Trim(), english.Trim()));
+            }
+        }
     }
 
     /// <summary>

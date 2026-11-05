@@ -8,8 +8,9 @@ capture judge**, not from keyword heuristics: the judge decides whether the turn
 holds memory-worthy content, and AgentRecall only validates that decision and
 persists it.
 
-**AgentRecall contract: 3** — these instructions were written for that contract:
-the semantic capture judge, Stop-hook judgment enforcement, and reported rule outcomes.
+**AgentRecall contract: 4** — these instructions were written for that contract:
+the semantic capture judge, Stop-hook judgment enforcement, reported rule outcomes, and
+rules placed in the code (anchors, domain concepts, the glossary).
 Hooks run the globally installed `agentrecall`, never this repository's source, so the
 two can drift apart. Every injected context block names the contract the installed build
 actually implements, in its heading: `## AgentRecall Technical Context (agentrecall
@@ -84,7 +85,8 @@ where `<payload>` is:
           "because": "...",
           "scope": "...",
           "always_apply": false,
-          "tags": ["..."]
+          "tags": ["..."],
+          "glossary": { "<the user's word>": "<the English term the rule uses>" }
         },
         "evidence": "...",
         "why_not_saved": "...",
