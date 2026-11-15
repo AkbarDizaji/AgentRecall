@@ -171,8 +171,11 @@ agentrecall rules list
 agentrecall rules show 1
 ```
 
-**Curate.** Captured rules are **Active** by default. Rules move through a
-small set of lifecycle states:
+**Curate.** Rules you add yourself with `feedback add` are **Active** by
+default (`AutoApproveFeedback`). Rules captured automatically at the end of a
+Claude Code turn start **Pending** your approval instead — see
+[Capture pipeline](#capture-pipeline). Rules move through a small set of
+lifecycle states:
 
 | State | Meaning |
 | --- | --- |
@@ -238,21 +241,31 @@ agentrecall eval retrieval --dataset ./my-eval.json
 | `rules promote <id>` | Promote a rule. |
 | `rules supersede <oldId> <newId>` | Replace one rule with another (versioned). |
 | `rules archive <id>` | Archive a rule (excluded from search). |
-| `rules anchor <id> add\|remove <anchor>...` | Pin a rule to where it belongs — `path:tests/**`, `symbol:OrderService` — so it is delivered when the work reaches that place, even on reading a file. |
-| `concept add "<term>" "<definition>"` / `concept list` | Save what a business or technical term means (`--aliases`, `--paths`, `--symbols`, `--global`); delivered under "Domain Concepts" when a task names it or touches its code. |
 | `rules archive --all-pending [--session <id>]` | Reject (archive) every rule awaiting capture approval in one chat. |
+| `rules anchor <id> add\|remove <anchor>...` | Pin a rule to where it belongs — `path:tests/**`, `symbol:OrderService` — so it is delivered when the work reaches that place, even on reading a file. |
+| `rules conflicts` | List detected rule conflicts and the chosen winner (`--json`). |
+| `rules explain <id>` | Explain a rule's confidence from its outcome history. |
+| `rules triggers` | Audit every trigger against its injection/outcome record (`--all`, `--json`). |
+| `rules retrigger <id> --trigger "when …"` | Rewrite a rule's trigger, keeping its confidence and history. |
+| `outcome record` | Record an outcome (`TestsPassed`, `UserAccepted`, …) and adjust the rule's confidence. |
+| `lessons mine` / `list` / `show` / `accept` / `reject` | Mine repeated historical signals into suggested lessons, then review them; `accept` turns one into a rule. |
+| `lifecycle suggest` / `list` / `show` / `apply` / `reject` | Recommend promote/archive/supersede/review actions; `suggest` is a dry run unless `--apply`. |
+| `concept add "<term>" "<definition>"` / `concept list` | Save what a business or technical term means (`--aliases`, `--paths`, `--symbols`, `--global`); delivered under "Domain Concepts" when a task names it or touches its code. |
+| `glossary add "<term>" "<english term>"` / `glossary list` / `glossary remove "<term>"` | Map a word you use (e.g. in Persian) to the English term rules are written in, so recall finds them (`list --json`). |
 | `import build-log / test-log / lint-log <file>` | Ingest failures. |
 | `import pr-comments <file>` | Capture PR review comments as rules (`--task`, `--scope-level`, `--scope-value`, `--tags`, `--accepted`). |
 | `inject-context "<task>"` | Build agent-ready context (must-follow, warnings, preferred/anti-patterns). |
 | `dna` | Summarise the repo's engineering personality (`--markdown`, `--json`, `--top <n>`, `--scope-level`, `--scope-value`, `--output <file>`). |
+| `report monthly` / `lifecycle` / `usage` / `dna` | Learning reports: captures and promotions, lifecycle counts, top/stale rules, conventions (`--json`). |
 | `eval retrieval` | Evaluate retrieval quality (`--dataset <path>`); non-zero exit below baseline. |
 | `activity last` / `activity list` | Show recent activity notices (`--json`, `--limit <n>`). |
-| `glossary add "<term>" "<english term>"` / `glossary list` / `glossary remove "<term>"` | Map a word you use (e.g. in Persian) to the English term rules are written in, so recall finds them (`list --json`). |
 | `turn-summary --last` | Aggregated Turn Memory Summary for the last turn (`--json`, `--detailed`, `--compact`). |
 | `seed list` / `show <pack>` / `install <pack>` / `remove <pack>` / `status` | Manage seed packs (`--active`, `--suggested`, `--force`, `--json`). |
 | `career impact --last` / `career journal --last` / `career status` | Career-impact pack commands (`--json`, `--detailed`, `--file <path>`). |
+| `document write` / `document status` | Write a document the agent offered (body on stdin; `--type`, `--title`, `--turn-id`, `--root`, `--force`, `--json`), or show the document-opportunity mode and last candidate. |
 | `cleanup pending-noise` | Archive noisy Pending rules from before source/outcome-aware capture (dry run by default; `--apply`, `--json`, `--tag`, `--status`). |
-| `doctor` | Check database/schema, PATH, Claude Code hook wiring, and the installed version; read-only by default (`--fix`, `--json`, `--offline`, `--project <path>`). |
+| `doctor` | Check database/schema, PATH, Claude Code hook wiring and duplicates, the instruction contract, and the installed version; read-only by default (`--fix`, `--json`, `--offline`, `--project <path>`, `--user-settings <path>`). |
+| `hook user-prompt-submit` / `hook pre-tool-use` | The Claude Code hook entry points (read the hook payload on stdin). |
 | `finalize-turn` / `finalize-turn status` | Run or inspect turn finalization (`--json`, `--hook`). |
 | `capture-status --last-turn` | Alias for `finalize-turn status`. |
 | `mcp` | Run the MCP server over stdio (for Claude Code). |
@@ -422,6 +435,11 @@ capture anything.
   | `≥ 0.80` | Captures (still Pending your approval — see below) |
   | `0.55 – 0.79` | Suggests a Pending rule |
   | `< 0.55` | Skips |
+
+  These thresholds apply to the judge's verdict. `CaptureAutoConfidence` is a
+  separate, lower bar for feedback recorded outside the judge (`feedback add`,
+  `capture_feedback`, `add_feedback`): a worthy lesson below it is parked
+  Pending instead of being activated.
 - **Duplicates are reinforced, not duplicated**; an explicit supersede replaces
   the prior rule.
 - **The judge is the agent, and the Stop hook enforces that it answers.**
@@ -481,12 +499,12 @@ agentrecall finalize-turn status      # or: agentrecall capture-status --last-tu
 agentrecall activity last             # what AgentRecall did last, in general
 ```
 
-`agentrecall devcontainer init` scaffolds a `CLAUDE.md` contract requiring the
-agent to check status first and only offer manual capture when nothing was
-captured **and** you explicitly ask. If an agent still says "the Stop hook may
-have captured it", update the tool (`dotnet tool update --global AgentRecall`)
-and re-run `agentrecall devcontainer init` to refresh the Stop hook and
-guidance.
+`agentrecall claude-code init` (or `devcontainer init`) scaffolds a `CLAUDE.md`
+contract requiring the agent to check status first and only offer manual
+capture when nothing was captured **and** you explicitly ask. If an agent still
+says "the Stop hook may have captured it", update the tool
+(`dotnet tool update --global AgentRecall`) and re-run
+`agentrecall claude-code init` to refresh the hooks and guidance.
 
 **Cleaning up old noise.** For Pending rules created before source/outcome-aware
 capture existed, `cleanup pending-noise` finds and archives them (dry run by
@@ -583,8 +601,14 @@ claude mcp add agentrecall agentrecall mcp
 | `get_project_rules` | Rules that always apply here (project → promoted → active). |
 | `get_reminders` | A short checklist for a kind of work. |
 | `capture_status` | The last turn-finalization result — the answer to "did AgentRecall capture anything?". |
+| `submit_capture_judgment` | Submit the agent's semantic capture verdict for the turn, plus `rule_outcomes` for the rules it was given — the way capture actually happens. |
 | `resolve_pending_capture` | Approve/reject one rule awaiting capture approval, or every rule pending in the chat (`approve_all`/`reject_all`). |
 | `search_rules` | Find rules relevant to a query. |
+| `get_rule` | Fetch one rule's exact stored guidance by id. |
+| `anchor_rule` | Pin a rule or concept to paths (`tests/**`) or symbols (`OrderService`) so it is delivered when the work reaches them. |
+| `save_concept` | Save what a business or technical term means in this project. |
+| `report_bad_rule` | Archive a rule that turned out to be wrong or unusable, so it stops being injected. |
+| `delete_rule` | Permanently delete a rule (`force=true` for one still in force). |
 | `suggest_feedback_candidate` | Detect whether a message is a reusable correction. |
 | `capture_feedback` | Save a correction in one step (`pending=true` to require approval). |
 | `add_feedback` | Record feedback with full task/scope context. |
@@ -595,30 +619,25 @@ Each rule returns as `trigger`, `rule`, `do`, `do_not`, `reason`, `applies_to`,
 stderr, and behaves identically installed or run from source.
 
 **Registering the server only makes tools available** — the agent still has to
-call them. Add this to your `CLAUDE.md`/`AGENTS.md` to make it default
-behavior (or let `agentrecall devcontainer init` scaffold it for you):
+call them, and capture depends on the agent acting as the judge. Don't
+hand-write the instructions for this: `agentrecall claude-code init` appends the
+current `CLAUDE.md` guidance block (stamped with the contract version it was
+written for) and refreshes it on every re-run, so it never drifts from what the
+installed version expects.
 
-```markdown
-## Memory (AgentRecall)
-
-- **Before** coding/refactoring/reviewing/debugging, call `inject_context` with
-  the task. Follow must-follow rules and heed warnings.
-- **When the user corrects you**, call `suggest_feedback_candidate`, then
-  `capture_feedback` for reusable lessons.
-- **After a PR review**, pass comments to `import_pr_comments`.
-- **When a capture shows "Awaiting your approval"**, relay it to the user and
-  wait for yes/no (or "yes to all"), then call `resolve_pending_capture`.
-```
-
-**For deterministic injection**, wire a Claude Code hook instead of relying on
-the model to choose to call a tool — hooks run before the model responds,
-every time the gate matches:
+**For deterministic injection**, `claude-code init` also wires Claude Code
+hooks instead of relying on the model to choose to call a tool — hooks run
+before the model responds, every time the gate matches. The result in
+`.claude/settings.json` looks like this:
 
 ```json
 {
   "hooks": {
     "UserPromptSubmit": [
       { "hooks": [ { "type": "command", "command": "PATH=$HOME/.dotnet/tools:$PATH agentrecall hook user-prompt-submit" } ] }
+    ],
+    "PreToolUse": [
+      { "matcher": "Read|Edit|Write|MultiEdit", "hooks": [ { "type": "command", "command": "PATH=$HOME/.dotnet/tools:$PATH agentrecall hook pre-tool-use" } ] }
     ],
     "Stop": [
       { "hooks": [ { "type": "command", "command": "PATH=$HOME/.dotnet/tools:$PATH agentrecall finalize-turn --hook" } ] }
@@ -627,7 +646,8 @@ every time the gate matches:
 }
 ```
 
-On each prompt this gates on `HookKeywords` (dev-shaped prompts only, no cost
+`PreToolUse` delivers the rules anchored to a file when the agent is about to
+read or change it. On each prompt, `UserPromptSubmit` gates on `HookKeywords` (dev-shaped prompts only, no cost
 otherwise), retrieves rules scoped to the repository, and prepends a compact
 `## AgentRecall Technical Context` block (Must Follow / Warnings / Preferred
 Patterns / Anti Patterns / Source Rules — empty sections omitted). It never
@@ -669,6 +689,7 @@ folder.
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `DataDirectory` | `~/.agentrecall` | Where the SQLite database lives. |
+| `DatabaseFileName` | `agentrecall.db` | The database file's name inside `DataDirectory`. |
 | `LogLevel` | `Information` | Log verbosity. |
 | `AutoApproveFeedback` | `true` | `false` makes every capture start `Pending`. |
 | `ActivityNoticeLevel` | `Verbose` | CLI activity notice verbosity: `Verbose`/`Normal`/`Silent`. |
@@ -680,14 +701,21 @@ folder.
 | `HookIncludePending` | `true` | Whether Pending rules may be injected, so a repeat can be recognized and reinforced. |
 | `HookPendingCap` | `1` | Max Pending rules injected per prompt when `HookIncludePending` is true. |
 | `TurnFinalizerEnabled` | `true` | Master switch for `finalize-turn`. |
+| `CaptureHookEnabled` | `true` | Master switch for the Stop-hook capture path. |
 | `CaptureJudgeMode` | `Semantic` | `Off` disables automatic Stop-hook capture entirely. |
+| `JudgmentEnforcementMode` | `Substantive` | When the Stop hook blocks a turn to ask for its verdict: `Substantive`, `Always`, or `Off` (never block). |
+| `JudgmentEnforcementMinTurnCharacters` | `200` | Prompt + response length before a turn counts as substantive. |
+| `MaxJudgmentRequestsPerTurn` | `1` | How many times one turn may be blocked for its verdict before it is finalized unjudged. |
+| `OutcomeTrackingEnabled` | `true` | Whether reported rule outcomes adjust confidence. |
+| `DocOpportunityMode` | `Semantic` | `Off` stops the agent from offering to write documents at the end of a turn. |
+| `DocOpportunityRoot` | `docs` | Where `document write` creates its type folders (`docs/rfcs`, `docs/incidents`, …). |
 | `StoreTurnTranscript` | `false` | Persist the raw transcript with each finalization. |
 | `MaxCandidatesPerTurn` | `5` | Max lessons captured from one turn. |
 | `MaxCandidateCharacters` | `1000` | Per-candidate length cap. |
-| `CaptureAutoConfidence` | `0.5` | Minimum confidence to auto-capture without explicit acceptance. |
+| `CaptureAutoConfidence` | `0.5` | Minimum confidence to activate feedback recorded outside the judge without explicit acceptance. |
 | `FinalizerShowUserNotice` | `true` | Emit a Stop-hook notice after a turn. |
 | `SuppressDuplicateNotices` | `true` | Stay silent when only a duplicate was reinforced. |
-| `InteractiveMemoryMode` | `Auto` | `Ask`/`Silent` change whether ambiguous captures prompt you. |
+| `InteractiveMemoryMode` | `Auto` | Whether captures wait for your approval; `Silent` bypasses the approval gate. See [Interactive Memory](#interactive-memory). |
 | `CareerImpactMode` | `SignificantOnly` | `Silent`/`Always` for the career-impact pack's auto-summary. |
 | `CareerImpactSummaryLevel` | `Compact` | `Detailed` for the career-impact auto-summary. |
 
