@@ -146,6 +146,7 @@ public static class ActivityNoticeFactory
 
         var details = new List<string>();
         details.AddRange(result.Captured.Select(l => $"#{l.RuleId} captured: {Label(l.Text)}"));
+        details.AddRange(result.Captured.Concat(result.Suggested).Where(l => l.Absolute).Select(l => AbsoluteRule.Warning(l.RuleId)));
         details.AddRange(result.Suggested.Select(l => $"#{l.RuleId} suggested: {Label(l.Text)}"));
         details.AddRange(result.Skipped.Select(s => $"skipped: {s.Reason}"));
 

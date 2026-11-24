@@ -43,6 +43,12 @@ and stores. Practical consequences for you:
   injected on every turn — not only when it matches the task's keywords. Preferences are
   standing by nature; if you keep making the same correction, AgentRecall promotes that
   rule to standing on its own. Standing rules are marked `[standing]` in the summary.
+- **A standing rule should still say where it holds.** A rule about a language's syntax
+  ("use `x is null`, not `x == null`") belongs to that language's files, and a rule about
+  tests belongs to the tests: set `always_apply` with `anchors` (`**/*.cs`, `tests/**`) and
+  it holds every turn there and nowhere else. A standing rule with no anchors is absolute —
+  every task in every repository — and AgentRecall saves it but warns, since that rarely
+  fits a lesson. Communication preferences are the exception: every reply is their place.
 - **Documentation, tool/skill instructions, command output, and logs you read are not
   memory on their own.** They become a rule only when the turn pairs them with an
   observed failure, a correction, or an explicit save — a documentation-backed

@@ -4,6 +4,7 @@ using AgentRecall.Cli.Mcp.Tools;
 using AgentRecall.Core.Abstractions;
 using AgentRecall.Core.Capture;
 using AgentRecall.Core.Capture.Judge;
+using AgentRecall.Core.Context;
 using AgentRecall.Core.Domain;
 using AgentRecall.Core.Feedback;
 using AgentRecall.Core.Finalization;
@@ -559,6 +560,57 @@ public class CaptureJudgeFinalizerTests
         Assert.True(Assert.Single(await Rules(db)).AlwaysApply);
     }
 
+    // Standing-4. A standing rule with nothing to bound it is saved, but the summary warns about it.
+    [Fact]
+    public async Task Standing_WithNothingToBoundIt_IsSavedWithAWarning()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        var absolute = JudgeVerdicts.Rule(
+            title: "Prefer composition", condition: "when designing any type",
+            action: "prefer composition over inheritance", because: "inheritance couples types tightly",
+            scope: "workspace", avoid: "deep class hierarchies") with { AlwaysApply = true };
+        var result = await Finalize(db, Turn(Capture(
+            JudgeMemoryType.EngineeringLesson, JudgeCaptureReason.UserCorrection, 0.9, absolute)));
+
+        var lesson = Assert.Single(result.Captured);
+        Assert.True(lesson.Absolute);
+        Assert.Contains($"Rule #{lesson.RuleId} is absolute", TurnFinalizationFormatter.RenderText(result), StringComparison.Ordinal);
+        Assert.Contains($"Rule #{lesson.RuleId} is absolute", TurnFinalizationFormatter.SummaryLine(result), StringComparison.Ordinal);
+    }
+
+    // Standing-5. A syntax rule anchored to its language's files, or a communication preference, is
+    // bounded by its place or its subject — saved standing, with no warning.
+    [Fact]
+    public async Task Standing_BoundedByAnchorsOrByBeingAPreference_IsNotAbsolute()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+
+        var syntax = JudgeVerdicts.Rule(
+            title: "Null checks", condition: "when checking for null in C#",
+            action: "write `x is null` rather than `x == null`", because: "an overloaded == can lie",
+            scope: "workspace", avoid: "== null") with
+        {
+            AlwaysApply = true,
+            Anchors = [new RuleAnchor(AnchorKind.Path, "**/*.cs")],
+        };
+        var preference = JudgeVerdicts.Rule(
+            title: "Answer briefly", condition: "when answering the user",
+            action: "answer briefly with examples when helpful", because: "the user prefers concise replies",
+            scope: "user", avoid: null);
+
+        var syntaxResult = await Finalize(db, Turn(Capture(
+            JudgeMemoryType.RepositoryConvention, JudgeCaptureReason.UserCorrection, 0.9, syntax), prompt: "syntax"));
+        var preferenceResult = await Finalize(db, Turn(Capture(
+            JudgeMemoryType.CommunicationPreference, JudgeCaptureReason.UserPreference, 0.9, preference), prompt: "preference"));
+
+        Assert.False(Assert.Single(syntaxResult.Captured).Absolute);
+        Assert.False(Assert.Single(preferenceResult.Captured).Absolute);
+        Assert.DoesNotContain("is absolute", TurnFinalizationFormatter.RenderText(syntaxResult), StringComparison.Ordinal);
+    }
+
     // Standing-3. Backstop: a repeated correction reinforcing an existing rule promotes it to standing.
     [Fact]
     public async Task Standing_RepeatedCorrection_PromotesExistingRuleToStanding()
@@ -596,6 +648,7 @@ public class CaptureJudgeFinalizerTests
         Assert.Contains(existingId, result.Duplicates);
         var rule = Assert.Single(await Rules(db));
         Assert.True(rule.AlwaysApply); // promoted by the repeated-correction backstop
+        Assert.Contains(result.Skipped, k => k.Reason.Contains($"Rule #{existingId} is absolute", StringComparison.Ordinal));
     }
 
     private static async Task<(int Code, string Output)> RunCli(TestDatabase db, JsonObject payload, params string[] args)

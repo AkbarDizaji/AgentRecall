@@ -451,9 +451,12 @@ public sealed class TurnFinalizer : ITurnFinalizer
         duplicates.Add(targetId);
         skipped.Add(new SkippedLesson
         {
-            Reason = promoted
-                ? $"Reinforced existing rule #{targetId} and promoted it to a standing rule (repeated correction)."
-                : $"Reinforced existing rule #{targetId}.",
+            Reason = !promoted
+                ? $"Reinforced existing rule #{targetId}."
+                : Context.AbsoluteRule.Is(target)
+                    ? $"Reinforced existing rule #{targetId} and promoted it to a standing rule (repeated correction). " +
+                      Context.AbsoluteRule.Warning(targetId)
+                    : $"Reinforced existing rule #{targetId} and promoted it to a standing rule (repeated correction).",
             DuplicateOfRuleId = targetId,
         });
         return summary with { TargetRuleId = targetId };
@@ -667,6 +670,7 @@ public sealed class TurnFinalizer : ITurnFinalizer
             ScopeLabel = ScopeLabel(rule.ScopeLevel, rule.ScopeValue),
             Confidence = rule.Confidence,
             AlwaysApply = rule.AlwaysApply,
+            Absolute = Context.AbsoluteRule.Is(rule),
             Note = note,
             AwaitingApproval = rule.Status == RuleStatus.Pending,
         };

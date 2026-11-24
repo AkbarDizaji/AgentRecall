@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using AgentRecall.Core.Context;
 using AgentRecall.Core.Domain;
 
 namespace AgentRecall.Core.Finalization;
@@ -65,6 +66,11 @@ public static class TurnFinalizationFormatter
             {
                 var standing = lesson.AlwaysApply ? " [standing — applies every turn]" : string.Empty;
                 sb.Append($"\n- #{lesson.RuleId} {CategoryLabel(lesson.Category)}: {lesson.Text}{standing}");
+                if (lesson.Absolute)
+                {
+                    sb.Append($"\n  {AbsoluteRule.Warning(lesson.RuleId)}");
+                }
+
                 if (lesson.AwaitingApproval)
                 {
                     sb.Append($"\n  Awaiting your approval — reply yes/no, or run `agentrecall rules approve {lesson.RuleId}` " +
@@ -89,6 +95,11 @@ public static class TurnFinalizationFormatter
             {
                 var note = string.IsNullOrWhiteSpace(lesson.Note) ? string.Empty : $" ({lesson.Note})";
                 sb.Append($"\n- #{lesson.RuleId} Pending rule: {lesson.Text}{note}");
+                if (lesson.Absolute)
+                {
+                    sb.Append($"\n  {AbsoluteRule.Warning(lesson.RuleId)}");
+                }
+
                 sb.Append($"\n  Run `agentrecall rules approve {lesson.RuleId}` to remember it, " +
                           $"or `agentrecall rules archive {lesson.RuleId}` to ignore it.");
             }
@@ -121,13 +132,14 @@ public static class TurnFinalizationFormatter
         {
             var lesson = result.Captured[0];
             var extra = result.Captured.Count > 1 ? $" (+{result.Captured.Count - 1} more)" : string.Empty;
+            var warning = lesson.Absolute ? " " + AbsoluteRule.Warning(lesson.RuleId) : string.Empty;
             if (lesson.AwaitingApproval)
             {
-                return $"AgentRecall captured rule #{lesson.RuleId}: {Summarize(lesson.Text)}.{extra} " +
+                return $"AgentRecall captured rule #{lesson.RuleId}: {Summarize(lesson.Text)}.{extra}{warning} " +
                        $"Awaiting your approval — reply yes/no, or run `agentrecall rules approve {lesson.RuleId}` to remember it.";
             }
 
-            return $"AgentRecall captured rule #{lesson.RuleId}: {Summarize(lesson.Text)}.{extra}";
+            return $"AgentRecall captured rule #{lesson.RuleId}: {Summarize(lesson.Text)}.{extra}{warning}";
         }
 
         if (result.Suggested.Count > 0)

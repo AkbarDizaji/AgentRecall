@@ -249,7 +249,11 @@ public sealed class SubmitCaptureJudgmentTool : IMcpTool
             ["avoid"] = Prop("string", "The anti-pattern to avoid."),
             ["because"] = Prop("string", "Why it matters."),
             ["scope"] = Prop("string", "The scope it belongs to (e.g. a repository name)."),
-            ["always_apply"] = Prop("boolean", "True for a universal constraint that applies to every task."),
+            ["always_apply"] = Prop("boolean",
+                "True for a constraint that holds on every turn. With anchors it holds every turn in that place " +
+                "only: a syntax rule is anchored to the files of its language (\"**/*.ts\") and a test rule to the " +
+                "tests (\"tests/**\"). Without anchors it holds on every task in every repository, which rarely " +
+                "fits and is reported back with a warning; a communication preference is the exception."),
             ["anchors"] = new JsonObject
             {
                 ["type"] = "object",

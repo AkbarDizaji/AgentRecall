@@ -93,6 +93,12 @@ public sealed record FinalizedLesson
     /// </summary>
     public bool AlwaysApply { get; init; }
 
+    /// <summary>
+    /// True when the rule is absolute — standing with nothing to bound it (see
+    /// <see cref="Context.AbsoluteRule"/>) — so the summary warns that it rarely fits.
+    /// </summary>
+    public bool Absolute { get; init; }
+
     /// <summary>An optional note (e.g. why it was suggested rather than captured).</summary>
     public string? Note { get; init; }
 

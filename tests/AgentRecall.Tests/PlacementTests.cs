@@ -33,14 +33,15 @@ public class PlacementTests
         string trigger = "",
         ScopeLevel scopeLevel = ScopeLevel.Global,
         string scopeValue = "",
-        double confidence = 0.9)
+        double confidence = 0.9,
+        bool alwaysApply = false)
     {
         await using var scope = db.CreateScope();
         var rule = await scope.ServiceProvider.GetRequiredService<IRecallRuleRepository>().AddAsync(new RecallRule
         {
             Trigger = trigger, RuleText = ruleText, Mistake = "", TechnicalContext = "", Tags = tags,
             Confidence = confidence, Status = RuleStatus.Active, Anchors = anchors,
-            ScopeLevel = scopeLevel, ScopeValue = scopeValue,
+            ScopeLevel = scopeLevel, ScopeValue = scopeValue, AlwaysApply = alwaysApply,
         });
         return rule.Id;
     }
@@ -176,6 +177,24 @@ public class PlacementTests
         var injected = Assert.Single(result.All);
         Assert.Equal(RuleImportance.MustFollow, injected.Importance);
         Assert.Contains("pinned to this place", injected.Explanation);
+    }
+
+    [Fact]
+    public async Task AnchoredStandingRule_StandsInItsPlace_NotOnEveryPrompt()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+        await Seed(db, "Keep each test to a single act step.", anchors: "path:tests/**", alwaysApply: true);
+
+        var elsewhere = await Build(db, new ContextRequest { Task = "rename the billing service", StandingOnly = true });
+        var inPlace = await Build(db, new ContextRequest
+        {
+            Task = "Editing OrderTests.cs",
+            FileNames = ["/repo/tests/Unit/OrderTests.cs"],
+        });
+
+        Assert.Empty(elsewhere.All);
+        Assert.Equal(RuleImportance.MustFollow, Assert.Single(inPlace.All).Importance);
     }
 
     [Fact]

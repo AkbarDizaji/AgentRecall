@@ -4,6 +4,19 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **An absolute rule is saved with a warning.** A standing rule with no anchors that is not a
+  communication or user preference applies to every task in every repository, which rarely fits a
+  lesson. It is still saved, but the finalize output, the one-line summary, and the activity notice
+  warn about it and say how to anchor or archive it; so does a repeated correction that promotes
+  such a rule to standing.
+- **A standing rule with anchors stands in its place only.** A syntax rule anchored to its
+  language's files, or a test rule anchored to the tests, holds on every turn there and competes
+  like any other rule elsewhere, instead of being injected on every prompt. The judge is told to
+  anchor syntax and test rules this way.
+
 ## [2.15.0] - 2026-11-24
 
 ### Changed

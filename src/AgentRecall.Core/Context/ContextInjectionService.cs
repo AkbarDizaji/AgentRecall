@@ -625,9 +625,13 @@ public sealed class ContextInjectionService : IContextInjectionService
             reasons.Add("seed rule (starter guidance)");
         }
 
+        // A standing rule with anchors stands in its place, not everywhere: a test rule holds on
+        // every turn in the tests and competes like any other rule elsewhere.
+        var standing = rule.AlwaysApply && !isConcept && (anchors.Count == 0 || anchorHit is not null);
+
         return new Assessment(
             rule, relevance, score, reasons, projectScoped, highTrust, !isConcept && IsProhibition(rule), false, isSeed,
-            rule.AlwaysApply && !isConcept, isConcept, Anchored: anchors.Count > 0, Pinned: pinned, AnchorHit: anchorHit is not null);
+            standing, isConcept, Anchored: anchors.Count > 0, Pinned: pinned, AnchorHit: anchorHit is not null);
     }
 
     /// <summary>
