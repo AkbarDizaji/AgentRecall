@@ -4,7 +4,7 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.15.0] - 2026-11-24
 
 ### Changed
 - **A rule pinned to where the work is now outranks relevance.** A rule whose anchor matches the
