@@ -4,6 +4,16 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **A rule pinned to where the work is now outranks relevance.** A rule whose anchor matches the
+  files, declared types, or task used to get only a relevance floor and then compete on score, so
+  a low-confidence or dampened pinned rule could fall behind a keyword match or be trimmed by the
+  budget. Pinned rules now rank ahead of every other rule, claim the token budget and the rule
+  limit first, are must-follow whenever approved (prohibitions stay warnings), and win a conflict
+  against an unpinned rule. A concept named by the task is still a definition and is unaffected.
+
 ## [2.14.0] - 2026-11-05
 
 ### Added

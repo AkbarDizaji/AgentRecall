@@ -239,9 +239,11 @@ public sealed class ContextInjectionService : IContextInjectionService
         }
 
         ranked = ranked
-            // Standing (always-apply) rules rank first so they claim their reserved slots before
-            // relevance-ranked rules compete for the remaining token budget.
-            .OrderByDescending(a => a.AlwaysApply)
+            // A rule pinned to this place outranks everything: where the work is was said outright,
+            // which no keyword score can beat. Standing (always-apply) rules come next so they claim
+            // their reserved slots before relevance-ranked rules compete for the remaining budget.
+            .OrderByDescending(a => a.PinnedRule)
+            .ThenByDescending(a => a.AlwaysApply)
             .ThenByDescending(a => a.Score)
             .ThenByDescending(a => a.Rule.Confidence)
             .ThenBy(a => a.Rule.Id)
@@ -280,7 +282,7 @@ public sealed class ContextInjectionService : IContextInjectionService
         // competing guidance the polarity-based policy does not (e.g. unit vs
         // integration tests): the loser is dropped and the conflict is recorded, so
         // the agent sees a single chosen rule plus an explanation.
-        result = ResolveInjectedConflicts(result);
+        result = ResolveInjectedConflicts(result, ranked.Where(a => a.PinnedRule).Select(a => a.Rule.Id).ToHashSet());
 
         // Conflict resolution can drop rules that PackIntoBudget already counted into
         // TokensUsed/Explanation — recompute both from what actually survived, so the
@@ -310,9 +312,10 @@ public sealed class ContextInjectionService : IContextInjectionService
 
     /// <summary>
     /// Detects conflicts among the injected rules, drops each loser, and records the
-    /// resolution. Returns the result unchanged when nothing conflicts.
+    /// resolution. Returns the result unchanged when nothing conflicts. When exactly one side of a
+    /// conflict is pinned to this place, it wins outright, whatever the resolver would have picked.
     /// </summary>
-    private ContextInjectionResult ResolveInjectedConflicts(ContextInjectionResult result)
+    private ContextInjectionResult ResolveInjectedConflicts(ContextInjectionResult result, IReadOnlySet<int> pinned)
     {
         var injected = result.All.Select(r => r.Rule).Where(r => r.Category != RuleCategory.DomainConcept).ToList();
         if (injected.Count < 2)
@@ -340,7 +343,7 @@ public sealed class ContextInjectionService : IContextInjectionService
                 continue;
             }
 
-            var resolution = _resolution.Resolve(members);
+            var resolution = PreferPinned(_resolution.Resolve(members), members, pinned);
             var selected = byId[resolution.SelectedRuleId];
             var ignored = members.Where(r => r.Id != selected.Id).ToList();
 
@@ -369,6 +372,28 @@ public sealed class ContextInjectionService : IContextInjectionService
             Warnings = result.Warnings.Where(i => !losers.Contains(i.Rule.Id)).ToList(),
             Suggested = result.Suggested.Where(i => !losers.Contains(i.Rule.Id)).ToList(),
             Conflicts = resolved,
+        };
+    }
+
+    /// <summary>
+    /// Overrides the resolver when exactly one rule in the conflict is pinned to this place: where
+    /// the work is was said outright, which outweighs any comparison of confidence or recency.
+    /// </summary>
+    private static Conflicts.RuleResolution PreferPinned(
+        Conflicts.RuleResolution resolution, List<RecallRule> members, IReadOnlySet<int> pinned)
+    {
+        var pinnedMembers = members.Where(m => pinned.Contains(m.Id)).ToList();
+        if (pinnedMembers.Count != 1 || pinnedMembers[0].Id == resolution.SelectedRuleId)
+        {
+            return resolution;
+        }
+
+        var winner = pinnedMembers[0].Id;
+        return resolution with
+        {
+            SelectedRuleId = winner,
+            IgnoredRuleIds = members.Where(m => m.Id != winner).Select(m => m.Id).ToList(),
+            Explanation = resolution.Explanation.Prepend($"Rule #{winner} is pinned to this place.").ToList(),
         };
     }
 
@@ -795,25 +820,28 @@ public sealed class ContextInjectionService : IContextInjectionService
         trimmed = 0;
         var selected = 0;
 
-        // Fill in priority order: must-follow, then warnings, then suggested.
-        foreach (var importance in new[] { RuleImportance.MustFollow, RuleImportance.Warning, RuleImportance.Suggested })
-        {
-            foreach (var (_, injected) in bucketed.Where(b => b.Injected.Importance == importance))
-            {
-                if (selected >= limit || tokensUsed + injected.EstimatedTokens > budget)
-                {
-                    trimmed++;
-                    continue;
-                }
+        // Fill in priority order: rules pinned to this place first, whatever their bucket, so a
+        // full budget trims a keyword match before it ever trims a pinned rule. Then must-follow,
+        // warnings, and suggested.
+        var order = bucketed.Where(b => b.Assessment.PinnedRule)
+            .Concat(new[] { RuleImportance.MustFollow, RuleImportance.Warning, RuleImportance.Suggested }
+                .SelectMany(importance => bucketed.Where(b => !b.Assessment.PinnedRule && b.Injected.Importance == importance)));
 
-                tokensUsed += injected.EstimatedTokens;
-                selected++;
-                switch (importance)
-                {
-                    case RuleImportance.MustFollow: mustFollow.Add(injected); break;
-                    case RuleImportance.Warning: warnings.Add(injected); break;
-                    default: suggested.Add(injected); break;
-                }
+        foreach (var (_, injected) in order)
+        {
+            if (selected >= limit || tokensUsed + injected.EstimatedTokens > budget)
+            {
+                trimmed++;
+                continue;
+            }
+
+            tokensUsed += injected.EstimatedTokens;
+            selected++;
+            switch (injected.Importance)
+            {
+                case RuleImportance.MustFollow: mustFollow.Add(injected); break;
+                case RuleImportance.Warning: warnings.Add(injected); break;
+                default: suggested.Add(injected); break;
             }
         }
 
@@ -871,13 +899,17 @@ public sealed class ContextInjectionService : IContextInjectionService
             ? RuleImportance.Warning
             // A standing (always-apply) rule is must-follow regardless of relevance score — it is a
             // universal constraint, not a task match. Unapproved (Pending) rules and seed rules are
-            // surfaced but never as must-follow: seeds are starter guidance, not project truth.
-            : !a.Unapproved && !a.IsSeed && (a.AlwaysApply || a.HighTrust || a.ProjectScoped) && (a.AlwaysApply || a.Score >= MustFollowFloor)
+            // surfaced but never as must-follow: seeds are starter guidance, not project truth. A rule
+            // pinned to this place is must-follow too, however low its score has drifted.
+            : !a.Unapproved && !a.IsSeed && (a.AlwaysApply || a.PinnedRule || a.HighTrust || a.ProjectScoped)
+                && (a.AlwaysApply || a.PinnedRule || a.Score >= MustFollowFloor)
                 ? RuleImportance.MustFollow
                 : RuleImportance.Suggested;
 
         var reasons = a.AlwaysApply
             ? a.Reasons.Prepend("standing rule — applies to every task").ToList()
+            : a.PinnedRule
+            ? a.Reasons.Prepend("pinned to this place — outranks relevance").ToList()
             : a.Reasons;
         var explanation = reasons.Count > 0
             ? $"{string.Join("; ", reasons)} (score {a.Score:0.00})."
@@ -1011,5 +1043,12 @@ public sealed class ContextInjectionService : IContextInjectionService
         bool IsConcept,
         bool Anchored,
         bool Pinned,
-        bool AnchorHit);
+        bool AnchorHit)
+    {
+        /// <summary>
+        /// A rule (not a concept) pinned to this work. It ranks, packs and wins conflicts ahead of
+        /// anything admitted on score alone. A concept named by the task stays a definition.
+        /// </summary>
+        public bool PinnedRule => Pinned && !IsConcept;
+    }
 }

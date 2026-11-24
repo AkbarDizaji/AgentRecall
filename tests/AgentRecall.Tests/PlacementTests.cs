@@ -32,13 +32,14 @@ public class PlacementTests
         string tags = "",
         string trigger = "",
         ScopeLevel scopeLevel = ScopeLevel.Global,
-        string scopeValue = "")
+        string scopeValue = "",
+        double confidence = 0.9)
     {
         await using var scope = db.CreateScope();
         var rule = await scope.ServiceProvider.GetRequiredService<IRecallRuleRepository>().AddAsync(new RecallRule
         {
             Trigger = trigger, RuleText = ruleText, Mistake = "", TechnicalContext = "", Tags = tags,
-            Confidence = 0.9, Status = RuleStatus.Active, Anchors = anchors,
+            Confidence = confidence, Status = RuleStatus.Active, Anchors = anchors,
             ScopeLevel = scopeLevel, ScopeValue = scopeValue,
         });
         return rule.Id;
@@ -137,6 +138,44 @@ public class PlacementTests
         var injected = Assert.Single(result.All);
         Assert.Equal(RuleImportance.MustFollow, injected.Importance);
         Assert.Contains("anchored to path:tests/**", injected.Explanation);
+    }
+
+    [Fact]
+    public async Task PinnedRule_OutranksAStrongerKeywordMatch_AndSurvivesATightBudget()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+        var keyword = await Seed(db, "Order fixtures are built with the order fixture builders.", tags: "order,fixtures,builders", trigger: "editing order fixtures with the builders");
+        var pinned = await Seed(db, "Keep each test to a single act step.", anchors: "path:tests/**", confidence: 0.1);
+
+        var request = new ContextRequest
+        {
+            Task = "Editing order fixtures with the builders",
+            FileNames = ["/repo/tests/Unit/OrderTests.cs"],
+        };
+        var full = await Build(db, request);
+        var first = (await Build(db, request with { Limit = 1 })).All.Single();
+
+        Assert.True(full.All.Single(i => i.Rule.Id == keyword).Score > full.All.Single(i => i.Rule.Id == pinned).Score);
+        Assert.Equal(pinned, first.Rule.Id);
+    }
+
+    [Fact]
+    public async Task PinnedRule_IsMustFollow_EvenWithLowConfidence()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+        await Seed(db, "Keep each test to a single act step.", anchors: "path:tests/**", confidence: 0.1);
+
+        var result = await Build(db, new ContextRequest
+        {
+            Task = "Editing OrderTests.cs",
+            FileNames = ["/repo/tests/Unit/OrderTests.cs"],
+        });
+
+        var injected = Assert.Single(result.All);
+        Assert.Equal(RuleImportance.MustFollow, injected.Importance);
+        Assert.Contains("pinned to this place", injected.Explanation);
     }
 
     [Fact]
