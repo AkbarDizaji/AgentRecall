@@ -61,6 +61,20 @@ public sealed class AgentRecallOptions
     public int HookMaxRules { get; set; } = 5;
 
     /// <summary>
+    /// Most rules the hook injects when the ones past <see cref="HookMaxRules"/> still score well
+    /// (see <see cref="HookExtendedScoreFloor"/>), so a turn with several strong matches is not cut
+    /// off at an arbitrary five. Set it to <see cref="HookMaxRules"/> to turn the extra room off.
+    /// </summary>
+    public int HookExtendedMaxRules { get; set; } = 10;
+
+    /// <summary>
+    /// Score a rule needs to take one of the slots past <see cref="HookMaxRules"/> — twice the
+    /// must-follow bar, so the extra room goes to strong matches only. A rule pinned to the place
+    /// the work is in needs no score.
+    /// </summary>
+    public double HookExtendedScoreFloor { get; set; } = 0.30;
+
+    /// <summary>
     /// Whether the hook may inject Pending (unapproved) rules. Default true so a
     /// capped number of task-relevant Pending suggestions resurface — otherwise a
     /// Pending rule can never be recognized as a repeat and reinforced toward

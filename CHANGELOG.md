@@ -4,6 +4,14 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **The hooks inject up to ten rules when the extra ones still score well.** The first five slots
+  work as before; slots six to ten go only to a rule scoring at least `HookExtendedScoreFloor`
+  (default `0.30`, twice the must-follow bar) or pinned to where the work is. `HookExtendedMaxRules`
+  (default `10`) sets the ceiling; set it to `HookMaxRules` to turn the extra room off.
+
 ## [2.16.0] - 2026-11-25
 
 ### Changed

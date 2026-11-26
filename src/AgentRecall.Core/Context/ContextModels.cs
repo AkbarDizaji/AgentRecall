@@ -56,6 +56,16 @@ public sealed record ContextRequest
     public int Limit { get; init; } = 25;
 
     /// <summary>
+    /// Room past <see cref="Limit"/> for rules that are still worth the space: up to this many rules
+    /// in all, where each one past <see cref="Limit"/> must score at least
+    /// <see cref="ExtendedScoreFloor"/> or be pinned to this place. Null leaves <see cref="Limit"/> a hard cap.
+    /// </summary>
+    public int? ExtendedLimit { get; init; }
+
+    /// <summary>The score a rule needs to take a slot past <see cref="Limit"/>.</summary>
+    public double ExtendedScoreFloor { get; init; } = 0.30;
+
+    /// <summary>
     /// Rule ids to exclude from this retrieval entirely — neither injected nor recorded as
     /// used. The PreToolUse hook sets this to the rules already surfaced earlier in the same
     /// turn, so a rule is not re-injected on every file write (context bloat) or re-counted as

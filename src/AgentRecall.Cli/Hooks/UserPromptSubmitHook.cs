@@ -51,6 +51,8 @@ public static class UserPromptSubmitHook
                 ScopeLevel = repository is null ? null : ScopeLevel.Repository,
                 ScopeValue = repository,
                 Limit = options.HookMaxRules,
+                ExtendedLimit = options.HookExtendedMaxRules,
+                ExtendedScoreFloor = options.HookExtendedScoreFloor,
                 IncludePending = options.HookIncludePending,
                 PendingCap = options.HookPendingCap,
                 // Rules surfaced to the agent count as retrievals for learning reports.

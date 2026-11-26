@@ -273,6 +273,8 @@ public sealed class ContextInjectionService : IContextInjectionService
             ranked,
             Math.Max(0, request.TokenBudget - scaffolding),
             request.Limit,
+            Math.Max(request.Limit, request.ExtendedLimit ?? request.Limit),
+            request.ExtendedScoreFloor,
             prunedByPolicy,
             alreadySeen,
             out var trimmed);
@@ -807,6 +809,8 @@ public sealed class ContextInjectionService : IContextInjectionService
         List<Assessment> ranked,
         int budget,
         int limit,
+        int extendedLimit,
+        double extendedScoreFloor,
         int prunedByPolicy,
         IReadOnlyDictionary<int, int> seen,
         out int trimmed)
@@ -831,9 +835,13 @@ public sealed class ContextInjectionService : IContextInjectionService
             .Concat(new[] { RuleImportance.MustFollow, RuleImportance.Warning, RuleImportance.Suggested }
                 .SelectMany(importance => bucketed.Where(b => !b.Assessment.PinnedRule && b.Injected.Importance == importance)));
 
-        foreach (var (_, injected) in order)
+        foreach (var (assessment, injected) in order)
         {
-            if (selected >= limit || tokensUsed + injected.EstimatedTokens > budget)
+            // Past the limit, a slot goes only to a rule still worth it: a strong score, or a pin.
+            var earnsExtraSlot = assessment.PinnedRule || assessment.Score >= extendedScoreFloor;
+            if (selected >= extendedLimit
+                || (selected >= limit && !earnsExtraSlot)
+                || tokensUsed + injected.EstimatedTokens > budget)
             {
                 trimmed++;
                 continue;

@@ -133,6 +133,8 @@ public static class PreToolUseHook
                 ChangedEntities = declared,
                 AnchoredOnly = reading,
                 Limit = options.HookMaxRules,
+                ExtendedLimit = options.HookExtendedMaxRules,
+                ExtendedScoreFloor = options.HookExtendedScoreFloor,
                 IncludePending = options.HookIncludePending,
                 PendingCap = options.HookPendingCap,
                 ExcludeRuleIds = alreadySurfaced,

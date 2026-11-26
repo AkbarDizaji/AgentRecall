@@ -698,6 +698,8 @@ folder.
 | `HookEnabled` | `true` | Master switch for the `UserPromptSubmit` hook. |
 | `HookKeywords` | dev-task words | Words/phrases that mark a prompt as dev work. |
 | `HookMaxRules` | `5` | Max rules injected per prompt. |
+| `HookExtendedMaxRules` | `10` | Max rules injected per prompt when the ones past `HookMaxRules` still score well. |
+| `HookExtendedScoreFloor` | `0.30` | Score a rule needs to take a slot past `HookMaxRules`; a rule pinned to the work needs none. |
 | `HookIncludePending` | `true` | Whether Pending rules may be injected, so a repeat can be recognized and reinforced. |
 | `HookPendingCap` | `1` | Max Pending rules injected per prompt when `HookIncludePending` is true. |
 | `TurnFinalizerEnabled` | `true` | Master switch for `finalize-turn`. |

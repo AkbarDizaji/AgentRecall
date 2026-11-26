@@ -198,6 +198,42 @@ public class PlacementTests
     }
 
     [Fact]
+    public async Task RulesPastTheLimit_AreKeptOnlyWhileTheyStillScoreWell()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+        var strong = await Seed(db, "Build invoices with the invoice builder.", tags: "invoice,builder",
+            trigger: "editing invoice builder", confidence: 0.9);
+        var weak = await Seed(db, "Name invoice tests after the behaviour.", tags: "invoice", confidence: 0.1);
+
+        var request = new ContextRequest { Task = "editing invoice builder", Limit = 0, ExtendedLimit = 10 };
+        var scores = (await Build(db, request with { Limit = 10 })).All.ToDictionary(i => i.Rule.Id, i => i.Score);
+        var extended = await Build(db, request);
+
+        Assert.True(scores[strong] >= request.ExtendedScoreFloor);
+        Assert.True(scores[weak] < request.ExtendedScoreFloor);
+        Assert.Equal(strong, Assert.Single(extended.All).Rule.Id);
+    }
+
+    [Fact]
+    public async Task APinnedRule_TakesASlotPastTheLimit_WhateverItScores()
+    {
+        await using var db = new TestDatabase();
+        await Init(db);
+        await Seed(db, "Keep each test to a single act step.", anchors: "path:tests/**", confidence: 0.1);
+
+        var result = await Build(db, new ContextRequest
+        {
+            Task = "Editing OrderTests.cs",
+            FileNames = ["/repo/tests/Unit/OrderTests.cs"],
+            Limit = 0,
+            ExtendedLimit = 10,
+        });
+
+        Assert.Single(result.All);
+    }
+
+    [Fact]
     public async Task AnchoredRule_IsHeldBack_WhenTheWorkIsElsewhere()
     {
         await using var db = new TestDatabase();
