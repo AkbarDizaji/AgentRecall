@@ -4,6 +4,15 @@ All notable changes to AgentRecall are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **The user now sees how many rules went into context.** The UserPromptSubmit hook printed its
+  "fetched N rules" line as plain text ahead of the rules, so it went into the model's context and
+  the user never saw it. It now answers in JSON like the PreToolUse hook: the rules go to
+  `additionalContext` and the line goes to `systemMessage`. The line is bolder, splits the rules by
+  importance, and counts the distinct rules this chat has been given so far.
+
 ## [2.17.0] - 2026-11-26
 
 ### Changed

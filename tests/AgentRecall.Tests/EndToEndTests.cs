@@ -58,10 +58,19 @@ public class HookInjectionE2ETests
         $$"""{"prompt": {{JsonSerializer.Serialize(prompt)}}, "cwd": {{JsonSerializer.Serialize(cwd)}}}""";
 
     /// <summary>
-    /// Runs the real CLI command <c>hook user-prompt-submit</c> with the payload on
-    /// stdin, returning what it would print to Claude Code on stdout.
+    /// Runs the real CLI command <c>hook user-prompt-submit</c> with the payload on stdin,
+    /// returning the context Claude Code hands the model (its additionalContext).
     /// </summary>
     private static async Task<string> RunHookCli(TestDatabase db, string payload)
+    {
+        var output = await RunHookCliRaw(db, payload);
+        return output.Length == 0
+            ? output
+            : JsonNode.Parse(output)!["hookSpecificOutput"]!["additionalContext"]!.GetValue<string>();
+    }
+
+    /// <summary>Runs <c>hook user-prompt-submit</c>, returning exactly what it prints on stdout.</summary>
+    private static async Task<string> RunHookCliRaw(TestDatabase db, string payload)
     {
         var originalIn = Console.In;
         var output = new StringWriter();
@@ -183,6 +192,44 @@ public class HookInjectionE2ETests
         Assert.True(
             output.Contains("Must Follow:") || output.Contains("Preferred Patterns:"),
             "Expected the rule under Must Follow or Preferred Patterns.\n" + output);
+    }
+
+    [Fact]
+    public async Task Hook_TellsTheUserHowManyRulesWentIntoContext_OutsideTheModelsContext()
+    {
+        using var repo = new TempRepo();
+        await using var db = new TestDatabase();
+        await Init(db);
+        await SeedAndPromoteMoqRule(db);
+
+        var output = JsonNode.Parse(await RunHookCliRaw(
+            db, Payload("Write unit tests for OrderService using Moq", repo.Path)))!;
+        var message = output["systemMessage"]!.GetValue<string>();
+        var context = output["hookSpecificOutput"]!["additionalContext"]!.GetValue<string>();
+
+        Assert.Equal("UserPromptSubmit", output["hookSpecificOutput"]!["hookEventName"]!.GetValue<string>());
+        Assert.Contains("fetched **1 rule** into context", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("fetched", context, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Hook_CountsTheRulesThisChatHasBeenGiven_AcrossPrompts()
+    {
+        using var repo = new TempRepo();
+        await using var db = new TestDatabase();
+        await Init(db);
+        await SeedAndPromoteMoqRule(db);
+
+        string Prompt(string text) => new JsonObject
+        {
+            ["prompt"] = text, ["cwd"] = repo.Path, ["session_id"] = "chat-1",
+        }.ToJsonString();
+
+        await RunHookCliRaw(db, Prompt("Write unit tests for OrderService using Moq"));
+        var second = JsonNode.Parse(await RunHookCliRaw(db, Prompt("Add Moq unit tests for InvoiceService")))!;
+
+        // The same rule twice is still one rule in this chat.
+        Assert.Contains("**1 rule in this chat**", second["systemMessage"]!.GetValue<string>(), StringComparison.Ordinal);
     }
 
     [Fact]

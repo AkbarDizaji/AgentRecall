@@ -33,7 +33,7 @@ public static class ActivityNoticeFactory
         return new ActivityNotice
         {
             Type = ActivityType.ContextFetched,
-            Summary = $"fetched {rules.Count} relevant {Plural.Of(rules.Count, "rule")}.",
+            Summary = $"fetched **{rules.Count} {Plural.Of(rules.Count, "rule")}** into context — {Breakdown(result)}.",
             Details = rules.Select(r => $"#{r.Rule.Id} {Short(r.Rule)}").ToList(),
             RuleIds = rules.Select(r => r.Rule.Id).ToList(),
             Source = source,
@@ -41,6 +41,16 @@ public static class ActivityNoticeFactory
             // (if it ever recurs) does not double-log.
             OperationHash = result.RetrievalId is null ? null : $"context:{result.RetrievalId}",
         };
+    }
+
+    /// <summary>How the injected rules split by importance, e.g. "2 must-follow · 1 warning · 2 suggested".</summary>
+    private static string Breakdown(ContextInjectionResult result)
+    {
+        var parts = new List<string>();
+        if (result.MustFollow.Count > 0) parts.Add($"{result.MustFollow.Count} must-follow");
+        if (result.Warnings.Count > 0) parts.Add($"{result.Warnings.Count} {Plural.Of(result.Warnings.Count, "warning")}");
+        if (result.Suggested.Count > 0) parts.Add($"{result.Suggested.Count} suggested");
+        return string.Join(" · ", parts);
     }
 
     /// <summary>

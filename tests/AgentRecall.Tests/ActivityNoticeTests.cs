@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using AgentRecall.Cli;
 using AgentRecall.Core.Abstractions;
 using AgentRecall.Core.Activity;
@@ -445,17 +446,17 @@ public class ActivityNoticeTests
         await Init(db);
         await SeedRule(db);
 
-        var output = await RunHook(db, Payload("Write Moq unit tests for OrderService", repo.Path));
+        var (context, notice) = Split(await RunHook(db, Payload("Write Moq unit tests for OrderService", repo.Path)));
 
-        // F: a compact one-line notice is present.
-        Assert.Contains($"{Badge} fetched", output, StringComparison.Ordinal);
+        // F: a compact one-line notice is shown to the user.
+        Assert.StartsWith($"{Badge} fetched", notice, StringComparison.Ordinal);
 
-        // G + H: the notice line itself carries no detail bullets and no rule text.
-        var noticeLine = output.Split('\n').First(l => l.Contains(Badge, StringComparison.Ordinal));
-        Assert.DoesNotContain("It.IsAny", noticeLine, StringComparison.Ordinal);
-        Assert.DoesNotContain("- #", noticeLine, StringComparison.Ordinal);
-        // The badge appears exactly once (no per-rule notice spam).
-        Assert.Equal(1, CountOccurrences(output, Badge));
+        // G + H: the notice is one line with no detail bullets and no rule text.
+        Assert.DoesNotContain("\n", notice, StringComparison.Ordinal);
+        Assert.DoesNotContain("It.IsAny", notice, StringComparison.Ordinal);
+        Assert.DoesNotContain("- #", notice, StringComparison.Ordinal);
+        // The notice never reaches the model's context (no per-rule notice spam there either).
+        Assert.Equal(0, CountOccurrences(context, Badge));
     }
 
     [Fact] // AC: notices never meaningfully grow the injected context.
@@ -467,27 +468,23 @@ public class ActivityNoticeTests
         await using var withDb = new TestDatabase(o => o.HookNoticeLevel = "Normal");
         await Init(withDb);
         await SeedRichRules(withDb);
-        var withNotice = await RunHook(withDb, Payload(prompt, repo.Path));
+        var (withNotice, notice) = Split(await RunHook(withDb, Payload(prompt, repo.Path)));
 
         await using var withoutDb = new TestDatabase(o => o.HookNoticeLevel = "Silent");
         await Init(withoutDb);
         await SeedRichRules(withoutDb);
-        var withoutNotice = await RunHook(withoutDb, Payload(prompt, repo.Path));
+        var (withoutNotice, silent) = Split(await RunHook(withoutDb, Payload(prompt, repo.Path)));
 
-        // Both inject the same rule block.
+        // Both inject the same rule block, and only the Normal level shows a notice.
         Assert.Contains("## AgentRecall Technical Context", withNotice, StringComparison.Ordinal);
-        Assert.DoesNotContain(Badge, withoutNotice, StringComparison.Ordinal);
+        Assert.NotNull(notice);
+        Assert.Null(silent);
 
-        // The hard guarantee: the notice can only ever add a single compact line, so it
-        // cannot bloat the injected context no matter how large the rule block is.
-        var delta = withNotice.Length - withoutNotice.Length;
-        Assert.True(delta > 0 && delta < 80, $"notice added {delta} chars (must be one compact line)");
-
-        // And for a realistically-sized rule block, that line stays well under the
-        // suggested 15% budget.
-        Assert.True(
-            withNotice.Length <= withoutNotice.Length * 1.15,
-            $"with={withNotice.Length} without={withoutNotice.Length}");
+        // The hard guarantee: the notice goes to the user, never into the injected context, so it
+        // cannot grow that context by a single character however loud it is. (The two blocks differ
+        // only in their random retrieval ids, which are the same length.)
+        Assert.Equal(withoutNotice.Length, withNotice.Length);
+        Assert.DoesNotContain(Badge, withNotice, StringComparison.Ordinal);
     }
 
     // ---- Isolation (AB) -------------------------------------------------------
@@ -532,6 +529,13 @@ public class ActivityNoticeTests
 
     private static string Payload(string prompt, string cwd) =>
         $$"""{"prompt": {{JsonSerializer.Serialize(prompt)}}, "cwd": {{JsonSerializer.Serialize(cwd)}}}""";
+
+    /// <summary>The hook's JSON output split into the model's context and the user's notice.</summary>
+    private static (string Context, string? Notice) Split(string output)
+    {
+        var json = JsonNode.Parse(output)!;
+        return (json["hookSpecificOutput"]!["additionalContext"]!.GetValue<string>(), json["systemMessage"]?.GetValue<string>());
+    }
 
     private static async Task<string> RunHook(TestDatabase db, string payload)
     {

@@ -1572,13 +1572,29 @@ public static partial class CommandRouter
             case "user-prompt-submit":
             {
                 var payload = await Console.In.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
-                var context = await Hooks.UserPromptSubmitHook
-                    .RunAsync(payload, services, Console.Error, cancellationToken)
+                var injection = await Hooks.UserPromptSubmitHook
+                    .RunForHostAsync(payload, services, Console.Error, cancellationToken)
                     .ConfigureAwait(false);
 
-                if (!string.IsNullOrEmpty(context))
+                // As with PreToolUse: the rules go to additionalContext for the model, and the
+                // "fetched N rules" line goes to systemMessage, the one channel the user sees.
+                if (!injection.IsEmpty)
                 {
-                    output.WriteLine(context);
+                    var response = new System.Text.Json.Nodes.JsonObject
+                    {
+                        ["hookSpecificOutput"] = new System.Text.Json.Nodes.JsonObject
+                        {
+                            ["hookEventName"] = "UserPromptSubmit",
+                            ["additionalContext"] = injection.AdditionalContext,
+                        },
+                    };
+
+                    if (!string.IsNullOrEmpty(injection.SystemMessage))
+                    {
+                        response["systemMessage"] = injection.SystemMessage;
+                    }
+
+                    output.WriteLine(response.ToJsonString());
                 }
 
                 // Always succeed so the hook never blocks the prompt.
